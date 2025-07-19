@@ -1,0 +1,113 @@
+/* styles/animations.css */
+
+@keyframes vcp-shimmer-bg {
+    0% { background-position: 150% 0; }
+    100% { background-position: -150% 0; }
+}
+
+@keyframes blinkColon {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+}
+
+.digital-clock .colon {
+    animation: blinkColon 2s infinite;
+    position: relative;
+}
+
+@keyframes st-colon-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+}
+
+@keyframes st-soft-circular-ripple-effect {
+    0% {
+        transform: translate(-50%, -50%) scale(0);
+        opacity: 0.7;
+    }
+    80% {
+        transform: translate(-50%, -50%) scale(18);
+        opacity: 0;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(0);
+        opacity: 0;
+    }
+}
+
+.topic-item.active-topic-glowing {
+    position: relative;
+    overflow: hidden;
+}
+
+.topic-item.active-topic-glowing::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    background-image: radial-gradient(
+        circle,
+        rgba(190, 210, 240, 0.45) 0%,
+        rgba(190, 210, 240, 0.3) 40%,
+        rgba(190, 210, 240, 0) 70%
+    );
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0;
+    animation: st-soft-circular-ripple-effect 3.8s ease-out infinite;
+    z-index: 0;
+    pointer-events: none;
+}
+body.light-theme .topic-item.active-topic-glowing::before {
+    background-image: radial-gradient(
+        circle,
+        rgba(65, 144, 213, 0.041) 0%,
+        rgba(56, 131, 196, 0.358) 40%,
+        rgba(14, 78, 134, 0) 70%
+    ) !important;
+}
+
+/*
+ * =======================================================
+ * 小吉的魔法时间：流式文字动态“流光”效果 (Text Shimmer Effect)
+ * =======================================================
+ */
+
+/* 1. 定义一个名为 "textShimmer" 的动画过程 */
+@keyframes textShimmer {
+  from {
+    /* 动画开始时，背景渐变的位置在最右侧 */
+    background-position: 200% center;
+  }
+  to {
+    /* 动画结束时，背景渐变的位置移动到最左侧，形成流动效果 */
+    background-position: -200% center;
+  }
+}
+
+/* 2. 将此效果应用到正在流式输出的消息内容上 */
+/* 这个选择器精确地指向了正在流式输出(有.streaming类)的消息项(message-item)中的内容区域(md-content) */
+.message-item.streaming .md-content {
+  /* 创建一个从透明到高亮再到透明的线性渐变作为背景 */
+  background-image: linear-gradient(
+    to right,
+    var(--shimmer-color-transparent) 20%,
+    var(--shimmer-color-highlight) 50%,
+    var(--shimmer-color-transparent) 80%
+  );
+  
+  /* 关键魔法#1：将背景的范围裁切成文字的形状 */
+  background-clip: text;
+  -webkit-background-clip: text; /* 兼容Webkit内核浏览器 */
+
+  /* 关键魔法#2：将文字本身的颜色设为透明，这样才能“透”出后面的背景渐变 */
+  color: transparent;
+  
+  /* 将背景尺寸扩大，以便渐变效果有足够的空间进行移动 */
+  background-size: 200% auto;
+  
+  /* 应用我们之前定义的动画 */
+  animation: textShimmer 2.5s linear infinite; /* 设置动画速度 */
+}

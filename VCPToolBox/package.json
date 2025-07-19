@@ -1,0 +1,26 @@
+{
+  "name": "cherry-var",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": ""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@tavily/core": "^0.5.2",
+    "axios": "^1.6.0",
+    "basic-auth": "^2.0.1",
+    "chinese-lunar-calendar": "^1.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2",
+    "node-schedule": "^2.1.1",
+    "jsdom": "^24.0.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.17.0"
+  }
+}

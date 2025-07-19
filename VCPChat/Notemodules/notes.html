@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的笔记</title>
+    <!-- 确保这个路径对于你的项目结构是正确的 -->
+    <!-- <link rel="stylesheet" href="../style.css"> -->
+<link rel="stylesheet" href="../styles/themes.css"> <!-- 引用主题样式 -->
+    <link rel="stylesheet" href="notes.css">
+    <!-- 用于语法高亮的 Highlight.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" id="highlight-theme-style">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- DOMPurify for HTML sanitization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    <!-- KaTeX for LaTeX rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div class="top-light-effect"></div>
+    <div class="container">
+        <!-- 用于笔记列表和操作的侧边栏 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <input type="text" id="searchInput" placeholder="搜索笔记..." aria-label="搜索笔记">
+                <div class="sidebar-actions">
+                    <button id="newMdBtn" class="button">新建MD</button>
+                    <button id="newTxtBtn" class="button">新建TXT</button>
+                    <button id="newFolderBtn" class="button">新建文档</button>
+                </div>
+            </div>
+            <ul id="noteList" class="note-list-panel" aria-live="polite">
+                <!-- 笔记项目将由 JavaScript 动态插入此处 -->
+            </ul>
+        </div>
+
+        <!-- Resizer Handle -->
+        <div class="resizer" id="resizer"></div>
+
+        <!-- 用于笔记编辑和预览的主内容区域 -->
+        <div class="main-content">
+            <div class="note-editor-header">
+                <input type="text" id="noteTitle" placeholder="笔记标题" aria-label="笔记标题">
+                <div class="note-actions">
+                    <button id="saveNoteBtn" class="button button-primary">保存</button>
+                    <button id="deleteNoteBtn" class="button button-danger">删除</button>
+                </div>
+            </div>
+            <div class="note-body">
+                <!-- Editor Area -->
+                <div class="editor-container">
+                    <textarea id="noteContent" placeholder="开始写笔记..." aria-label="笔记内容"></textarea>
+                    <div class="content-bubble editor-bubble">编辑区</div>
+                </div>
+                <!-- Preview Area -->
+                <div class="preview-container">
+                    <div id="previewContent" class="markdown-preview" aria-live="polite">
+                        <!-- Markdown 预览将在此处渲染 -->
+                    </div>
+                    <div class="content-bubble preview-bubble">预览区</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="notes.js"></script>
+
+    <!-- Custom Context Menu HTML -->
+    <div id="customContextMenu" class="custom-context-menu">
+        <ul>
+            <li id="context-rename">重命名</li>
+            <li id="context-delete">删除</li>
+            <li id="context-copy-note">复制笔记</li>
+        </ul>
+    </div>
+</body>
+</html>

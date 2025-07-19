@@ -1,0 +1,193 @@
+/*
+ * 全局和基础样式
+ * 使用主程序传入的 CSS 变量进行统一样式
+ */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    overflow: hidden;
+    /* background-color: var(--primary-bg); */ /* Let the wallpaper show through */
+    color: var(--primary-text);
+    display: flex; /* 使用 Flexbox 布局 */
+    flex-direction: column;
+    /* Add some padding to the body to create space around the container */
+    padding: 15px;
+    box-sizing: border-box;
+}
+
+.translator-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 20px;
+    box-sizing: border-box;
+    gap: 15px; /* 调整元素间距 */
+
+    /* --- Frosted Glass Effect --- */
+    background-color: var(--panel-bg);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+/* 头部样式 */
+.translator-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.translator-header h2 {
+    margin: 0;
+    font-size: 1.2em;
+    color: var(--primary-text);
+}
+
+.translator-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+/* 输入控件 (下拉、输入框、按钮) 统一样式 */
+.translator-controls select,
+.translator-controls input[type="text"],
+.translator-controls button,
+#copyBtn {
+    padding: 7px 14px 8px; /* 调整 padding-top 使文本稍微向上偏移 */
+    border-radius: 8px; /* 更圆润的边角 */
+    border: 1px solid var(--border-color);
+    background-color: var(--input-bg);
+    color: var(--primary-text);
+    font-size: 0.95em;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    height: 36px; /* 统一高度 */
+    box-sizing: border-box; /* 确保 padding 和 border 包含在 height 内 */
+}
+
+.translator-controls select:focus,
+.translator-controls input[type="text"]:focus,
+.translator-main textarea:focus {
+    outline: none;
+    border-color: var(--highlight-text);
+    box-shadow: 0 0 0 2px rgba(var(--highlight-text), 0.3); /* 使用高亮色作为聚焦效果 */
+}
+
+/* 按钮专属样式 */
+.translator-controls button,
+#copyBtn {
+    background-color: var(--button-bg);
+    cursor: pointer;
+    display: flex; /* 使用 Flexbox 布局 */
+    align-items: center; /* 垂直居中 */
+    justify-content: center; /* 水平居中 */
+}
+/* 为翻译按钮设置白色文本 */
+#translateBtn {
+    color: var(--text-on-accent); /* 确保翻译按钮文本与主题匹配 */
+}
+
+.translator-controls button:hover,
+#copyBtn:hover {
+    background-color: var(--button-hover-bg);
+    border-color: var(--highlight-text);
+}
+
+/* 主要内容区域 (文本框) */
+.translator-main {
+    display: flex;
+    flex-grow: 1;
+    gap: 20px;
+    min-height: 0; /* 防止 flex 溢出的关键 */
+}
+
+.translator-main textarea {
+    flex: 1;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    /* Use a more solid background for readability on a frosted panel */
+    background-color: var(--secondary-bg);
+    color: var(--primary-text);
+    font-size: 1em;
+    line-height: 1.6;
+    resize: none;
+    box-sizing: border-box;
+}
+
+.translator-main textarea::placeholder {
+    color: var(--secondary-text);
+}
+
+/* “翻译中”的闪烁效果 */
+.translator-main textarea.streaming {
+    animation: shimmer 1.5s infinite linear;
+    background-image: linear-gradient(to right, var(--input-bg) 0%, var(--accent-bg) 50%, var(--input-bg) 100%);
+    background-size: 200% 100%;
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: 200% 0;
+    }
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+
+/* 输出区域和复制按钮 */
+.output-area {
+    position: relative;
+    flex: 1;
+    display: flex;
+}
+
+#copyBtn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
+    padding: 6px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#copyBtn svg {
+    width: 18px;
+    height: 18px;
+    color: var(--text-on-accent); /* 确保复制按钮图标与主题匹配 */
+}
+
+.copy-feedback {
+    font-size: 12px;
+    font-family: sans-serif;
+    color: var(--primary-text);
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}

@@ -1,0 +1,750 @@
+/* styles/settings.css */
+
+/* Sidebar Tabs */
+.sidebar-tabs {
+    display: flex;
+    margin-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-tab-button {
+    flex-grow: 1;
+    padding: 10px 5px;
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent; /* For active indicator */
+    color: var(--secondary-text);
+    cursor: pointer;
+    font-size: 0.95em;
+    text-align: center;
+    transition: background-color 0.2s ease, color 0.2s ease, border-bottom-color 0.2s ease;
+    margin-bottom: -1px; /* Align with bottom border of container */
+}
+
+.sidebar-tab-button:hover {
+    background-color: var(--accent-bg);
+    color: var(--highlight-text);
+}
+
+.sidebar-tab-button.active {
+    color: var(--highlight-text);
+    border-bottom-color: var(--user-bubble-bg);
+    font-weight: 500;
+}
+
+.sidebar-tab-content {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 0; 
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    transform: translateY(10px);
+    pointer-events: none;
+    transition: opacity 0.25s ease-out,
+                transform 0.25s ease-out,
+                max-height 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
+                padding-top 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
+                padding-bottom 0.35s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.sidebar-tab-content:not(.active) {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    border-top-width: 0 !important; 
+    border-bottom-width: 0 !important;
+}
+
+.sidebar-tab-content.active {
+    opacity: 1;
+    max-height: 100vh; 
+    transform: translateY(0);
+    overflow-y: auto;
+    pointer-events: auto;
+    overflow-x: hidden;
+    flex-grow: 1; 
+}
+/* End Sidebar Tabs */
+
+.sidebar h2 {
+    color: var(--secondary-text);
+    margin-top: 5px;
+    margin-bottom: 15px;
+    font-size: 1.4em;
+    border-bottom: none;
+    padding-bottom: 10px;
+}
+
+.settings-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px; 
+    padding-bottom: 10px; 
+    border-bottom: 1px solid var(--border-color); 
+}
+
+.settings-header-bar h2 {
+    margin: 0; 
+    padding: 0; 
+    border-bottom: none; 
+    text-align: left; 
+    flex-grow: 1; 
+}
+
+.settings-header-bar .global-settings-btn {
+    width: auto; 
+    padding: 8px 15px; 
+    font-size: 0.9em; 
+    margin-left: 15px; 
+}
+
+.agent-list, .topic-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    overflow-y: auto;
+    overflow-x: hidden; 
+    flex-grow: 1;
+}
+ 
+.agent-list li, .topic-list .topic-item {
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    border-radius: 8px; 
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.agent-list li:hover, .topic-list .topic-item:hover {
+    background-color: var(--accent-bg);
+    transform: translateX(2px);
+}
+.agent-list li.active { 
+    background-color: var(--user-bubble-bg);
+    color: white;
+    font-weight: 500;
+}
+.agent-list li.active .agent-name {
+    color: white;
+}
+.agent-list li.active img.avatar {
+    border-color: var(--highlight-text);
+}
+
+.agent-list img.avatar, .topic-list .topic-item img.avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    margin-right: 10px;
+    object-fit: cover;
+    border: 2px solid var(--button-bg);
+}
+
+.agent-list .agent-name, .topic-list .topic-item .agent-name {
+    font-weight: 400;
+    font-size: 1.05em;
+    color: var(--primary-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-grow: 1; 
+}
+
+.topic-list .topic-item .message-count {
+    margin-left: auto; 
+    padding: 3px 8px;
+    background-color: var(--accent-bg);
+    color: var(--highlight-text);
+    border-radius: 10px;
+    font-size: 0.85em; 
+    min-width: 20px; 
+    text-align: center;
+    font-weight: bold; 
+    font-family: "Arial Rounded MT Bold", "Helvetica Rounded", Arial, sans-serif; 
+}
+
+#tabContentTopics p { 
+    padding: 15px;
+    text-align: center;
+    color: var(--secondary-text);
+}
+
+
+.sidebar-actions {
+    margin-top: auto;
+    padding-top: 10px;
+    border-top: none;
+    display: flex;
+    flex-direction: row; /* Changed to row for horizontal buttons */
+    gap: 8px;
+    justify-content: space-between; /* Distribute space between buttons */
+}
+
+#tabContentSettings {
+    padding: 15px;
+    box-sizing: border-box;
+}
+
+#agentSettingsContainer {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#agentSettingsContainer h3 { 
+    color: var(--highlight-text);
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.2em;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+
+#agentSettingsForm {
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 12px; 
+}
+
+#agentSettingsForm > div { 
+    display: flex;
+    flex-direction: column; 
+    gap: 6px; 
+}
+
+#agentSettingsForm label {
+    display: block;
+    font-weight: 500;
+    color: var(--secondary-text);
+    font-size: 0.9em;
+}
+
+#agentSettingsForm input[type="text"],
+#agentSettingsForm input[type="url"],
+#agentSettingsForm input[type="password"],
+#agentSettingsForm input[type="number"],
+#agentSettingsForm input[type="file"],
+#agentSettingsForm textarea,
+#agentSettingsForm select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 10px;
+    margin-bottom: 0; 
+    border-radius: 8px; 
+    border: 1px solid var(--border-color);
+    background-color: var(--input-bg);
+    color: var(--primary-text);
+    font-size: 0.95em;
+}
+#agentSettingsForm input[type="file"] {
+    padding: 5px; 
+}
+
+
+#agentSettingsForm textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+#agentSettingsForm .form-actions {
+    margin-top: 15px; 
+    display: flex;
+    flex-direction: column; /* Make buttons stack vertically */
+    justify-content: flex-start;
+    gap: 10px;
+}
+
+#agentSettingsForm .form-actions button {
+    padding: 10px 18px; 
+    font-size: 1em;    
+    border-radius: 8px; 
+    border: none;       
+    cursor: pointer;    
+    transition: background-color 0.2s; 
+    color: #ffffff; 
+}
+
+#agentSettingsForm .form-actions button[type="submit"] {
+    background-color: var(--user-bubble-bg); 
+}
+#agentSettingsForm .form-actions button[type="submit"]:hover {
+    background-color: var(--button-hover-bg);
+}
+
+#agentSettingsForm .form-actions .danger-button {
+    background-color: var(--danger-color);
+}
+#agentSettingsForm .form-actions .danger-button:hover {
+    background-color: var(--danger-hover-bg);
+}
+
+body.light-theme #agentSettingsForm .form-actions button[type="submit"] {
+    background-color: var(--button-bg);
+}
+body.light-theme #agentSettingsForm .form-actions button[type="submit"]:hover {
+    background-color: var(--button-hover-bg);
+}
+body.light-theme #agentSettingsForm .form-actions .danger-button {
+    background-color: var(--danger-color);
+}
+body.light-theme #agentSettingsForm .form-actions .danger-button:hover {
+    background-color: var(--danger-hover-bg);
+}
+
+#selectAgentPromptForSettings {
+    text-align: center;
+    padding: 20px;
+    color: var(--secondary-text);
+}
+
+/* --- Group Settings Specific Styles --- */
+#groupSettingsContainer {
+    width: 100%;
+    box-sizing: border-box;
+    /* Similar to #agentSettingsContainer if needed, or rely on parent #tabContentSettings padding */
+}
+
+#groupSettingsContainer h3 { /* Assuming a title like agent settings */
+    color: var(--highlight-text);
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.2em;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+#groupSettingsForm {
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+#groupSettingsForm .form-group { /* Common class for form sections */
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#groupSettingsForm .form-group-inline { /* For checkbox and label on same line */
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Space between checkbox and label */
+}
+
+#groupSettingsForm .form-group-inline label {
+    margin-bottom: 0; /* Remove bottom margin from label */
+    display: inline-flex; /* Allow label to be inline with checkbox */
+    align-items: center;
+    cursor: pointer;
+}
+
+#groupSettingsForm label {
+    display: block;
+    font-weight: 500;
+    color: var(--secondary-text);
+    font-size: 0.9em;
+}
+
+#groupSettingsForm input[type="text"],
+#groupSettingsForm input[type="file"],
+#groupSettingsForm textarea,
+#groupSettingsForm select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 10px;
+    margin-bottom: 0;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background-color: var(--input-bg);
+    color: var(--primary-text);
+    font-size: 0.95em;
+}
+#groupSettingsForm input[type="file"] {
+    padding: 5px;
+}
+
+#groupSettingsForm textarea {
+    min-height: 60px; /* Slightly smaller for group prompts */
+    resize: vertical;
+}
+
+#groupSettingsForm .form-actions {
+    margin-top: 15px;
+    display: flex;
+    flex-direction: column; /* Make buttons stack vertically */
+    justify-content: flex-start;
+    gap: 10px;
+}
+
+#groupSettingsForm .form-actions button {
+    padding: 10px 18px;
+    font-size: 1em;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    color: #ffffff;
+    flex: 1; /* Make buttons take equal width */
+    text-align: center; /* Center text within the button */
+}
+
+#groupSettingsForm .form-actions button[type="submit"] {
+    background-color: var(--user-bubble-bg);
+}
+#groupSettingsForm .form-actions button[type="submit"]:hover {
+    background-color: var(--button-hover-bg);
+}
+
+#groupSettingsForm .form-actions #deleteGroupBtn {
+    background-color: var(--danger-color);
+}
+#groupSettingsForm .form-actions #deleteGroupBtn:hover {
+    background-color: var(--danger-hover-bg);
+}
+
+body.light-theme #groupSettingsForm .form-actions button[type="submit"] {
+    background-color: var(--button-bg);
+}
+body.light-theme #groupSettingsForm .form-actions button[type="submit"]:hover {
+    background-color: var(--button-hover-bg);
+}
+body.light-theme #groupSettingsForm .form-actions #deleteGroupBtn {
+    background-color: var(--danger-color);
+}
+body.light-theme #groupSettingsForm .form-actions #deleteGroupBtn:hover {
+    background-color: var(--danger-hover-bg);
+}
+
+
+.group-members-list-container {
+    max-height: 150px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px;
+    background-color: var(--input-bg);
+}
+
+.group-member-item {
+    display: flex;
+    align-items: center;
+    padding: 5px 0;
+}
+
+.group-member-item input[type="checkbox"] {
+    margin-right: 8px;
+    width: 16px; /* Custom size for checkbox */
+    height: 16px;
+    accent-color: var(--highlight-text); /* Color the checkbox itself */
+}
+
+.group-member-item label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-weight: normal; /* Override general label style if needed */
+    color: var(--primary-text);
+    font-size: 0.95em;
+}
+
+.group-member-item .avatar-small {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    margin-right: 8px;
+    object-fit: cover;
+}
+
+#memberTagsContainer {
+    /* Styles for the container of all tag inputs, if needed */
+}
+
+#memberTagsInputs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.member-tag-input-item {
+    display: flex;
+    flex-direction: column; /* Stack label and input */
+    gap: 4px;
+}
+.member-tag-input-item label {
+    font-size: 0.85em;
+    color: var(--secondary-text);
+}
+.member-tag-input-item input[type="text"] {
+    font-size: 0.9em;
+    padding: 6px 8px;
+}
+
+#groupSettingsForm img#groupAvatarPreview {
+    border: 2px solid var(--button-bg) !important;
+    border-radius: 8px;
+    max-width: 100px;
+    max-height: 100px;
+    object-fit: cover;
+    display: block;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+input[type="file"] {
+    font-size: 0;
+    background-color: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    width: auto;
+    display: inline-block;
+    vertical-align: middle; /* 保持垂直居中对齐 */
+    position: relative; /* 启用相对定位 */
+    top: 8px; /* 向下微调3像素 */
+}
+
+input[type="file"]::-webkit-file-upload-button,
+input[type="file"]::file-selector-button {
+    background-color: var(--button-bg);
+    color: var(--primary-text);
+    border: 1px solid var(--button-bg);
+    padding: 10px 15px; /* 恢复垂直内边距 */
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95em;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    font-family: inherit;
+}
+
+input[type="file"]::-webkit-file-upload-button:hover,
+input[type="file"]::file-selector-button:hover {
+    background-color: var(--button-hover-bg);
+    border-color: var(--button-hover-bg);
+}
+
+body.light-theme input[type="file"]::-webkit-file-upload-button,
+body.light-theme input[type="file"]::file-selector-button {
+    color: #ffffff;
+}
+
+body.light-theme input[type="file"]::-webkit-file-upload-button:hover,
+body.light-theme input[type="file"]::file-selector-button:hover {
+    color: #ffffff;
+}
+#agentSettingsForm img.avatar-preview,
+#agentSettingsContainer img[alt="Avatar Preview"],
+#agentSettingsForm div > img[src*="blob:"],
+#agentSettingsForm div > img[data-preview-for],
+#agentSettingsForm img[id*="AvatarPreview"],
+#agentSettingsForm img[class*="AvatarPreview"] {
+    border: 2px solid var(--button-bg) !important;
+    border-radius: 8px;
+    max-width: 100px;
+    max-height: 100px;
+    object-fit: cover;
+    display: block;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+#agentSettingsForm > div > img:only-child {
+    border: 2px solid var(--button-bg) !important;
+    border-radius: 8px;
+    max-width: 100px;
+    max-height: 100px;
+    object-fit: cover;
+    display: block;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+#agentSettingsForm .form-actions button.error-feedback {
+    background-color: var(--danger-color) !important;
+    color: white !important;
+}
+
+#agentSettingsForm .form-actions button.error-feedback:hover {
+    background-color: var(--danger-hover-bg) !important;
+}
+
+.topics-header {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 10px;
+    border-bottom: none;
+    margin-bottom: 15px;
+}
+
+.topics-header h2 {
+    margin-top: 5px;
+    margin-bottom: 10px;
+    color: var(--secondary-text);
+    font-size: 1.4em;
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.topic-search-container {
+    display: flex;
+    width: 100%;
+    gap: 8px;
+    padding: 0 15px;
+    box-sizing: border-box;
+}
+
+.topic-search-input {
+    flex-grow: 1;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    background-color: var(--input-bg);
+    color: var(--primary-text);
+    font-size: 1em;
+    box-sizing: border-box;
+    max-width: calc(100% - 8px);
+    min-width: 0;
+}
+
+.topic-search-input::placeholder {
+    color: var(--secondary-text);
+    opacity: 0.7;
+}
+
+.topic-search-input:focus {
+    outline: none;
+    border-color: var(--user-bubble-bg);
+    box-shadow: 0 0 0 2px rgba(61, 90, 128, 0.3);
+}
+
+.digital-clock {
+    font-size: 2.0em;
+    color: var(--highlight-text);
+    font-family: 'Maven Pro ExtraBold', 'Arial Black', sans-serif;
+    font-weight: 800;
+    letter-spacing: 1px;
+    line-height: 1;
+    margin-bottom: -1px;
+    text-align: left;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+.date-display {
+    font-size: 0.7em;
+    color: var(--secondary-text);
+    font-weight: 500;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1;
+    text-align: left;
+    margin-top: 0px;
+    position: relative;
+    top: -1px;
+    left: 3px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- Invite Agent Buttons --- */
+.invite-agent-buttons-container {
+    display: grid;
+    /* 一行尽可能多地显示按钮，每个按钮最小宽度约100px，最大占据1fr空间 */
+    /* 如果希望严格一行3个，可以使用: grid-template-columns: repeat(3, 1fr); */
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px; /* 按钮之间的间距 */
+    padding: 10px 15px; /* 容器的内边距，与 notifications-list 保持一致 */
+    /* border-top: 1px solid var(--border-color); /* 在main.html中已通过style添加 */
+    /* margin-top: 10px; /* 在main.html中已通过style添加 */
+    background-color: var(--panel-bg-dark); /* 与通知区域背景协调 */
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+body.light-theme .invite-agent-buttons-container {
+    background-color: var(--panel-bg-light);
+}
+
+.invite-agent-button {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px; /* 较小的内边距 */
+    border: 1px solid var(--button-border-color, var(--border-color)); /* 尝试使用按钮边框变量，否则用通用边框 */
+    background-color: var(--button-bg);
+    color: var(--primary-text); /* 使用主题的主文字颜色 */
+    border-radius: 6px; /* 与其他小按钮类似的圆角 */
+    cursor: pointer;
+    font-size: 0.85em; /* 较小的字体 */
+    text-align: left;
+    overflow: hidden; /* 防止内容溢出 */
+    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.1s ease;
+    min-width: 0; /* 允许按钮在grid中收缩 */
+}
+
+.invite-agent-button:hover {
+    background-color: var(--button-hover-bg);
+    border-color: var(--button-hover-bg);
+    transform: translateY(-1px); /* 轻微上浮效果 */
+}
+
+.invite-agent-button img {
+    width: 20px; /* 小头像 */
+    height: 20px;
+    border-radius: 50%;
+    margin-right: 7px; /* 头像和文字间距 */
+    object-fit: cover;
+    flex-shrink: 0; /* 防止头像被压缩 */
+}
+
+.invite-agent-button span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* 名称过长时显示省略号 */
+    flex-grow: 1; /* 允许文字占据剩余空间 */
+}
+
+/* 亮色主题下的特定调整 (如果需要) */
+body.light-theme .invite-agent-button {
+    border-color: var(--border-color-light);
+    background-color: var(--secondary-bg-light); /* 使用更浅的背景以融入亮色主题 */
+    color: var(--primary-text-light);
+}
+
+body.light-theme .invite-agent-button:hover {
+    background-color: var(--accent-bg-light);
+    border-color: var(--accent-bg-light);
+}
+/* 新增样式：使表单组内的元素水平排列 */
+.form-group-inline {
+    display: flex;
+    flex-direction: row !important; /* 确保水平排列 */
+    align-items: center;
+    justify-content: flex-start; /* 将内容靠左对齐 */
+    gap: 10px; /* 调整元素之间的间距 */
+}
+
+.form-group-inline label {
+    margin-bottom: 0; /* 移除标签的底部外边距 */
+}
+
+/* 新增样式：使用户头像表单组内的元素水平排列 */
+.form-group-inline-avatar {
+    display: flex;
+    align-items: center;
+    gap: 10px; /* 调整元素之间的间距 */
+}
+
+.form-group-inline-avatar label {
+    margin-bottom: 0; /* 移除标签的底部外边距 */
+}
+/* General Input Placeholder Styling */
+input::placeholder,
+textarea::placeholder {
+    color: var(--placeholder-text);
+    opacity: 1; /* Override default opacity */
+}

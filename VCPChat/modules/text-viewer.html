@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文本阅读模式</title>
+    <link rel="stylesheet" href="../styles/themes.css"> <!-- 引用主题样式 -->
+    <link rel="stylesheet" href="../style.css"> <!-- 复用主项目的样式 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css" integrity="sha384-Xi8rHCmBmhbuyyhbI88391ZKP2dmfnOl4rT9ZfRI7mLTdk1wblIUnrIq35nqwEvC" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js" integrity="sha384-X/XCfMm41VSsqRNQgDerQczD69XqmjOOOwYQvr/uuC+j4OPoNhVgjdGFwhvN02Ja" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/auto-render.min.js" integrity="sha384-+XBljXPPiv+OzfbB3cVmLHf4hdUFHlWNZN5spNQ7rmHTXpd7WvJum6fIACpNNfIR" crossorigin="anonymous"></script>
+    <!-- Highlight.js for syntax highlighting -->
+    <link id="highlight-theme-style" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <style>
+        /* Define CSS variables for dark theme (default) */
+        :root {
+            --viewer-bg-color: var(--primary-bg);
+            --viewer-primary-text: var(--primary-text);
+            --viewer-message-bg-assistant: var(--tertiary-bg); /* 聊天区背景 */
+            --viewer-code-bg: var(--secondary-bg); /* 侧边栏/面板背景 */
+            --viewer-code-text: var(--primary-text);
+            --viewer-inline-code-text: var(--highlight-text);
+            --viewer-button-text: var(--primary-text);
+            --viewer-code-bg-hover: var(--accent-bg);
+            --viewer-button-active-bg: var(--accent-bg);
+            --viewer-top-light-effect-bg: var(--shimmer-color-transparent); /* 使用主题中的透明闪烁色 */
+            --viewer-heading-color: var(--highlight-text); /* 新增：深色主题下的标题颜色 */
+        }
+
+        /* Define CSS variables for light theme */
+        body.light-theme {
+            --viewer-bg-color: var(--primary-bg);
+            --viewer-primary-text: var(--primary-text);
+            --viewer-message-bg-assistant: var(--tertiary-bg);
+            --viewer-code-bg: var(--secondary-bg);
+            --viewer-code-text: var(--primary-text);
+            --viewer-inline-code-text: var(--highlight-text);
+            --viewer-button-text: var(--primary-text);
+            --viewer-code-bg-hover: var(--accent-bg);
+            --viewer-button-active-bg: var(--accent-bg);
+            --viewer-top-light-effect-bg: var(--shimmer-color-transparent); /* 使用主题中的透明闪烁色 */
+            --viewer-heading-color-light: var(--highlight-text); /* 新增：浅色主题下的标题颜色 */
+        }
+
+        .custom-quote-dark {
+            color: var(--quoted-text); /* 使用主题中的引用文本颜色 */
+        }
+        .custom-quote-light {
+            color: var(--quoted-text); /* 使用主题中的引用文本颜色 */
+        }
+
+        /* Markdown headings */
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--viewer-heading-color); /* Default blue for headings in dark theme */
+        }
+
+        body.light-theme h1,
+        body.light-theme h2,
+        body.light-theme h3,
+        body.light-theme h4,
+        body.light-theme h5,
+        body.light-theme h6 {
+            color: var(--viewer-heading-color-light); /* Blue for headings in light theme */
+        }
+
+        body {
+            font-family: var(--font-family-sans-serif, sans-serif);
+            background-color: var(--viewer-bg-color);
+            color: var(--viewer-primary-text);
+            padding: 20px 20px 80px 20px;
+            margin: 0;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+        .top-light-effect {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px; /* 根据用户圈图调整宽度 */
+            max-width: 300px;
+            height: 25px; /* 略微增加高度以获得更好的椭圆感 */
+            background-color: var(--viewer-top-light-effect-bg);
+            border-radius: 0 0 50% 50% / 0 0 100% 100%; /* 底部椭圆角 */
+            z-index: -1; /* 确保在内容下方 */
+        }
+        .content-container {
+            /* --- Frosted Glass Effect --- */
+            background-color: var(--panel-bg);
+            backdrop-filter: blur(12px) saturate(150%);
+            -webkit-backdrop-filter: blur(12px) saturate(150%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+
+            color: var(--viewer-primary-text); /* Ensure text inside container is also readable */
+            padding: 20px; /* Increased padding */
+            border-radius: 12px; /* Increased border-radius */
+            margin-top: 15px; /* 调整向下移动的距离 */
+        }
+        /* Ensure pre/code blocks are styled similarly to the main app if possible */
+        pre {
+            background-color: var(--viewer-code-bg);
+            color: var(--viewer-code-text);
+            padding: 1em;
+            border-radius: 5px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        code {
+            font-family: var(--font-family-monospace, monospace);
+            background-color: transparent; /* Background for inline code */
+            color: var(--viewer-inline-code-text);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+        }
+        /* Style for the copy button */
+        .copy-button {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            padding: 5px;
+            background-color: var(--viewer-code-bg);
+            color: var(--viewer-button-text);
+            border: none; /* 移除边框 */
+            border-radius: 6px; /* 稍微增加圆角 */
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.3s, background-color 0.3s, border-color 0.3s;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); /* 添加轻微阴影 */
+        }
+        .copy-button:hover {
+            background-color: var(--viewer-code-bg-hover);
+        }
+        .copy-button svg {
+            width: 16px; /* SVG 图标大小 */
+            height: 16px; /* SVG 图标大小 */
+        }
+        pre:hover .copy-button {
+            opacity: 1; /* Show on hover */
+        }
+        .copy-button:active {
+            background-color: var(--viewer-button-active-bg);
+        }
+        /* Style for the edit button */
+        .edit-button {
+            position: absolute;
+            top: 5px;
+            right: 35px; /* Positioned to the left of the copy button (5px + 26px + 4px) */
+            padding: 5px;
+            background-color: var(--viewer-code-bg);
+            color: var(--viewer-button-text);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.3s, background-color 0.3s, border-color 0.3s;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .edit-button:hover {
+            background-color: var(--viewer-code-bg-hover);
+        }
+        .edit-button svg {
+            width: 16px;
+            height: 16px;
+        }
+        pre:hover .edit-button {
+            opacity: 1; /* Show on hover */
+        }
+        .edit-button:active {
+            background-color: var(--viewer-button-active-bg);
+        }
+        /* Style for the play button */
+        .play-button {
+            position: absolute;
+            top: 5px;
+            right: 65px; /* Positioned to the left of the edit button */
+            padding: 5px;
+            background-color: var(--viewer-code-bg);
+            color: var(--viewer-button-text);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.3s, background-color 0.3s, border-color 0.3s;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .play-button:hover {
+            background-color: var(--viewer-code-bg-hover);
+        }
+        .play-button svg {
+            width: 16px;
+            height: 16px;
+        }
+        pre:hover .play-button {
+            opacity: 1; /* Show on hover */
+        }
+        .play-button:active {
+            background-color: var(--viewer-button-active-bg);
+        }
+
+        /* Styles for HTML Preview */
+        .html-preview-container {
+            position: relative;
+            width: 100%;
+            height: 85vh; /* 85% of the viewport height */
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        .html-preview-container iframe {
+            width: 100%;
+            height: 100%;
+            border: 1px solid var(--viewer-code-bg-hover);
+            border-radius: 5px;
+            background-color: #fff; /* Set a default background for the iframe content */
+        }
+
+        .exit-preview-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            background-color: var(--viewer-code-bg);
+            color: var(--viewer-button-text);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 10; /* Ensure it's above the iframe content */
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap; /* Prevent text from wrapping */
+        }
+        .exit-preview-button:hover {
+            background-color: var(--viewer-code-bg-hover);
+        }
+        /* Styles for custom context menu */
+        .custom-context-menu {
+            position: absolute;
+            background-color: var(--viewer-message-bg-assistant);
+            border: 1px solid var(--viewer-code-bg-hover);
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            padding: 5px 0;
+            z-index: 1000; /* Ensure it's on top */
+            display: none; /* Hidden by default */
+            min-width: 150px;
+        }
+        .custom-context-menu button {
+            display: block;
+            width: 100%;
+            padding: 8px 15px;
+            text-align: left;
+            background-color: transparent;
+            color: var(--viewer-primary-text);
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .custom-context-menu button:hover {
+            background-color: var(--viewer-code-bg-hover);
+        }
+        /* Container for global action buttons */
+        .global-actions-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px; /* Space between buttons */
+            margin: 20px auto; /* Margin for the container */
+        }
+
+        /* Common style for global action buttons */
+        .global-action-button {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 2px 18px; /* Adjusted padding for better width consistency */
+                    background-color: rgba(255, 255, 255, 0.05); /* Frosted glass background */
+                    backdrop-filter: blur(10px);
+                    -webkit-backdrop-filter: blur(10px);
+                    color: var(--viewer-button-text);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 6px;
+                    cursor: pointer;
+                    transition: background-color 0.3s;
+                    font-size: 14px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                    min-width: 130px; /* Ensure a minimum width for consistency */
+                    text-align: center;
+                }
+        .global-action-button:hover {
+            background-color: var(--viewer-code-bg-hover);
+        }
+        .global-action-button:active {
+            background-color: var(--viewer-button-active-bg);
+        }
+        .global-action-button svg {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+        }
+
+        /* Force spacer with content to prevent collapsing */
+        .force-spacer {
+            height: 40px;
+            font-size: 1px; /* Make content invisible */
+            color: transparent; /* Make content invisible */
+            user-select: none; /* Prevent selection */
+        }
+
+        .content-container.editing-all {
+            outline: 2px solid var(--viewer-inline-code-text); /* Visual cue for editing */
+            box-shadow: 0 0 10px var(--viewer-inline-code-text); /* Enhanced visual cue */
+        }
+        /* Basic Table Styling for Markdown */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 1em;
+            color: var(--viewer-primary-text); /* Ensure text color is inherited */
+        }
+        th, td {
+            border: 1px solid var(--viewer-code-bg-hover); /* Use a visible border color */
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: var(--viewer-code-bg); /* Slight background for headers */
+        }
+
+        /* Style for Mermaid diagrams */
+        .mermaid {
+            background-color: var(--viewer-code-bg);
+            padding: 1em;
+            border-radius: 5px;
+            margin-bottom: 1em;
+            display: flex; /* 新增：使其内容居中 */
+            justify-content: center; /* 新增：使其内容居中 */
+            align-items: center; /* 新增：使其内容居中 */
+        }
+
+        /* Styles for Python execution output */
+        .python-output-container {
+            background-color: var(--viewer-code-bg);
+            color: var(--viewer-code-text);
+            padding: 1em;
+            border-radius: 5px;
+            margin-top: 0; /* Spacing from the code block */
+            border-top: 1px solid var(--viewer-code-bg-hover); /* Separator line */
+            font-family: var(--font-family-monospace, monospace);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            display: none; /* Hidden by default */
+        }
+
+        /* Styles for Sandbox Toggle Switch */
+        .sandbox-toggle-container {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center; /* To align items like other buttons */
+                    gap: 8px;
+                    color: var(--viewer-button-text);
+                    padding: 8px 12px; /* Reduced horizontal padding to compensate for width */
+                    background-color: rgba(255, 255, 255, 0.05); /* Frosted glass background */
+                    backdrop-filter: blur(10px);
+                    -webkit-backdrop-filter: blur(10px);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 6px;
+                    cursor: pointer;
+                    transition: background-color 0.3s;
+                    font-size: 14px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                    min-width: 130px;
+                }
+        .sandbox-toggle-container:hover {
+            background-color: var(--viewer-code-bg-hover);
+        }
+        .sandbox-toggle-checkbox {
+            display: none;
+        }
+        .sandbox-toggle-label {
+            position: relative;
+            width: 44px; /* Increased width */
+            height: 24px; /* Increased height */
+            background-color: var(--viewer-code-bg-hover);
+            border-radius: 12px; /* Adjusted border-radius */
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .sandbox-toggle-label::after {
+            content: '';
+            position: absolute;
+            width: 20px; /* Increased size */
+            height: 20px; /* Increased size */
+            border-radius: 50%;
+            background-color: white;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.3s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .sandbox-toggle-checkbox:checked + .sandbox-toggle-label {
+            background-color: #4CAF50; /* Green when active */
+        }
+        .sandbox-toggle-checkbox:checked + .sandbox-toggle-label::after {
+            transform: translateX(20px);
+        }
+    </style>
+</head>
+<body>
+    <div class="top-light-effect"></div> <!-- 新增的半椭圆形元素 -->
+    <div class="content-container" id="textContent">
+        <!-- 文本内容将在这里被渲染 -->
+    </div>
+    <div id="customContextMenu" class="custom-context-menu">
+        <button id="contextMenuCopy">复制</button>
+        <button id="contextMenuCut">剪切</button>
+        <button id="contextMenuDelete">删除</button>
+        <button id="contextMenuEditAll" style="display: none;">编辑全文</button>
+        <button id="contextMenuCopyAll" style="display: none;">复制全文</button>
+    </div>
+    <div class="global-actions-container">
+        <button id="editAllButton" class="global-action-button" title="编辑全文">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            <span>编辑全文</span>
+        </button>
+        <button id="shareToNotesButton" class="global-action-button" title="分享笔记">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+            <span>分享笔记</span>
+        </button>
+        <div class="sandbox-toggle-container" title="切换Python执行环境。开启时使用安全的浏览器沙箱环境，关闭时使用本机的Python环境。">
+            <label for="sandbox-toggle">安全沙箱</label>
+            <input type="checkbox" id="sandbox-toggle" class="sandbox-toggle-checkbox" checked>
+            <label for="sandbox-toggle" class="sandbox-toggle-label"></label>
+        </div>
+    </div>
+    <div class="force-spacer">&nbsp;</div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@latest/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="text-viewer.js"></script>
+</body>
+</html>

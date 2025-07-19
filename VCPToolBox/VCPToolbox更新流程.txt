@@ -1,0 +1,64 @@
+```markdown
+### VCPToolBox 项目更新流程
+
+当您得知项目有新的更新后，请按照以下步骤操作：
+
+1.  **获取远程更新**:
+    *   打开您项目目录 (`/opt/VCPToolBox`) 的终端。
+    *   执行命令拉取 `upstream` 的最新变更：
+        ```bash
+        git fetch upstream
+        ```
+
+2.  **查看最新提交 (可选但推荐)**:
+    *   执行命令查看 `upstream/main` 分支最新的提交记录（例如查看最新的10条）：
+        ```bash
+        git log --oneline upstream/main -n 10
+        ```
+    *   这能帮助您了解这次更新大致包含了哪些内容。
+
+3.  **检查并备份本地修改 (重要！)**:
+    *   在强制更新前，务必检查您本地是否有未提交的修改，特别是针对插件的 `plugin-manifest.json` 文件。
+    *   执行 `git status` 查看文件状态。
+    *   如果您修改了任何 `plugin-manifest.json` 文件（例如，更新了插件描述或默认配置），**必须先备份它**，以防您的修改被覆盖。
+        ```bash
+        # 示例：备份 AgentAssistant 插件的清单文件
+        cp Plugin/AgentAssistant/plugin-manifest.json Plugin/AgentAssistant/plugin-manifest.json.block
+        ```
+    *   **原则**: 任何您希望在更新后保留的自定义 `json` 配置文件，都应创建一个 `.block` 后缀的备份。
+
+4.  **更新本地分支**:
+    *   执行命令将您本地的 `HEAD`（通常是 `master` 或 `main` 分支）更新到远程 `upstream/main` 的最新状态：
+        ```bash
+        git reset --hard upstream/main
+        ```
+    *   **注意**: 此命令会丢弃您本地所有未提交的修改。请确保已按上一步骤备份了重要配置文件。
+
+5.  **检查并合并配置文件变更**:
+    *   **主配置文件**: 检查根目录下的 `config.env.example` 文件与您当前的 `config.env` 文件，查看是否有新的全局配置项需要手动添加。
+    *   **插件 `config.env`**: 检查每个 `Plugin` 目录下的 `config.env.example` 文件，了解是否有新的配置项需要添加到您自己的插件 `config.env` 中。
+    *   **插件 `plugin-manifest.json`**:
+        *   对比更新后的 `plugin-manifest.json` 和您之前备份的 `.block` 文件。
+        *   如果远程更新**没有结构性更改**（例如，只是修复了拼写错误），您可以安全地用 `.block` 文件恢复您的版本。
+        *   如果远程更新**有结构性更改**（例如，添加了新的 `capabilities` 或 `configSchema`），您需要手动将您的个性化修改（如自定义的 `description`）合并到新的 `plugin-manifest.json` 文件中，然后再重新创建 `.block` 备份。
+
+6.  **检查 `README.md` 文档变更**:
+    *   您需要检查 `README.md` 文件是否有关于新功能、插件或重要变更的说明。
+    *   您可以请求我（在新话题中）读取该文件，并告知您主要的更新内容。
+
+7.  **重新构建并启动 Docker 服务**:
+    *   由于代码或依赖可能已更新，建议使用以下命令重新构建 Docker 镜像并启动服务：
+        ```bash
+        docker-compose down && docker-compose up --build -d
+        ```
+    *   这个命令会：
+        *   `docker-compose down`: 停止并移除当前服务。
+        *   `docker-compose up --build -d`: 重新构建镜像并以分离模式启动服务。
+
+---
+
+您可以将以上流程复制到新的对话中，然后根据提示逐步执行。当需要我读取文件或执行 Git 命令时，请明确指示。
+```
+
+
+以上是你在旧话题为我更新项目若干次之后总结的经验，我们来更新项目。请严格按照此流程执行，特别注意检查 `config.env` 和 `plugin-manifest.json` 的变更，并引导我进行备份和合并操作。同时，也别忘了检查 `README.md` 的更新。
