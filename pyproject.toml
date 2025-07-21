@@ -1,0 +1,22 @@
+[project]
+name = "vcp-toolbox"
+version = "0.1.0"
+description = "VCP ToolBox - AI能力增强中间层"
+authors = [
+    {name = "VCP Team"}
+]
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "sympy (>=1.14.0,<2.0.0)",
+    "scipy (>=1.16.0,<2.0.0)",
+    "numpy (>=2.3.1,<3.0.0)",
+    "requests (==2.31.0)",
+    "python-dotenv (==1.0.0)",
+    "pillow (==10.3.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

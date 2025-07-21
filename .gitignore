@@ -159,3 +159,9 @@ image/通用表情包/*
 
 # 忽略 FluxGen 生成的图片
 image/fluxgen/
+
+# VCPLog 运行时日志
+Plugin/VCPLog/log/
+
+# WeatherReporter 缓存文件
+Plugin/WeatherReporter/weather_cache.json
