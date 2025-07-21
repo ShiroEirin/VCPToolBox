@@ -34,9 +34,25 @@
 
 ## 依赖安装
 
-### 方式一：Poetry 虚拟环境 (推荐)
+### 方式一：NPM 直接安装 (推荐)
 
-这是最安全和干净的安装方式，不会污染系统环境。
+这是最简单快捷的安装方式，适合大多数用户。
+
+```bash
+# 克隆项目
+git clone <项目地址>
+cd VCPToolBox
+
+# 安装 Node.js 依赖
+npm install
+
+# 安装 Python 依赖 (使用系统 Python)
+pip install -r requirements.txt
+```
+
+### 方式二：Poetry 虚拟环境
+
+如果你希望使用虚拟环境隔离 Python 依赖，可以使用这种方式。**注意：Poetry 在 Windows 环境下的 shell 激活存在兼容性问题。**
 
 #### 1. 安装 Poetry (如果尚未安装)
 
@@ -82,9 +98,9 @@ poetry run python -c "import sympy, scipy, numpy, requests, dotenv, PIL; print('
 node -e "console.log('✅ Node.js 环境正常'); console.log('PM2版本:', require('./node_modules/pm2/package.json').version)"
 ```
 
-### 方式二：系统环境直接安装
+### 方式三：系统环境完整安装
 
-如果你不介意在系统环境中安装依赖：
+传统的系统级安装方式：
 
 ```bash
 # 克隆项目
@@ -98,7 +114,7 @@ pip install -r requirements.txt
 npm install
 ```
 
-### 方式三：Docker 容器化部署
+### 方式四：Docker 容器化部署
 
 ```bash
 # 构建镜像
@@ -186,7 +202,37 @@ python -c "from dotenv import load_dotenv; load_dotenv('config.env'); print('✅
 
 ## 启动服务
 
-### Poetry 环境启动 (推荐)
+### NPM + PM2 启动 (推荐)
+
+**这是最推荐的启动方式**，使用 npx 可以直接使用项目本地安装的 PM2，无需全局安装。
+
+#### 生产运行模式 (推荐)
+```bash
+# 使用 npx 启动 PM2 (推荐)
+npx pm2 start server.js --name vcp-toolbox
+
+# 查看服务状态
+npx pm2 status
+
+# 查看日志
+npx pm2 logs vcp-toolbox
+
+# 重启服务
+npx pm2 restart vcp-toolbox
+
+# 停止服务
+npx pm2 stop vcp-toolbox
+```
+
+#### 开发调试模式
+```bash
+# 前台运行，便于调试
+node server.js
+```
+
+### Poetry 环境启动
+
+**注意：Poetry shell 在 Windows 环境下存在兼容性问题，不推荐在 Windows 上使用。**
 
 #### 开发调试模式
 ```bash
@@ -197,9 +243,9 @@ poetry shell
 node server.js
 ```
 
-#### 生产运行模式
+#### 生产运行模式 (Linux/macOS)
 ```bash
-# 使用 PM2 在 Poetry 环境中启动
+# 使用 PM2 在 Poetry 环境中启动 (仅适用于 Linux/macOS)
 poetry run pm2 start server.js --name vcp-toolbox
 
 # 查看服务状态
@@ -209,7 +255,9 @@ poetry run pm2 status
 poetry run pm2 logs vcp-toolbox
 ```
 
-### 系统环境启动
+**Windows 用户请使用 NPM + PM2 启动方式。**
+
+### 全局 PM2 启动
 
 #### 开发调试模式
 ```bash
@@ -217,9 +265,12 @@ poetry run pm2 logs vcp-toolbox
 node server.js
 ```
 
-#### 生产运行模式
+#### 生产运行模式 (需要全局安装 PM2)
 ```bash
-# 使用 PM2 启动
+# 全局安装 PM2 (如果未安装)
+npm install -g pm2
+
+# 使用全局 PM2 启动
 pm2 start server.js --name vcp-toolbox
 
 # 设置开机自启
@@ -333,9 +384,24 @@ lsof -ti:6005 | xargs kill -9
 
 ### 日志管理
 
-#### Poetry + PM2 环境
+#### NPM + PM2 环境 (推荐)
 ```bash
 # 查看 PM2 日志
+npx pm2 logs vcp-toolbox
+
+# 清空日志
+npx pm2 flush
+
+# 重启服务
+npx pm2 restart vcp-toolbox
+
+# 停止服务
+npx pm2 stop vcp-toolbox
+```
+
+#### Poetry + PM2 环境 (Linux/macOS)
+```bash
+# 查看 PM2 日志 (仅适用于 Linux/macOS)
 poetry run pm2 logs vcp-toolbox
 
 # 清空日志
@@ -361,10 +427,13 @@ docker restart vcp-toolbox
 git pull origin main
 
 # 更新依赖
-poetry install  # Python 依赖
+poetry install  # Python 依赖 (可选)
 npm install     # Node.js 依赖
 
-# 重启服务
+# 重启服务 (推荐使用 npx)
+npx pm2 restart vcp-toolbox
+
+# 或使用 Poetry (仅 Linux/macOS)
 poetry run pm2 restart vcp-toolbox
 ```
 
@@ -380,10 +449,14 @@ cp -r Plugin Plugin.backup
 ### 性能监控
 
 ```bash
-# 使用 PM2 监控
-poetry run pm2 monit
+# 使用 PM2 监控 (推荐)
+npx pm2 monit
 
 # 查看系统资源使用
+npx pm2 show vcp-toolbox
+
+# 或使用 Poetry (仅 Linux/macOS)
+poetry run pm2 monit
 poetry run pm2 show vcp-toolbox
 ```
 
