@@ -115,7 +115,9 @@ const webSocketServer = require('./WebSocketServer.js'); // 新增 WebSocketServ
 const basicAuth = require('basic-auth');
 const cors = require('cors'); // 引入 cors 模块
 
-dotenv.config({ path: 'config.env' });
+// 支持通过环境变量指定配置文件路径
+const configPath = process.env.CONFIG_PATH || 'config.env';
+dotenv.config({ path: configPath });
 
 const ADMIN_USERNAME = process.env.AdminUsername;
 const ADMIN_PASSWORD = process.env.AdminPassword;
