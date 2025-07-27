@@ -112,12 +112,13 @@ const crypto = require('crypto');
 const pluginManager = require('./Plugin.js');
 const taskScheduler = require('./routes/taskScheduler.js');
 const webSocketServer = require('./WebSocketServer.js'); // 新增 WebSocketServer 引入
+const vcpInfoHandler = require('./vcpInfoHandler.js'); // 引入新的 VCP 信息处理器
 const basicAuth = require('basic-auth');
 const cors = require('cors'); // 引入 cors 模块
 
-// 支持通过环境变量指定配置文件路径
-const configPath = process.env.CONFIG_PATH || 'config.env';
-dotenv.config({ path: configPath });
+const activeRequests = new Map(); // 新增：用于存储活动中的请求，以便中止
+
+dotenv.config({ path: 'config.env' });
 
 const ADMIN_USERNAME = process.env.AdminUsername;
 const ADMIN_PASSWORD = process.env.AdminPassword;
@@ -743,9 +744,37 @@ app.post('/v1/schedule_task', async (req, res) => {
     }
 });
 
+// 新增：紧急停止路由
+app.post('/v1/interrupt', (req, res) => {
+    const id = req.body.requestId || req.body.messageId; // 兼容 requestId 和 messageId
+    if (!id) {
+        return res.status(400).json({ error: 'requestId or messageId is required.' });
+    }
 
-app.post('/v1/chat/completions', async (req, res) => {
+    const context = activeRequests.get(id);
+    if (context) {
+        console.log(`[Interrupt] Received stop signal for ID: ${id}`);
+        context.abortController.abort(); // 触发中止
+        // The actual response handling is done in the handleChatCompletion's error handler
+        res.status(200).json({ status: 'success', message: `Interrupt signal sent for request ${id}.` });
+    } else {
+        console.log(`[Interrupt] Received stop signal for non-existent or completed ID: ${id}`);
+        res.status(404).json({ status: 'error', message: `Request ${id} not found or already completed.` });
+    }
+});
+
+
+async function handleChatCompletion(req, res, forceShowVCP = false) {
     const { default: fetch } = await import('node-fetch');
+    const shouldShowVCP = SHOW_VCP_OUTPUT || forceShowVCP; // Combine env var and route-specific flag
+    
+    const id = req.body.requestId || req.body.messageId; // 兼容 requestId 和 messageId
+    const abortController = new AbortController();
+
+    if (id) {
+        activeRequests.set(id, { req, res, abortController });
+    }
+
     try {
         let originalBody = req.body;
         await writeDebugLog('LogInput', originalBody);
@@ -827,18 +856,24 @@ app.post('/v1/chat/completions', async (req, res) => {
         }
         await writeDebugLog('LogOutputAfterProcessing', originalBody);
         
+        const isOriginalRequestStreaming = originalBody.stream === true;
+        // If VCP info needs to be shown, the response MUST be streamed to the client.
+        const willStreamResponse = isOriginalRequestStreaming; // Only stream if the original request was a stream.
+
         let firstAiAPIResponse = await fetch(`${apiUrl}/v1/chat/completions`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${apiKey}`, 
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
                 ...(req.headers['user-agent'] && { 'User-Agent': req.headers['user-agent'] }),
-                'Accept': originalBody.stream ? 'text/event-stream' : (req.headers['accept'] || 'application/json'),
+                'Accept': willStreamResponse ? 'text/event-stream' : (req.headers['accept'] || 'application/json'),
             },
-            body: JSON.stringify(originalBody),
+            // Force stream to be true if we are showing VCP info.
+            body: JSON.stringify({ ...originalBody, stream: willStreamResponse }),
+            signal: abortController.signal, // 传递中止信号
         });
 
-        const isOriginalResponseStreaming = originalBody.stream === true && firstAiAPIResponse.headers.get('content-type')?.includes('text/event-stream');
+        const isUpstreamStreaming = willStreamResponse && firstAiAPIResponse.headers.get('content-type')?.includes('text/event-stream');
         
         if (!res.headersSent) {
             res.status(firstAiAPIResponse.status);
@@ -847,7 +882,7 @@ app.post('/v1/chat/completions', async (req, res) => {
                      res.setHeader(name, value);
                 }
             });
-            if (isOriginalResponseStreaming && !res.getHeader('Content-Type')?.includes('text/event-stream')) {
+            if (isOriginalRequestStreaming && !res.getHeader('Content-Type')?.includes('text/event-stream')) {
                 res.setHeader('Content-Type', 'text/event-stream');
                 if (!res.getHeader('Cache-Control')) res.setHeader('Cache-Control', 'no-cache');
                 if (!res.getHeader('Connection')) res.setHeader('Connection', 'keep-alive');
@@ -856,7 +891,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
         let firstResponseRawDataForClientAndDiary = ""; // Used for non-streaming and initial diary
 
-        if (isOriginalResponseStreaming) {
+        if (isUpstreamStreaming) {
             let currentMessagesForLoop = originalBody.messages ? JSON.parse(JSON.stringify(originalBody.messages)) : [];
             let recursionDepth = 0;
             const maxRecursion = parseInt(process.env.MaxVCPLoopStream) || 5;
@@ -1094,9 +1129,8 @@ app.post('/v1/chat/completions', async (req, res) => {
                                 if (DEBUG_MODE) console.log(`[VCP Stream Loop] WebSocket push for ${toolCall.name} (success) processed.`);
                             }
 
-                            if (SHOW_VCP_OUTPUT && !res.writableEnded) {
-                                const vcpClientPayload = { type: 'vcp_stream_result', tool_name: toolCall.name, status: 'success', content: toolResultText };
-                                res.write(`data: ${JSON.stringify(vcpClientPayload)}\n\n`);
+                            if (shouldShowVCP && !res.writableEnded) {
+                                vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult);
                             }
                         } catch (pluginError) {
                              console.error(`[VCP Stream Loop EXECUTION ERROR] Error executing plugin ${toolCall.name}:`, pluginError.message);
@@ -1106,9 +1140,8 @@ app.post('/v1/chat/completions', async (req, res) => {
                                 type: 'vcp_log',
                                 data: { tool_name: toolCall.name, status: 'error', content: toolResultText, source: 'stream_loop_error' }
                             }, 'VCPLog');
-                             if (SHOW_VCP_OUTPUT && !res.writableEnded) {
-                                const vcpClientPayload = { type: 'vcp_stream_result', tool_name: toolCall.name, status: 'error', content: toolResultText };
-                                res.write(`data: ${JSON.stringify(vcpClientPayload)}\n\n`);
+                             if (shouldShowVCP && !res.writableEnded) {
+                                vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText);
                              }
                         }
                     } else {
@@ -1119,9 +1152,8 @@ app.post('/v1/chat/completions', async (req, res) => {
                             type: 'vcp_log',
                             data: { tool_name: toolCall.name, status: 'error', content: toolResultText, source: 'stream_loop_not_found' }
                         }, 'VCPLog');
-                        if (SHOW_VCP_OUTPUT && !res.writableEnded) {
-                            const vcpClientPayload = { type: 'vcp_stream_result', tool_name: toolCall.name, status: 'error', content: toolResultText };
-                            res.write(`data: ${JSON.stringify(vcpClientPayload)}\n\n`);
+                        if (shouldShowVCP && !res.writableEnded) {
+                            vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText);
                         }
                     }
                     return toolResultContentForAI;
@@ -1147,6 +1179,7 @@ app.post('/v1/chat/completions', async (req, res) => {
                         'Accept': 'text/event-stream', // Ensure streaming for subsequent calls
                     },
                     body: JSON.stringify({ ...originalBody, messages: currentMessagesForLoop, stream: true }),
+                    signal: abortController.signal, // 传递中止信号
                 });
 
                 if (!nextAiAPIResponse.ok) {
@@ -1219,7 +1252,8 @@ app.post('/v1/chat/completions', async (req, res) => {
             do {
                 let anyToolProcessedInCurrentIteration = false; // Reset for each iteration of the outer AI-Tool-AI loop
                 // Add the *current* AI content to the client history *before* processing it for tools
-                conversationHistoryForClient.push({ type: 'ai', content: currentAIContentForLoop });
+                // Add the *current* AI content to the client history *before* processing it for tools
+                conversationHistoryForClient.push(currentAIContentForLoop);
 
                 const toolRequestStartMarker = "<<<[TOOL_REQUEST]>>>";
                 const toolRequestEndMarker = "<<<[END_TOOL_REQUEST]>>>";
@@ -1322,8 +1356,9 @@ app.post('/v1/chat/completions', async (req, res) => {
                                     if (DEBUG_MODE) console.log(`[Multi-Tool] WebSocket push for ${toolCall.name} (success) processed.`);
                                 }
 
-                                if (SHOW_VCP_OUTPUT) {
-                                    conversationHistoryForClient.push({ type: 'vcp', content: `工具 ${toolCall.name} 调用结果:\n${toolResultText}` });
+                                if (shouldShowVCP) {
+                                    const vcpText = vcpInfoHandler.streamVcpInfo(null, originalBody.model, toolCall.name, 'success', pluginResult);
+                                    if (vcpText) conversationHistoryForClient.push(vcpText);
                                 }
                             } catch (pluginError) {
                                  console.error(`[Multi-Tool EXECUTION ERROR] Error executing plugin ${toolCall.name}:`, pluginError.message);
@@ -1333,8 +1368,9 @@ app.post('/v1/chat/completions', async (req, res) => {
                                     type: 'vcp_log',
                                     data: { tool_name: toolCall.name, status: 'error', content: toolResultText, source: 'non_stream_loop_error' }
                                 }, 'VCPLog');
-                                 if (SHOW_VCP_OUTPUT) {
-                                    conversationHistoryForClient.push({ type: 'vcp', content: `工具 ${toolCall.name} 调用错误:\n${toolResultText}` });
+                                 if (shouldShowVCP) {
+                                     const vcpText = vcpInfoHandler.streamVcpInfo(null, originalBody.model, toolCall.name, 'error', toolResultText);
+                                     if (vcpText) conversationHistoryForClient.push(vcpText);
                                  }
                             }
                         } else {
@@ -1345,8 +1381,9 @@ app.post('/v1/chat/completions', async (req, res) => {
                                type: 'vcp_log',
                                data: { tool_name: toolCall.name, status: 'error', content: toolResultText, source: 'non_stream_loop_not_found' }
                            }, 'VCPLog');
-                            if (SHOW_VCP_OUTPUT) {
-                                conversationHistoryForClient.push({ type: 'vcp', content: toolResultText });
+                            if (shouldShowVCP) {
+                                const vcpText = vcpInfoHandler.streamVcpInfo(null, originalBody.model, toolCall.name, 'error', toolResultText);
+                                if (vcpText) conversationHistoryForClient.push(vcpText);
                             }
                         }
                         return toolResultContentForAI;
@@ -1370,6 +1407,7 @@ app.post('/v1/chat/completions', async (req, res) => {
                             'Accept': 'application/json',
                         },
                         body: JSON.stringify({ ...originalBody, messages: currentMessagesForNonStreamLoop, stream: false }),
+                        signal: abortController.signal, // 传递中止信号
                     });
 
                     if (!recursionAiResponse.ok) {
@@ -1404,13 +1442,7 @@ app.post('/v1/chat/completions', async (req, res) => {
             } while (recursionDepth < maxRecursion);
 
             // --- Finalize Non-Streaming Response ---
-            const finalContentForClient = conversationHistoryForClient
-                .map(item => {
-                    if (item.type === 'ai') return item.content;
-                    // VCP results are only included if SHOW_VCP_OUTPUT was true when they were added
-                    if (item.type === 'vcp') return `\n<<<[VCP_RESULT]>>>\n${item.content}\n<<<[END_VCP_RESULT]>>>\n`;
-                    return '';
-                }).join('');
+            const finalContentForClient = conversationHistoryForClient.join('');
 
             let finalJsonResponse;
             try {
@@ -1444,13 +1476,48 @@ app.post('/v1/chat/completions', async (req, res) => {
         }
     } catch (error) {
         console.error('处理请求或转发时出错:', error.message, error.stack);
+        // 新增：处理 AbortError
+        if (error.name === 'AbortError') {
+            console.log(`[Abort] Request ${id} was aborted by the user.`);
+            if (!res.headersSent) {
+                // 非流式请求被中止
+                res.status(200).json({
+                    choices: [{
+                        index: 0,
+                        message: { role: 'assistant', content: '请求已中止' },
+                        finish_reason: 'stop'
+                    }]
+                });
+            } else if (!res.writableEnded) {
+                // 流式请求被中止，优雅地结束它
+                res.write('data: [DONE]\n\n');
+                res.end();
+            }
+            return; // 确保在中止后不再执行其他错误处理
+        }
+
         if (!res.headersSent) {
              res.status(500).json({ error: 'Internal Server Error', details: error.message });
         } else if (!res.writableEnded) {
              console.error('[STREAM ERROR] Headers already sent. Cannot send JSON error. Ending stream if not already ended.');
              res.end();
         }
+    } finally {
+        // 确保在请求结束时从池中移除
+        if (id) {
+            activeRequests.delete(id);
+        }
     }
+}
+
+// Route for standard chat completions. VCP info is shown based on the .env config.
+app.post('/v1/chat/completions', (req, res) => {
+    handleChatCompletion(req, res, false);
+});
+
+// Route to force VCP info to be shown, regardless of the .env config.
+app.post('/v1/chatvcp/completions', (req, res) => {
+    handleChatCompletion(req, res, true);
 });
 
 
