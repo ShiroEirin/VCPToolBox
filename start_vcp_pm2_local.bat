@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 echo VCP ToolBox - PM2 本地开发启动脚本
 echo =====================================
 
@@ -15,12 +16,17 @@ if %errorlevel% == 0 (
     echo.
     echo 当前服务状态:
     npx pm2 status vcp-toolbox-local
+    echo.
+    echo 按任意键退出...
+    pause >nul
+    exit /b 0
 ) else (
     echo 正在启动 VCP ToolBox 本地开发服务...
     echo 使用配置文件: config.local.env
     echo 服务端口: 6006 (避免与Docker版本冲突)
     
-    npx pm2 start server.js --name vcp-toolbox-local --env CONFIG_PATH=config.local.env
+    set CONFIG_PATH=config.local.env
+    npx pm2 start server.js --name vcp-toolbox-local
     
     if %errorlevel% == 0 (
         echo.
@@ -37,12 +43,16 @@ if %errorlevel% == 0 (
         echo 重启服务: restart_vcp_pm2_local.bat
         echo.
         echo [提示] Docker版本仍可正常使用端口6005
+        echo.
+        echo 按任意键退出...
+        pause >nul
     ) else (
         echo.
         echo ❌ 启动失败！请检查错误信息
         echo 请确保 config.local.env 文件存在
+        echo.
+        echo 按任意键退出...
+        pause >nul
+        exit /b 1
     )
 )
-
-echo.
-pause

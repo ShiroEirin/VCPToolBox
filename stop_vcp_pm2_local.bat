@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 echo VCP ToolBox - PM2 本地开发停止脚本
 echo =====================================
 
@@ -28,4 +29,5 @@ echo 当前 PM2 状态:
 npx pm2 status
 
 echo.
-pause
+echo 按任意键退出...
+pause >nul

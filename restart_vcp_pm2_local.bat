@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 echo VCP ToolBox - PM2 本地开发重启脚本
 echo =====================================
 
@@ -15,11 +16,11 @@ if %errorlevel% == 0 (
     npx pm2 status vcp-toolbox-local
     echo.
     echo 查看日志: npx pm2 logs vcp-toolbox-local
+    echo.
+    echo 按任意键退出...
+    pause >nul
 ) else (
     echo ❌ 重启失败！
     echo 尝试重新启动服务...
     call start_vcp_pm2_local.bat
 )
-
-echo.
-pause
