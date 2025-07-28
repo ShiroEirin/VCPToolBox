@@ -138,6 +138,7 @@ dist
 # Custom VCPToolBox ignores
 config.env
 config.env.local
+config.docker.env
 Plugin/EmojiListGenerator/generated_lists/
 Plugin/ImageProcessor/image_cache.json
 Plugin/WeatherReporter/weather_cache.txt
