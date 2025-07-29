@@ -118,10 +118,7 @@ const cors = require('cors'); // 引入 cors 模块
 
 const activeRequests = new Map(); // 新增：用于存储活动中的请求，以便中止
 
-// Load configuration from CONFIG_PATH environment variable or default to config.env
-const configPath = process.env.CONFIG_PATH || 'config.env';
-console.log(`[ServerSetup] Loading configuration from: ${configPath}`);
-dotenv.config({ path: configPath });
+dotenv.config({ path: 'config.env' });
 
 const ADMIN_USERNAME = process.env.AdminUsername;
 const ADMIN_PASSWORD = process.env.AdminPassword;
