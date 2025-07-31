@@ -3,7 +3,7 @@ services:
     build: .
     container_name: vcptoolbox
     ports:
-      - "6005:6005"
+      - "6006:6006"
     environment:
       TZ: Asia/Shanghai
     volumes:
