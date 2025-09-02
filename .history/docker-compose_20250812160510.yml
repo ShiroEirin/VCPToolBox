@@ -1,0 +1,17 @@
+services:
+    build: .
+    ports:
+    environment:
+    volumes:
+      - ./config.docker.env:/usr/src/app/config.env
+      # 注意: 如果插件的 config.env 文件不存在于宿主机，Docker 卷映射可能会创建目录而不是文件。
+      # 为了简单起见，这里假设目标是映射特定文件和已知数据目录。
+#
+#
+      #0 插件特定配置和数据示例 (根据 .dockerignore 和已知插件调整)
+      #0- ./Plugin/VCPLog/log:/usr/src/app/Plugin/VCPLog/log
+      #0- ./dailynote:/usr/src/app/dailynote
+
+      # 保持 node_modules 独立于容器，避免本地开发环境的 node_modules 覆盖容器内的。添加pydeps兼容科学计算器依赖。
+      - /usr/src/app/node_modules
+    # The command is defined in the Dockerfile's CMD instruction.

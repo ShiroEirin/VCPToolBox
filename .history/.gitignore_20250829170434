@@ -138,6 +138,7 @@ dist
 # Custom VCPToolBox ignores
 config.env
 config.env.local
+config.docker.env
 Plugin/EmojiListGenerator/generated_lists/
 Plugin/ImageProcessor/image_cache.json
 Plugin/WeatherReporter/weather_cache.txt
@@ -159,31 +160,24 @@ image/通用表情包/*
 
 # 忽略 FluxGen 生成的图片
 image/fluxgen/
- 
 
+# VCPLog 运行时日志
+Plugin/VCPLog/log/
 
+# WeatherReporter 缓存文件
+Plugin/WeatherReporter/weather_cache.json
 
- http-bio-8009-exec-11] 11:54:45 INFO  (TransactionEngineBusinessTransactionFilter.toBusinessTransaction:234) traceId= - get requestBody : {
-	"transactionInfo": {
-		"messageId": "1212332452345544534456",
-		"requestDate": "2025-08-28 16:50:24",
-		"requestSource": "CRM"
-	},
-	"payload": {
-		"policy": {
-			"policyNumber": "AF065092"
-		}
-	}
-}
+# 本地开发配置文件 (包含敏感信息，不应提交)
+config.local.env
+*.local.env
 
-[http-bio-8009-exec-11] 11:54:45 INFO  (TransactionEngineBusinessTransactionFilter.doFilter:122) traceId=1212332452345544534456 - businessTransaction组装完成，流水号为 : 1212332452345544534456
-[http-bio-8009-exec-11] 11:54:45 INFO  (TransactionEngineBusinessTransactionFilter.doFilter:152) traceId=1212332452345544534456 - isDuplicateTransaction数据重复校验完成，流水号为 : 1212332452345544534456
-[http-bio-8009-exec-11] 11:54:45 INFO  (EndorsementInvokeController.getAdditionalBenefits:2153) traceId=1212332452345544534456 - getAdditionalBenefits transaction invoke started...
-[http-bio-8009-exec-11] 11:54:45 INFO  (EndorsementInvokeController.getAdditionalBenefits:2218) traceId=1212332452345544534456 - 预估活力分达标额外身故保险金查询开始 - 保·单号: AF065092, 消息ID: 1212332452345544534456, 来源系统: CRM, 请求时间: 2025-08-28 16:50:24
-[http-bio-8009-exec-11] 11:54:45 INFO  (TransactionConstructor.constructTransactionInfo:34) traceId=1212332452345544534456 - request transaction : {"transactionInfo":{"requestSource":"CRM","requestDate":"2025-08-28 16:50:24","messageId":"1212332452345544534456"},"payload":{"policy":{"policyNumber":"AF065092"}}}
-[http-bio-8009-exec-11] 11:54:45 INFO  (VitalityGradeRecordManagerImpl.queryVitalityGradeRecords:41) traceId=1212332452345544534456 - 查询到健康等级记录，保单号: AF065092
-[http-bio-8009-exec-11] 11:54:45 INFO  (TransactionEngineManagerImpl.queryVitalityGradeRecords:10134) traceId=1212332452345544534456 - 成功查询到: com.siebre.policy.dto.VitalityGradeRecord@2cf37706
-[http-bio-8009-exec-11] 11:54:45 INFO  (EndorsementInvokeController.getAdditionalBenefits:2245) traceId=1212332452345544534456 - getAdditionalBenefits transaction invoke finished...
-[http-bio-8009-exec-11] 11:54:45 INFO  (EndorsementInvokeController.assembleResponse:1038) traceId=1212332452345544534456 - assemble the response body
-[http-bio-8009-exec-11] 11:54:45 INFO  (TransactionEngineBusinessTransactionFilter.doFilter:166) traceId=1212332452345544534456 - businessTransaction开始保存，流水号为 : 1212332452345544534456
-[http-bio-8009-exec-11] 11:54:45 INFO  (TransactionEngineBusinessTransactionFilter.doFilter:168) traceId=1212332452345544534456 - businessTransaction保存结束，流水号为 : 1212332452345544534456
+# 本地Docker配置文件 (避免合并冲突)
+Dockerfile
+docker-compose.yml
+
+# IDE/Editor history files
+.history
+
+# Claude configuration and cache files
+.claude/
+.crush/
