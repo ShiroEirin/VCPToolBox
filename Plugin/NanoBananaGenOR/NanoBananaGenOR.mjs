@@ -356,34 +356,35 @@ async function composeImage(args) {
         const base64Key = `image_base64_${i}`;
         const urlKey = `image_url_${i}`;
         
-        let processedImageUrl;
+        // 优先使用 base64 参数，然后是 url 参数
+        const imageInput = effectiveArgs[base64Key] || effectiveArgs[urlKey];
+        const activeKey = effectiveArgs[base64Key] ? base64Key : urlKey;
 
-        if (effectiveArgs[base64Key]) {
-            // 优先使用 base64 数据
-            processedImageUrl = effectiveArgs[base64Key];
-        } else if (effectiveArgs[urlKey]) {
-            const imageUrl = effectiveArgs[urlKey];
-            if (imageUrl.startsWith('data:')) {
-                processedImageUrl = imageUrl;
-            } else {
-                try {
-                    const { buffer, mimeType } = await getImageDataFromUrl(imageUrl);
-                    const base64Data = buffer.toString('base64');
-                    processedImageUrl = `data:${mimeType};base64,${base64Data}`;
-                } catch (e) {
-                    if (e.code === 'FILE_NOT_FOUND_LOCALLY') {
-                        const enhancedError = new Error(`多图片合成中第 ${i} 张图片 (参数: ${urlKey}) 本地未找到，需要远程获取。`);
-                        enhancedError.code = 'FILE_NOT_FOUND_LOCALLY';
-                        enhancedError.fileUrl = e.fileUrl;
-                        enhancedError.failedParameter = urlKey; // 关键：报告正确的失败参数
-                        throw enhancedError;
-                    }
-                    throw new Error(`处理第 ${i} 张图片时发生错误: ${e.message}`);
-                }
-            }
-        } else {
+        if (!imageInput) {
             // 如果索引不连续，报错
             throw new Error(`参数不连续: 缺少第 ${i} 张图片的 'image_url_${i}' 或 'image_base64_${i}'。`);
+        }
+
+        let processedImageUrl;
+        // 统一处理逻辑：检查输入是否已经是标准的 data URI
+        if (typeof imageInput === 'string' && imageInput.startsWith('data:')) {
+            processedImageUrl = imageInput;
+        } else {
+            // 如果不是，则假定它是一个需要获取的 URL (http, file 等)
+            try {
+                const { buffer, mimeType } = await getImageDataFromUrl(imageInput);
+                const base64Data = buffer.toString('base64');
+                processedImageUrl = `data:${mimeType};base64,${base64Data}`;
+            } catch (e) {
+                if (e.code === 'FILE_NOT_FOUND_LOCALLY') {
+                    const enhancedError = new Error(`多图片合成中第 ${i} 张图片 (参数: ${activeKey}) 本地未找到，需要远程获取。`);
+                    enhancedError.code = 'FILE_NOT_FOUND_LOCALLY';
+                    enhancedError.fileUrl = e.fileUrl;
+                    enhancedError.failedParameter = activeKey; // 报告正确的失败参数
+                    throw enhancedError;
+                }
+                throw new Error(`处理第 ${i} 张图片 ('${activeKey}') 时发生错误: ${e.message}`);
+            }
         }
 
         contentArray.push({
