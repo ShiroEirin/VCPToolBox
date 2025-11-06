@@ -205,6 +205,9 @@ async function handleDeletePostOrFloor(event) {
         };
         if (floor) {
             options.body = JSON.stringify({ floor });
+        } else {
+            // 删除整个帖子时，发送空对象以避免body解析错误
+            options.body = JSON.stringify({});
         }
 
         const response = await apiFetch(`${API_BASE_URL}/forum/post/${uid}`, options);
