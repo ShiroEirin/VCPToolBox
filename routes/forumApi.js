@@ -194,4 +194,82 @@ router.delete('/post/:uid', async (req, res) => {
     }
 });
 
+// NEW: PATCH /post/:uid - Edit a post's main content or a specific floor
+router.patch('/post/:uid', async (req, res) => {
+    const { uid } = req.params;
+    const { floor, content } = req.body; // 'floor' is optional. If present, edit a floor. Otherwise, edit main post.
+
+    if (content === undefined || content === null) {
+        return res.status(400).json({ success: false, error: 'Content for editing is required.' });
+    }
+
+    try {
+        await fs.mkdir(FORUM_DIR, { recursive: true });
+        const files = await fs.readdir(FORUM_DIR);
+        const targetFile = files.find(file => file.includes(`[${uid}].md`));
+
+        if (!targetFile) {
+            return res.status(404).json({ success: false, error: `Post with UID ${uid} not found.` });
+        }
+
+        const fullPath = path.join(FORUM_DIR, targetFile);
+        const fileContent = await fs.readFile(fullPath, 'utf-8');
+        let newFileContent = '';
+
+        const replyDelimiter = '\n\n---\n\n## 评论区\n---';
+        const mainContentDelimiterIndex = fileContent.indexOf(replyDelimiter);
+
+        if (floor) {
+            // --- Edit a specific floor ---
+            if (mainContentDelimiterIndex === -1) {
+                return res.status(400).json({ success: false, error: 'Post has no replies section to edit.' });
+            }
+
+            const mainContent = fileContent.substring(0, mainContentDelimiterIndex);
+            let repliesContent = fileContent.substring(mainContentDelimiterIndex + replyDelimiter.length);
+            const replies = repliesContent.trim() ? repliesContent.trim().split('\n\n---\n') : [];
+            
+            const floorToEdit = parseInt(floor, 10);
+            if (isNaN(floorToEdit) || floorToEdit <= 0 || floorToEdit > replies.length) {
+                return res.status(400).json({ success: false, error: `Invalid floor number: ${floor}.` });
+            }
+
+            const targetReply = replies[floorToEdit - 1];
+            const metadataEndIndex = targetReply.indexOf('\n\n');
+            if (metadataEndIndex === -1) {
+                return res.status(500).json({ success: false, error: 'Could not parse the reply to edit.' });
+            }
+            const replyMetadata = targetReply.substring(0, metadataEndIndex);
+            
+            // Reconstruct the reply with new content
+            replies[floorToEdit - 1] = `${replyMetadata}\n\n${content}`;
+
+            const newRepliesContent = replies.join('\n\n---\n');
+            newFileContent = mainContent + replyDelimiter + '\n' + newRepliesContent;
+            
+        } else {
+            // --- Edit the main post content ---
+            const mainContentStartDelimiter = '\n---\n';
+            const mainContentStartIndex = fileContent.indexOf(mainContentStartDelimiter);
+
+            if (mainContentStartIndex === -1) {
+                return res.status(500).json({ success: false, error: 'Could not parse main post structure.' });
+            }
+            
+            const metadata = fileContent.substring(0, mainContentStartIndex);
+            const repliesSection = mainContentDelimiterIndex !== -1 ? fileContent.substring(mainContentDelimiterIndex) : '';
+            
+            newFileContent = metadata + mainContentStartDelimiter + '\n' + content + repliesSection;
+        }
+
+        await fs.writeFile(fullPath, newFileContent, 'utf-8');
+        res.json({ success: true, message: `Post ${uid} was updated successfully.` });
+
+    } catch (error) {
+        console.error(`[Forum API] Error editing post ${uid}:`, error);
+        res.status(500).json({ success: false, error: 'Failed to process edit request.' });
+    }
+});
+
+
 module.exports = router;
