@@ -196,6 +196,9 @@ docker-compose.yml
 # VectorStore binary and map files (AI model data)
 VectorStore/*.bin
 VectorStore/*_map.json
+VectorStore/diary_name_vectors.json
+VectorStore/manifest.json
+VectorStore/*.json
 
 # Plugin binary cache files (运行时二进制缓存，不应提交)
 **/*.bin
