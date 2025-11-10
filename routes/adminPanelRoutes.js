@@ -54,174 +54,38 @@ module.exports = function(DEBUG_MODE, dailyNoteRootPath, pluginManager, getCurre
             const execOptions = { windowsHide: true }; // Option to prevent window pop-up
 
             if (process.platform === 'win32') {
-                // 智能PowerShell输出处理 - 优化版
-                function cleanPowerShellOutput(output) {
-                    if (!output || typeof output !== 'string') {
-                        throw new Error('PowerShell输出为空或格式错误');
-                    }
-
-                    try {
-                        // 尝试直接解析JSON（理想情况）
-                        const trimmed = output.trim();
-                        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-                            JSON.parse(trimmed);
-                            return trimmed;
-                        }
-                    } catch {}
-
-                    // 智能查找有效JSON：优先匹配最后一行
-                    const lines = output.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-
-                    // 从最后一行开始查找JSON
-                    for (let i = lines.length - 1; i >= 0; i--) {
-                        const line = lines[i];
-                        if ((line.startsWith('{') && line.endsWith('}')) ||
-                            (line.startsWith('[') && line.endsWith(']'))) {
-                            try {
-                                JSON.parse(line);
-                                return line;
-                            } catch {}
-                        }
-                    }
-
-                    // 如果还是找不到，尝试提取多行JSON
-                    for (let i = lines.length - 1; i >= 0; i--) {
-                        if (lines[i].startsWith('{')) {
-                            let jsonStr = '';
-                            let braceCount = 0;
-                            let inString = false;
-                            let escapeNext = false;
-
-                            for (let j = i; j < lines.length; j++) {
-                                const line = lines[j];
-                                for (let k = 0; k < line.length; k++) {
-                                    const char = line[k];
-
-                                    if (escapeNext) {
-                                        escapeNext = false;
-                                        continue;
-                                    }
-
-                                    if (char === '\\') {
-                                        escapeNext = true;
-                                        continue;
-                                    }
-
-                                    if (char === '"' && !escapeNext) {
-                                        inString = !inString;
-                                        continue;
-                                    }
-
-                                    if (!inString) {
-                                        if (char === '{') braceCount++;
-                                        else if (char === '}') braceCount--;
-                                    }
-                                }
-
-                                jsonStr += line;
-                                if (braceCount === 0 && jsonStr.startsWith('{')) {
-                                    try {
-                                        JSON.parse(jsonStr);
-                                        return jsonStr;
-                                    } catch {}
-                                    break;
-                                }
-                                if (j < lines.length - 1) jsonStr += '\n';
-                            }
-                            break;
-                        }
-                    }
-
-                    throw new Error('无法从PowerShell输出中提取有效JSON');
-                }
-
+                // 先尝试现代 PowerShell 命令，失败时回退到 wmic（向下兼容）
                 try {
-                    // 简化的PowerShell命令：移除复杂编码设置，使用最基础兼容方式
-                    const { stdout: memInfo } = await execAsync(
-                        'powershell -Command "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json -Compress"',
-                        execOptions
-                    );
-                    const jsonStr = cleanPowerShellOutput(memInfo);
-                    const memData = JSON.parse(jsonStr);
+                    const { stdout: memInfo } = await execAsync('powershell -Command "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json"', execOptions);
+                    const memData = JSON.parse(memInfo);
                     systemInfo.memory = {
                         total: (memData.TotalVisibleMemorySize || 0) * 1024,
                         free: (memData.FreePhysicalMemory || 0) * 1024,
                         used: ((memData.TotalVisibleMemorySize || 0) - (memData.FreePhysicalMemory || 0)) * 1024
                     };
-                } catch (cimError) {
-                    // 回退到传统WMI命令（Windows 10/8/7兼容）
-                    try {
-                        const { stdout: memInfo } = await execAsync(
-                            'powershell -Command "Get-WmiObject Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json -Compress"',
-                            execOptions
-                        );
-                        const jsonStr = cleanPowerShellOutput(memInfo);
-                        const memData = JSON.parse(jsonStr);
-                        systemInfo.memory = {
-                            total: (memData.TotalVisibleMemorySize || 0) * 1024,
-                            free: (memData.FreePhysicalMemory || 0) * 1024,
-                            used: ((memData.TotalVisibleMemorySize || 0) - (memData.FreePhysicalMemory || 0)) * 1024
-                        };
-                    } catch (wmiError) {
-                        // 最终回退到WMIC命令（Windows 10及以下版本备用）
-                        try {
-                            const { stdout: memInfo } = await execAsync('wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /value', execOptions);
-                            const memData = Object.fromEntries(memInfo.split('\r\n').filter(line => line.includes('=')).map(line => {
-                                const [key, value] = line.split('=');
-                                return [key.trim(), parseInt(value.trim()) * 1024];
-                            }));
-                            systemInfo.memory = {
-                                total: memData.TotalVisibleMemorySize || 0,
-                                free: memData.FreePhysicalMemory || 0,
-                                used: (memData.TotalVisibleMemorySize || 0) - (memData.FreePhysicalMemory || 0)
-                            };
-                        } catch (wmicError) {
-                            console.error('[SystemMonitor] 所有内存检测方法都失败:', wmicError.message);
-                            systemInfo.memory = { total: 0, free: 0, used: 0 };
-                        }
-                    }
+                } catch (powershellError) {
+                    // 回退到 wmic 命令
+                    const { stdout: memInfo } = await execAsync('wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /value', execOptions);
+                    const memData = Object.fromEntries(memInfo.split('\r\n').filter(line => line.includes('=')).map(line => {
+                        const [key, value] = line.split('=');
+                        return [key.trim(), parseInt(value.trim()) * 1024];
+                    }));
+                    systemInfo.memory = {
+                        total: memData.TotalVisibleMemorySize || 0,
+                        free: memData.FreePhysicalMemory || 0,
+                        used: (memData.TotalVisibleMemorySize || 0) - (memData.FreePhysicalMemory || 0)
+                    };
                 }
-
+                
                 try {
-                    // 简化的CPU检测命令
-                    const { stdout: cpuInfo } = await execAsync(
-                        'powershell -Command "Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average | Select-Object Average | ConvertTo-Json -Compress"',
-                        execOptions
-                    );
-                    const jsonStr = cleanPowerShellOutput(cpuInfo);
-                    const cpuData = JSON.parse(jsonStr);
+                    const { stdout: cpuInfo } = await execAsync('powershell -Command "Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average | Select-Object Average | ConvertTo-Json"', execOptions);
+                    const cpuData = JSON.parse(cpuInfo);
                     systemInfo.cpu = { usage: Math.round(cpuData.Average || 0) };
-                } catch (cimError) {
-                    // 回退到传统WMI命令（Windows 10/8/7兼容）
-                    try {
-                        const { stdout: cpuInfo } = await execAsync(
-                            'powershell -Command "Get-WmiObject Win32_Processor | Select-Object LoadPercentage | ConvertTo-Json -Compress"',
-                            execOptions
-                        );
-                        const jsonStr = cleanPowerShellOutput(cpuInfo);
-                        const cpuData = JSON.parse(jsonStr);
-                        // 处理单个CPU或多个CPU的情况
-                        let cpuUsage = 0;
-                        if (Array.isArray(cpuData)) {
-                            // 多个CPU核心，计算平均值
-                            const totalLoad = cpuData.reduce((sum, cpu) => sum + (cpu.LoadPercentage || 0), 0);
-                            cpuUsage = Math.round(totalLoad / cpuData.length);
-                        } else {
-                            // 单个CPU
-                            cpuUsage = cpuData.LoadPercentage || 0;
-                        }
-                        systemInfo.cpu = { usage: cpuUsage };
-                    } catch (wmiError) {
-                        // 最终回退到WMIC命令（Windows 10及以下版本备用）
-                        try {
-                            const { stdout: cpuInfo } = await execAsync('wmic cpu get loadpercentage /value', execOptions);
-                            const cpuMatch = cpuInfo.match(/LoadPercentage=(\d+)/);
-                            systemInfo.cpu = { usage: cpuMatch ? parseInt(cpuMatch[1]) : 0 };
-                        } catch (wmicError) {
-                            console.error('[SystemMonitor] 所有CPU检测方法都失败:', wmicError.message);
-                            systemInfo.cpu = { usage: 0 };
-                        }
-                    }
+                } catch (powershellError) {
+                    // 回退到 wmic 命令
+                    const { stdout: cpuInfo } = await execAsync('wmic cpu get loadpercentage /value', execOptions);
+                    const cpuMatch = cpuInfo.match(/LoadPercentage=(\d+)/);
+                    systemInfo.cpu = { usage: cpuMatch ? parseInt(cpuMatch[1]) : 0 };
                 }
             } else { // Linux/Unix
                 const { stdout: memInfo } = await execAsync('free -b', execOptions);
@@ -330,6 +194,7 @@ module.exports = function(DEBUG_MODE, dailyNoteRootPath, pluginManager, getCurre
             res.status(500).json({ error: 'Failed to write main config file', details: error.message });
         }
     });
+
 
     // GET plugin list with manifest, status, and config.env content
     adminApiRouter.get('/plugins', async (req, res) => {

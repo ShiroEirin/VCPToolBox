@@ -135,12 +135,7 @@ async function copyServerLogToClipboard() {
         return;
     }
 
-<<<<<<< HEAD
-    try {
-        await navigator.clipboard.writeText(logContent);
-=======
     const showSuccess = () => {
->>>>>>> upstream/main
         showMessage('日志内容已复制到剪贴板！', 'success');
         if (serverLogStatusSpan) {
             serverLogStatusSpan.textContent = '日志已复制!';
@@ -151,22 +146,15 @@ async function copyServerLogToClipboard() {
                 }
             }, 3000);
         }
-<<<<<<< HEAD
-    } catch (err) {
-        console.error('无法复制日志: ', err);
-=======
     };
 
     const showError = (err, type = '') => {
         console.error(`无法复制日志${type}: `, err);
->>>>>>> upstream/main
         showMessage('无法自动复制日志。请手动复制。', 'error');
         if (serverLogStatusSpan) {
             serverLogStatusSpan.textContent = '复制失败';
             serverLogStatusSpan.className = 'status-message error';
         }
-<<<<<<< HEAD
-=======
     };
 
     // Modern clipboard API
@@ -199,6 +187,5 @@ async function copyServerLogToClipboard() {
         showError(err, ' (fallback)');
     } finally {
         document.body.removeChild(textArea);
->>>>>>> upstream/main
     }
 }
