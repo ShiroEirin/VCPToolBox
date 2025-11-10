@@ -92,9 +92,16 @@ function formatVcpInfoToText(toolName, status, pluginResult) {
  * @param {string} toolName - 调用的工具名称。
  * @param {string} status - 调用状态 ('success' 或 'error')。
  * @param {any} pluginResult - 插件返回的原始结果。
+ * @param {AbortController} abortController - 可选的中止控制器，用于检查请求是否已被中止。
  * @returns {string} - 格式化后的 VCP 信息文本。
  */
-function streamVcpInfo(responseStream, modelName, toolName, status, pluginResult) {
+function streamVcpInfo(responseStream, modelName, toolName, status, pluginResult, abortController = null) {
+    // 新增：检查中止信号，如果请求已被中止，则跳过写入
+    if (abortController && abortController.signal && abortController.signal.aborted) {
+        // 请求已中止，直接返回空字符串，不执行任何写入操作
+        return '';
+    }
+    
     const formattedText = formatVcpInfoToText(toolName, status, pluginResult);
 
     // If a responseStream is provided and it's writable, send the data as an SSE chunk.

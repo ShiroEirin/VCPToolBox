@@ -558,6 +558,7 @@ class ChatCompletionHandler {
                       ? JSON.stringify(pluginResult, null, 2)
                       : String(pluginResult)
                     : `插件 ${toolCall.name} 执行完毕，但没有返回明确内容。`;
+                // Archery调用的WebSocket通知应该始终发送，不受中止状态影响
                 webSocketServer.broadcast(
                   {
                     type: 'vcp_log',
@@ -585,8 +586,9 @@ class ChatCompletionHandler {
                     pluginManifestForStream.webSocketPush.targetClientType || null,
                   );
                 }
+                // 但HTTP流写入仍需检查流状态和中止状态
                 if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult);
+                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult, abortController);
                 }
               })
               .catch(pluginError => {
@@ -595,6 +597,7 @@ class ChatCompletionHandler {
                   pluginError.message,
                 );
                 const toolResultText = `执行插件 ${toolCall.name} 时发生错误：${pluginError.message || '未知错误'}`;
+                // Archery调用的WebSocket通知应该始终发送
                 webSocketServer.broadcast(
                   {
                     type: 'vcp_log',
@@ -607,8 +610,9 @@ class ChatCompletionHandler {
                   },
                   'VCPLog',
                 );
+                // 但HTTP流写入仍需检查流状态和中止状态
                 if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText);
+                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
                 }
               });
           });
@@ -664,10 +668,11 @@ class ChatCompletionHandler {
                     },
                   },
                   'VCPLog',
+                  abortController,
                 );
 
                 if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', "工具调用验证失败：'tool_password'不正确或缺失。");
+                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', "工具调用验证失败：'tool_password'不正确或缺失。", abortController);
                 }
 
                 return toolResultContentForAI; // Return the error message and skip execution
@@ -724,6 +729,7 @@ class ChatCompletionHandler {
                     },
                   },
                   'VCPLog',
+                  abortController,
                 );
 
                 const pluginManifestForStream = pluginManager.getPlugin(toolCall.name);
@@ -739,13 +745,14 @@ class ChatCompletionHandler {
                   webSocketServer.broadcast(
                     wsPushMessageStream,
                     pluginManifestForStream.webSocketPush.targetClientType || null,
+                    abortController,
                   );
                   if (DEBUG_MODE)
                     console.log(`[VCP Stream Loop] WebSocket push for ${toolCall.name} (success) processed.`);
                 }
 
                 if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult);
+                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult, abortController);
                 }
               } catch (pluginError) {
                 console.error(
@@ -767,9 +774,10 @@ class ChatCompletionHandler {
                     },
                   },
                   'VCPLog',
+                  abortController,
                 );
                 if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText);
+                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
                 }
               }
             } else {
@@ -787,9 +795,10 @@ class ChatCompletionHandler {
                   },
                 },
                 'VCPLog',
+                abortController,
               );
               if (shouldShowVCP && !res.writableEnded) {
-                vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText);
+                vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
               }
             }
             return toolResultContentForAI;
@@ -992,6 +1001,7 @@ class ChatCompletionHandler {
                         ? JSON.stringify(pluginResult, null, 2)
                         : String(pluginResult)
                       : `插件 ${toolCall.name} 执行完毕，但没有返回明确内容。`;
+                  // Archery调用的WebSocket通知应该始终发送，不受中止状态影响
                   webSocketServer.broadcast(
                     {
                       type: 'vcp_log',
@@ -1019,6 +1029,7 @@ class ChatCompletionHandler {
                       pluginManifestNonStream.webSocketPush.targetClientType || null,
                     );
                   }
+                  // VCP信息收集不涉及HTTP流写入，但仍需检查中止状态以避免污染响应
                   if (shouldShowVCP) {
                     const vcpText = vcpInfoHandler.streamVcpInfo(
                       null,
@@ -1026,6 +1037,7 @@ class ChatCompletionHandler {
                       toolCall.name,
                       'success',
                       pluginResult,
+                      abortController,
                     );
                     if (vcpText) conversationHistoryForClient.push(vcpText);
                   }
@@ -1036,6 +1048,7 @@ class ChatCompletionHandler {
                     pluginError.message,
                   );
                   const toolResultText = `执行插件 ${toolCall.name} 时发生错误：${pluginError.message || '未知错误'}`;
+                  // Archery调用的WebSocket通知应该始终发送
                   webSocketServer.broadcast(
                     {
                       type: 'vcp_log',
@@ -1048,6 +1061,7 @@ class ChatCompletionHandler {
                     },
                     'VCPLog',
                   );
+                  // VCP信息收集不涉及HTTP流写入，但仍需检查中止状态
                   if (shouldShowVCP) {
                     const vcpText = vcpInfoHandler.streamVcpInfo(
                       null,
@@ -1055,6 +1069,7 @@ class ChatCompletionHandler {
                       toolCall.name,
                       'error',
                       toolResultText,
+                      abortController,
                     );
                     if (vcpText) conversationHistoryForClient.push(vcpText);
                   }
@@ -1101,6 +1116,7 @@ class ChatCompletionHandler {
                       },
                     },
                     'VCPLog',
+                    abortController,
                   );
 
                   if (shouldShowVCP) {
@@ -1110,6 +1126,7 @@ class ChatCompletionHandler {
                       toolCall.name,
                       'error',
                       "工具调用验证失败：'tool_password'不正确或缺失。",
+                      abortController,
                     );
                     if (vcpText) conversationHistoryForClient.push(vcpText);
                   }
@@ -1168,6 +1185,7 @@ class ChatCompletionHandler {
                       },
                     },
                     'VCPLog',
+                    abortController,
                   );
 
                   const pluginManifestNonStream = pluginManager.getPlugin(toolCall.name);
@@ -1183,6 +1201,7 @@ class ChatCompletionHandler {
                     webSocketServer.broadcast(
                       wsPushMessageNonStream,
                       pluginManifestNonStream.webSocketPush.targetClientType || null,
+                      abortController,
                     );
                     if (DEBUG_MODE)
                       console.log(`[Multi-Tool] WebSocket push for ${toolCall.name} (success) processed.`);
@@ -1195,6 +1214,7 @@ class ChatCompletionHandler {
                       toolCall.name,
                       'success',
                       pluginResult,
+                      abortController,
                     );
                     if (vcpText) conversationHistoryForClient.push(vcpText);
                   }
@@ -1218,6 +1238,7 @@ class ChatCompletionHandler {
                       },
                     },
                     'VCPLog',
+                    abortController,
                   );
                   if (shouldShowVCP) {
                     const vcpText = vcpInfoHandler.streamVcpInfo(
@@ -1226,6 +1247,7 @@ class ChatCompletionHandler {
                       toolCall.name,
                       'error',
                       toolResultText,
+                      abortController,
                     );
                     if (vcpText) conversationHistoryForClient.push(vcpText);
                   }
@@ -1245,6 +1267,7 @@ class ChatCompletionHandler {
                     },
                   },
                   'VCPLog',
+                  abortController,
                 );
                 if (shouldShowVCP) {
                   const vcpText = vcpInfoHandler.streamVcpInfo(
@@ -1253,6 +1276,7 @@ class ChatCompletionHandler {
                     toolCall.name,
                     'error',
                     toolResultText,
+                    abortController,
                   );
                   if (vcpText) conversationHistoryForClient.push(vcpText);
                 }

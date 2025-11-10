@@ -21,7 +21,9 @@ const TIME_EXPRESSIONS = {
             '上周': { type: 'lastWeek' },
             '上个月': { type: 'lastMonth' },
             '本周': { type: 'thisWeek' },
+            '这周': { type: 'thisWeek' },
             '本月': { type: 'thisMonth' },
+            '这个月': { type: 'thisMonth' },
             '月初': { type: 'thisMonthStart' }, // 例如本月初
             '上个月初': { type: 'lastMonthStart' },
             '上个月中': { type: 'lastMonthMid' },

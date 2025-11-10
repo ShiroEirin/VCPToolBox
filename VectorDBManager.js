@@ -926,7 +926,9 @@ async function getEmbeddingsInWorker(chunks, config) {
 
                 if (!response.ok) {
                     const errorBody = await response.text();
-                    throw new Error(`Embedding API error: ${response.status} ${response.statusText} - ${errorBody}`);
+                    const err = new Error(`Embedding API error: ${response.status} ${response.statusText} - ${errorBody}`);
+                    err.status = response.status;
+                    throw err;
                 }
 
                 const data = await response.json();
@@ -939,8 +941,14 @@ async function getEmbeddingsInWorker(chunks, config) {
                 lastError = error;
                 console.error(`[VectorDB][Worker] Batch (start: ${i}) attempt ${attempt} failed:`, error.message);
                 if (attempt < retryAttempts) {
-                    const delay = Math.min(retryBaseDelay * Math.pow(2, attempt - 1), retryMaxDelay);
-                    console.log(`[VectorDB][Worker] Retrying batch in ${delay}ms...`);
+                    let delay;
+                    if (error.status === 429) {
+                        console.log(`[VectorDB][Worker] Received 429 (Too Many Requests). Pausing for 30 seconds before next attempt.`);
+                        delay = 30000; // 30 seconds
+                    } else {
+                        delay = Math.min(retryBaseDelay * Math.pow(2, attempt - 1), retryMaxDelay);
+                        console.log(`[VectorDB][Worker] Retrying batch in ${delay}ms...`);
+                    }
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }

@@ -266,7 +266,15 @@ function initialize(httpServer, config) {
 }
 
 // 广播给所有已连接且认证的客户端，或者根据 clientType 筛选
-function broadcast(data, targetClientType = null) {
+function broadcast(data, targetClientType = null, abortController = null) {
+    // 新增：检查中止信号，如果请求已被中止，则跳过广播
+    if (abortController && abortController.signal && abortController.signal.aborted) {
+        if (serverConfig.debugMode) {
+            writeLog(`[Abort Check] Broadcast skipped due to aborted request.`);
+        }
+        return;
+    }
+    
     if (!wssInstance) return;
     const messageString = JSON.stringify(data);
     
