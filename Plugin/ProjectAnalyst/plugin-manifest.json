@@ -1,0 +1,32 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "ProjectAnalyst",
+  "version": "1.0.0",
+  "displayName": "项目分析器",
+  "description": "分析指定的项目文件夹，生成详细的分析报告，并支持后续查询分析结果。",
+  "author": "Roo",
+  "pluginType": "synchronous",
+  "entryPoint": {
+    "type": "nodejs",
+    "command": "node ProjectAnalyst.js"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 30000
+  },
+  "configSchema": {},
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "AnalyzeProject",
+        "description": "启动对一个本地项目文件夹的异步分析任务。\n参数:\n- directoryPath (字符串, 必需): 需要分析的项目的本地绝对路径。\n调用成功后，会立即返回一个分析ID，后台将开始漫长的分析过程。你可以使用QueryAnalysis命令通过分析ID查询结果。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectAnalyst「末」,\ncommand:「始」AnalyzeProject「末」,\ndirectoryPath:「始」C:\\Users\\YourName\\Documents\\MyProject「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectAnalyst「末」,\ncommand:「始」AnalyzeProject「末」,\ndirectoryPath:「始」H:\\VCP\\VCPToolBox「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "QueryAnalysis",
+        "description": "根据分析ID查询项目分析报告。\n参数:\n- analysisId (字符串, 必需): 通过AnalyzeProject命令获取到的项目分析ID（即分析报告的文件名）。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectAnalyst「末」,\ncommand:「始」QueryAnalysis「末」,\nanalysisId:「始」MyProject-2025-10-05.17.52「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectAnalyst「末」,\ncommand:「始」QueryAnalysis「末」,\nanalysisId:「始」VCPToolBox-2025-11-10.12.55「末」\n<<<[END_TOOL_REQUEST]>>>"
+      }
+    ]
+  }
+}

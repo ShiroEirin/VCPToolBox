@@ -19,7 +19,11 @@ async function getRealAuthCode(debugMode = false) {
 }
 
 // A helper function to handle fetch with retries for specific status codes
-async function fetchWithRetry(url, options, retries = 3, delay = 1000, debugMode = false) {
+async function fetchWithRetry(
+  url,
+  options,
+  { retries = 3, delay = 1000, debugMode = false, onRetry = null } = {},
+) {
   const { default: fetch } = await import('node-fetch');
   for (let i = 0; i < retries; i++) {
     try {
@@ -29,6 +33,9 @@ async function fetchWithRetry(url, options, retries = 3, delay = 1000, debugMode
           console.warn(
             `[Fetch Retry] Received status ${response.status}. Retrying in ${delay}ms... (${i + 1}/${retries})`,
           );
+        }
+        if (onRetry) {
+          await onRetry(i + 1, { status: response.status, message: response.statusText });
         }
         await new Promise(resolve => setTimeout(resolve, delay * (i + 1))); // Increase delay for subsequent retries
         continue; // Try again
@@ -48,6 +55,9 @@ async function fetchWithRetry(url, options, retries = 3, delay = 1000, debugMode
         console.warn(
           `[Fetch Retry] Fetch failed with error: ${error.message}. Retrying in ${delay}ms... (${i + 1}/${retries})`,
         );
+      }
+      if (onRetry) {
+        await onRetry(i + 1, { status: 'NETWORK_ERROR', message: error.message });
       }
       await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
     }
@@ -92,9 +102,10 @@ class ChatCompletionHandler {
       activeRequests.set(id, { req, res, abortController, timestamp: Date.now() });
     }
 
-    try {
-      let originalBody = req.body;
+    let originalBody = req.body;
+    const isOriginalRequestStreaming = originalBody.stream === true;
 
+    try {
       if (originalBody.model) {
         const originalModel = originalBody.model;
         const redirectedModel = modelRedirectHandler.redirectModelForBackend(originalModel);
@@ -220,7 +231,6 @@ class ChatCompletionHandler {
       originalBody.messages = processedMessages;
       await writeDebugLog('LogOutputAfterProcessing', originalBody);
 
-      const isOriginalRequestStreaming = originalBody.stream === true;
       const willStreamResponse = isOriginalRequestStreaming;
 
       let firstAiAPIResponse = await fetchWithRetry(
@@ -236,16 +246,73 @@ class ChatCompletionHandler {
           body: JSON.stringify({ ...originalBody, stream: willStreamResponse }),
           signal: abortController.signal,
         },
-        apiRetries,
-        apiRetryDelay,
-        DEBUG_MODE,
+        {
+          retries: apiRetries,
+          delay: apiRetryDelay,
+          debugMode: DEBUG_MODE,
+          onRetry: async (attempt, errorInfo) => {
+            if (!res.headersSent && isOriginalRequestStreaming) {
+              if (DEBUG_MODE)
+                console.log(`[VCP Retry] First retry attempt (#${attempt}). Sending 200 OK to client to establish stream.`);
+              res.status(200);
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+            }
+          },
+        },
       );
 
       const isUpstreamStreaming =
         willStreamResponse && firstAiAPIResponse.headers.get('content-type')?.includes('text/event-stream');
 
       if (!res.headersSent) {
-        res.status(firstAiAPIResponse.status);
+        const upstreamStatus = firstAiAPIResponse.status;
+
+        if (isOriginalRequestStreaming && upstreamStatus !== 200) {
+          // If streaming was requested, but upstream returned a non-200 status (e.g., 400, 401, 502, 504),
+          // we must return 200 OK and stream the error as an SSE chunk to prevent client listener termination.
+          res.status(200);
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+
+          // Read the error body from the upstream response
+          const errorBodyText = await firstAiAPIResponse.text();
+
+          // Log the error
+          console.error(`[Upstream Error Stream Proxy] Upstream API returned status ${upstreamStatus}. Streaming error to client: ${errorBodyText}`);
+
+          // Construct the error message for the client
+          const errorContent = `[UPSTREAM_ERROR] 上游API返回状态码 ${upstreamStatus}，错误信息: ${errorBodyText}`;
+
+          // Send an error chunk
+          const errorPayload = {
+            id: `chatcmpl-VCP-upstream-error-${Date.now()}`,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: originalBody.model || 'unknown',
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  content: errorContent,
+                },
+                finish_reason: 'stop',
+              },
+            ],
+          };
+          res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+          res.write('data: [DONE]\n\n', () => {
+            res.end();
+          });
+
+          // We are done with this request. Return early.
+          return;
+        }
+
+        // Normal header setting for non-streaming or successful streaming responses
+        res.status(upstreamStatus);
         firstAiAPIResponse.headers.forEach((value, name) => {
           if (
             !['content-encoding', 'transfer-encoding', 'connection', 'content-length', 'keep-alive'].includes(
@@ -1413,12 +1480,49 @@ class ChatCompletionHandler {
       console.error('处理请求或转发时出错:', error.message, error.stack);
 
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Internal Server Error', details: error.message });
+        if (isOriginalRequestStreaming) {
+          // If streaming was requested but failed before headers were sent (e.g., fetchWithRetry failed),
+          // send a 200 status and communicate the error via SSE chunks to prevent the client from stopping listening.
+          res.status(200);
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+
+          const errorContent = `[ERROR] 代理服务器在连接上游API时失败，可能已达到重试上限或网络错误: ${error.message}`;
+          
+          // Send an error chunk
+          const errorPayload = {
+            id: `chatcmpl-VCP-error-${Date.now()}`,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: originalBody.model || 'unknown',
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  content: errorContent,
+                },
+                finish_reason: 'stop',
+              },
+            ],
+          };
+          res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+          res.write('data: [DONE]\n\n', () => {
+            res.end();
+          });
+        } else {
+          // Non-streaming failure
+          res.status(500).json({ error: 'Internal Server Error', details: error.message });
+        }
       } else if (!res.writableEnded) {
+        // Headers already sent (error during streaming loop)
         console.error(
           '[STREAM ERROR] Headers already sent. Cannot send JSON error. Ending stream if not already ended.',
         );
-        res.end();
+        // Send [DONE] marker before ending the stream for graceful termination
+        res.write('data: [DONE]\n\n', () => {
+          res.end();
+        });
       }
     } finally {
       if (id) {

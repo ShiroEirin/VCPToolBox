@@ -635,17 +635,28 @@ class RAGDiaryPlugin {
     async processMessages(messages, pluginConfig) {
         try {
             // V3.0: 支持多system消息处理
-            // 1. 识别所有需要处理的 system 消息（包括日记本和元思考）
+            // 1. 识别所有需要处理的 system 消息（包括日记本、元思考和全局AIMemo开关）
+            let isAIMemoLicensed = false; // <--- AIMemo许可证 [[AIMemo=True]] 检测标志
             const targetSystemMessageIndices = messages.reduce((acc, m, index) => {
-                if (m.role === 'system' &&
-                    typeof m.content === 'string' &&
-                    /\[\[.*日记本.*\]\]|<<.*日记本.*>>|《《.*日记本.*》》|\[\[VCP元思考.*\]\]/.test(m.content)) {
-                    acc.push(index);
+                if (m.role === 'system' && typeof m.content === 'string') {
+                    // 检查全局 AIMemo 开关
+                    if (m.content.includes('[[AIMemo=True]]')) {
+                        isAIMemoLicensed = true;
+                        console.log('[RAGDiaryPlugin] AIMemo license [[AIMemo=True]] detected. ::AIMemo modifier is now active.');
+                    }
+
+                    // 检查 RAG/Meta/AIMemo 占位符
+                    if (/\[\[.*日记本.*\]\]|<<.*日记本.*>>|《《.*日记本.*》》|\[\[VCP元思考.*\]\]|\[\[AIMemo=True\]\]/.test(m.content)) {
+                        // 确保每个包含占位符的 system 消息都被处理
+                        if (!acc.includes(index)) {
+                           acc.push(index);
+                        }
+                    }
                 }
                 return acc;
             }, []);
 
-            // 如果没有找到任何包含RAG占位符的system消息，则直接返回
+            // 如果没有找到任何需要处理的 system 消息，则直接返回
             if (targetSystemMessageIndices.length === 0) {
                 return messages;
             }
@@ -750,7 +761,8 @@ class RAGDiaryPlugin {
                     combinedQueryForDisplay, // V3.5: 传递组合后的查询字符串用于广播
                     dynamicK,
                     timeRanges,
-                    globalProcessedDiaries // 传递全局 Set
+                    globalProcessedDiaries, // 传递全局 Set
+                    isAIMemoLicensed // 新增：AIMemo许可证
                 );
                 
                 newMessages[index].content = processedContent;
@@ -777,11 +789,14 @@ class RAGDiaryPlugin {
     }
 
     // V3.0 新增: 处理单条 system 消息内容的辅助函数
-    async _processSingleSystemMessage(content, queryVector, userContent, aiContent, combinedQueryForDisplay, dynamicK, timeRanges, processedDiaries) {
+    async _processSingleSystemMessage(content, queryVector, userContent, aiContent, combinedQueryForDisplay, dynamicK, timeRanges, processedDiaries, isAIMemoLicensed) {
         if (!this.pushVcpInfo) {
             console.warn('[RAGDiaryPlugin] _processSingleSystemMessage: pushVcpInfo is null. Cannot broadcast RAG details.');
         }
         let processedContent = content;
+
+        // 移除全局 AIMemo 开关占位符，因为它只作为许可证，不应出现在最终输出中
+        processedContent = processedContent.replace(/\[\[AIMemo=True\]\]/g, '');
 
         const ragDeclarations = [...processedContent.matchAll(/\[\[(.*?)日记本(.*?)\]\]/g)];
         const fullTextDeclarations = [...processedContent.matchAll(/<<(.*?)日记本>>/g)];
@@ -888,7 +903,11 @@ class RAGDiaryPlugin {
             }
             processedDiaries.add(dbName);
 
-            if (modifiers.includes('::AIMemo')) {
+            // 核心逻辑：只有在许可证存在的情况下，::AIMemo才生效
+            const shouldUseAIMemo = isAIMemoLicensed && modifiers.includes('::AIMemo');
+
+            if (shouldUseAIMemo) {
+                console.log(`[RAGDiaryPlugin] AIMemo licensed and activated for "${dbName}". Overriding other RAG modes.`);
                 aiMemoRequests.push({ placeholder, dbName });
             } else {
                 // 标准 RAG 立即处理
@@ -973,7 +992,11 @@ class RAGDiaryPlugin {
                     const finalSimilarity = Math.max(baseSimilarity, enhancedSimilarity);
 
                     if (finalSimilarity >= localThreshold) {
-                        if (modifiers.includes('::AIMemo')) {
+                        // 核心逻辑：只有在许可证存在的情况下，::AIMemo才生效
+                        const shouldUseAIMemo = isAIMemoLicensed && modifiers.includes('::AIMemo');
+
+                        if (shouldUseAIMemo) {
+                            console.log(`[RAGDiaryPlugin] AIMemo licensed and activated for "${dbName}" in hybrid mode. Overriding other RAG modes.`);
                             // 收集到 AIMemo 请求列表
                             aiMemoRequests.push({ placeholder, dbName });
                             return { placeholder, content: '' }; // 暂时返回空，稍后统一处理
