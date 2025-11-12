@@ -2,8 +2,9 @@
 const fs = require('fs').promises;
 const path = require('path');
 const dotenv = require('dotenv');
+const crypto = require('crypto');
 
-// 加载配置 
+// 加载配置
 const configPath = path.join(__dirname, 'config.env');
 let config = {};
 try {
@@ -20,8 +21,9 @@ try {
 }
 
 // 从命令行参数获取路径和ID
-const [,, directoryPath, analysisId] = process.argv;
+const [,, directoryPath, analysisId, analysisMode = 'quick'] = process.argv; // 'quick' or 'full'
 const DB_DIR = path.join(__dirname, 'database');
+const FILE_CACHE_DIR = path.join(__dirname, 'file_cache');
 const REPORT_FILE = path.join(DB_DIR, `${analysisId}.md`);
 
 // 需要跳过的目录
@@ -183,19 +185,33 @@ async function callAI(systemPrompt, userPrompt, retries = 3) {
 
 // --- 获取项目总结 ---
 async function getProjectSummary(fileTree, readmeContent) {
-    const systemPrompt = `你是一个专业的项目分析助手。你的任务是根据项目的文件结构树和README文件，快速总结这个项目的主要功能和技术栈。`;
+    const systemPrompt = `你是一位高级软件架构师。你的任务是深入分析项目结构和文档，精准地识别出项目的核心功能和关键实现。你的回答应该简洁、专业，并直指要点。`;
     
-    const userPrompt = `请分析以下项目信息，用2-3句话简洁地总结这个项目是做什么的：
+    const userPrompt = `请根据以下提供的项目文件结构树和README内容，完成以下任务：
 
-文件结构树：
+1.  **核心功能总结**: 用一句话总结该项目的主要目标或核心功能。
+2.  **关键实现定位**: 识别并列出 2-3 个实现上述核心功能的最关键的文件或类。
+3.  **简要原因**: 对每个列出的文件/类，用一句话解释它为什么是核心。
+
+**项目文件结构树:**
 \`\`\`
 ${fileTree}
 \`\`\`
 
-README内容：
+**README内容:**
+\`\`\`
 ${readmeContent}
+\`\`\`
 
-请直接给出总结，不要有多余的格式。`;
+请按照以下格式输出，不要添加任何额外的解释或客套话：
+
+**核心功能:** [此处填写项目核心功能总结]
+
+**关键实现:**
+*   \`[文件/类名1]\`: [选择该文件/类的原因]
+*   \`[文件/类名2]\`: [选择该文件/类的原因]
+*   \`[文件/类名3]\`: [选择该文件/类的原因]
+`;
     
     try {
         return await callAI(systemPrompt, userPrompt);
@@ -222,19 +238,84 @@ async function findReadmeFile(dir) {
     }
 }
 
+// --- 缓存管理 ---
+function getFileHash(filePath) {
+    return crypto.createHash('md5').update(filePath).digest('hex');
+}
+
+async function getFileMetadata(filePath) {
+    try {
+        const stats = await fs.stat(filePath);
+        return { size: stats.size, mtime: stats.mtimeMs };
+    } catch (error) {
+        return null;
+    }
+}
+
+async function checkFileCache(filePath) {
+    const fileHash = getFileHash(filePath);
+    const cachePath = path.join(FILE_CACHE_DIR, `${fileHash}.json`);
+    
+    try {
+        const cacheData = JSON.parse(await fs.readFile(cachePath, 'utf-8'));
+        const currentMeta = await getFileMetadata(filePath);
+        
+        if (!currentMeta) return null;
+        
+        if (cacheData.metadata.size === currentMeta.size && cacheData.metadata.mtime === currentMeta.mtime) {
+            log(`缓存命中: ${filePath}`);
+            return cacheData.analysis;
+        }
+        
+        return null;
+    } catch (error) {
+        return null; // 缓存不存在或读取失败
+    }
+}
+
+async function saveFileCache(filePath, analysis) {
+    const fileHash = getFileHash(filePath);
+    const cachePath = path.join(FILE_CACHE_DIR, `${fileHash}.json`);
+    const metadata = await getFileMetadata(filePath);
+    
+    if (!metadata) return;
+    
+    const cacheData = {
+        filePath,
+        metadata,
+        analysis,
+        cachedAt: new Date().toISOString()
+    };
+    
+    try {
+        await fs.writeFile(cachePath, JSON.stringify(cacheData, null, 2));
+    } catch (error) {
+        log(`保存缓存失败 ${filePath}: ${error.message}`);
+    }
+}
+
+
 // --- 分析单个文件 ---
 async function analyzeFile(fileInfo, fullTree) {
     const { path: filePath, type } = fileInfo;
+
+    // 1. 检查缓存
+    const cachedAnalysis = await checkFileCache(filePath);
+    if (cachedAnalysis) {
+        return `**[来自缓存]**\n\n${cachedAnalysis}`;
+    }
     
     try {
         const content = await fs.readFile(filePath, 'utf-8');
         
-        // 特殊依赖文件直接返回内容
+        // 2. 处理特殊文件
         if (type === 'special') {
-            return `**依赖配置文件内容：**\n\`\`\`\n${content}\n\`\`\``;
+            const analysis = `**依赖配置文件内容：**\n\`\`\`\n${content}\n\`\`\``;
+            await saveFileCache(filePath, analysis);
+            return analysis;
         }
         
-        // 读取分析提示词
+        // 3. 调用 AI 分析
         const promptPath = path.join(__dirname, config.ProjectAnalystModelPrompt || 'ProjectAnalystModelPrompt.txt');
         let systemPrompt;
         try {
@@ -258,6 +339,10 @@ ${content}
 请分析这个文件的功能和作用。`;
         
         const analysis = await callAI(systemPrompt, userPrompt);
+        
+        // 4. 保存到缓存
+        await saveFileCache(filePath, analysis);
+        
         return analysis;
         
     } catch (error) {
@@ -280,10 +365,13 @@ async function analyzeProject() {
     }, 5400 * 1000); // 90分钟 = 5400秒
 
     try {
-        log(`开始分析项目: ${directoryPath}`);
+        log(`开始分析项目: ${directoryPath} (模式: ${analysisMode})`);
         log(`分析ID: ${analysisId}`);
         
-        // 2. 获取文件树
+        // 2. 确保缓存目录存在
+        await fs.mkdir(FILE_CACHE_DIR, { recursive: true });
+
+        // 3. 获取文件树
         log('正在构建文件树...');
         const { tree: fileTree, files: filesToAnalyze } = await getFileTree(directoryPath);
         log(`文件树构建完成，发现 ${filesToAnalyze.length} 个需要分析的文件`);
@@ -338,9 +426,17 @@ ${fileTree}
         await fs.writeFile(REPORT_FILE, header);
         log('报告抬头已写入');
 
-        // 6. 批量处理文件分析
+        // 6. 如果是快速分析，到此为止
+        if (analysisMode === 'quick') {
+            const quickFooter = `\n\n---\n\n## ✅ 快速分析完成\n\n快速分析仅提供项目简介和文件结构。如需逐文件深入分析，请使用 \`fullAnalyze\` 参数。`;
+            await fs.appendFile(REPORT_FILE, quickFooter);
+            log('快速分析完成，即将退出。');
+            return; // 提前退出
+        }
+
+        // 7. 批量处理文件分析 (仅在 full 模式下)
         const batchSize = parseInt(config.ProjectAnalystBatch || '5');
-        log(`开始分析文件，批次大小: ${batchSize}`);
+        log(`开始完整文件分析，批次大小: ${batchSize}`);
         
         for (let i = 0; i < filesToAnalyze.length; i += batchSize) {
             const batch = filesToAnalyze.slice(i, i + batchSize);
@@ -376,13 +472,13 @@ ${fileAnalysis}
             log(`批次 ${Math.floor(i / batchSize) + 1} 完成`);
         }
 
-        // 7. 写入完成标记
+        // 8. 写入完成标记
         const footer = `
 ---
 
 ## ✅ 分析完成
 
-**总计分析文件数:** ${filesToAnalyze.length}  
+**总计分析文件数:** ${filesToAnalyze.length}
 **完成时间:** ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
 
 ---

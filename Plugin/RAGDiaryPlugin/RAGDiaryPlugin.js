@@ -996,8 +996,8 @@ class RAGDiaryPlugin {
                         const shouldUseAIMemo = isAIMemoLicensed && modifiers.includes('::AIMemo');
 
                         if (shouldUseAIMemo) {
-                            console.log(`[RAGDiaryPlugin] AIMemo licensed and activated for "${dbName}" in hybrid mode. Overriding other RAG modes.`);
-                            // 收集到 AIMemo 请求列表
+                            console.log(`[RAGDiaryPlugin] AIMemo licensed and activated for "${dbName}" in hybrid mode. Similarity: ${finalSimilarity.toFixed(4)} >= ${localThreshold}`);
+                            // ✅ 修复：只有在阈值匹配时才收集 AIMemo 请求
                             aiMemoRequests.push({ placeholder, dbName });
                             return { placeholder, content: '' }; // 暂时返回空，稍后统一处理
                         } else {
@@ -1007,6 +1007,9 @@ class RAGDiaryPlugin {
                             });
                             return { placeholder, content: retrievedContent };
                         }
+                    } else {
+                        // ✅ 修复：阈值不匹配时，即使有 ::AIMemo 修饰符也不处理
+                        console.log(`[RAGDiaryPlugin] "${dbName}" similarity (${finalSimilarity.toFixed(4)}) below threshold (${localThreshold}). Skipping ${modifiers.includes('::AIMemo') ? 'AIMemo' : 'RAG'}.`);
                     }
                     return { placeholder, content: '' };
                 } catch (error) {
