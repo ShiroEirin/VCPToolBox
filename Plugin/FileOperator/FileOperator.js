@@ -7,6 +7,7 @@ const pdf = require('pdf-parse');
 const mammoth = require('mammoth');
 const ExcelJS = require('exceljs');
 const axios = require('axios');
+const { validateCode } = require('./CodeValidator.js');
 
 // Load environment variables
 require('dotenv').config({ path: path.join(__dirname, 'config.env') });
@@ -160,6 +161,24 @@ function resolveAndNormalizePath(inputPath) {
   } else {
     // Path is like './foo' or '../foo', so it's explicitly relative to this script's directory.
     return path.resolve(__dirname, normalized);
+  }
+}
+
+async function runValidationAndFormat(filePath, content) {
+  try {
+    const validationResults = await validateCode(filePath, content);
+    if (validationResults.length > 0) {
+      let message = '\n\n代码检查发现以下问题:\n';
+      validationResults.forEach(res => {
+        message += `- [${res.severity}] Line ${res.line}, Col ${res.column}: ${res.message} (${res.ruleId || 'general'})\n`;
+      });
+      return message;
+    } else {
+      return '\n代码检查通过, 未发现明显问题。';
+    }
+  } catch (error) {
+    debugLog('Code validation failed', { filePath, error: error.message });
+    return `\n代码检查器运行时发生错误: ${error.message}`;
   }
 }
  
@@ -341,9 +360,12 @@ async function writeFile(filePath, content, encoding = 'utf8') {
     await fs.writeFile(newPath, content, encoding);
     const stats = await fs.stat(newPath);
 
-    const message = renamed
+    let message = renamed
       ? `已存在同名文件 "${path.basename(filePath)}"，已为您创建为 "${path.basename(newPath)}"`
       : '文件写入成功';
+    
+    const validationMessage = await runValidationAndFormat(newPath, content);
+    message += validationMessage;
 
     return {
       success: true,
@@ -462,10 +484,14 @@ async function editFile(filePath, content, encoding = 'utf8') {
     await fs.writeFile(filePath, content, encoding);
     const stats = await fs.stat(filePath);
 
+    let message = '文件编辑成功';
+    const validationMessage = await runValidationAndFormat(filePath, content);
+    message += validationMessage;
+
     return {
       success: true,
       data: {
-        message: 'File edited successfully',
+        message: message,
         path: filePath,
         size: stats.size,
         sizeFormatted: formatFileSize(stats.size),

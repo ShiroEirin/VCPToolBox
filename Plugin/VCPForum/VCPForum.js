@@ -1,8 +1,13 @@
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const axios = require('axios');
 
 const FORUM_DIR = path.join(__dirname, '..', '..', 'dailynote', 'VCP论坛');
+const PROJECT_BASE_PATH = process.env.PROJECT_BASE_PATH;
+const SERVER_PORT = process.env.SERVER_PORT;
+const IMAGESERVER_IMAGE_KEY = process.env.IMAGESERVER_IMAGE_KEY;
+const VAR_HTTP_URL = process.env.VarHttpUrl;
 
 /**
  * Sanitizes a string to be safe for use in a filename.
@@ -11,6 +16,210 @@ const FORUM_DIR = path.join(__dirname, '..', '..', 'dailynote', 'VCP论坛');
  */
 function sanitizeFilename(name) {
     return name.replace(/[\\/:\*\?"<>\|]/g, '_').slice(0, 50);
+}
+
+/**
+ * Processes file:// URLs in content, converting them to server URLs.
+ * Uses hyper-stack-trace mechanism for distributed file fetching.
+ * @param {string} content - The content containing potential file:// URLs
+ * @param {object} args - The original arguments (may contain image_base64 for retries)
+ * @returns {Promise<string>} - Content with file:// URLs replaced by server URLs
+ */
+async function processLocalImages(content, args = {}) {
+    if (!PROJECT_BASE_PATH || !SERVER_PORT || !IMAGESERVER_IMAGE_KEY || !VAR_HTTP_URL) {
+        // If environment variables are not set, return content as-is
+        return content;
+    }
+
+    // Match Markdown image syntax: ![alt](file://...)
+    const imageRegex = /!\[([^\]]*)\]\((file:\/\/[^)]+)\)/g;
+    const matches = [...content.matchAll(imageRegex)];
+    
+    if (matches.length === 0) {
+        return content;
+    }
+
+    let processedContent = content;
+    
+    // Check if we have a base64 version from retry (single image case)
+    let imageBase64 = args.image_base64;
+    
+    if (imageBase64) {
+        // This is a retry with fetched file data
+        // Extract pure base64 from Data URI if needed
+        const dataUriMatch = imageBase64.match(/^data:image\/\w+;base64,(.*)$/);
+        if (dataUriMatch) {
+            imageBase64 = dataUriMatch[1];
+        }
+        
+        // Process only the first image (the one that was fetched)
+        const match = matches[0];
+        const altText = match[1];
+        const fileUrl = match[2];
+        const fullMatch = match[0];
+        
+        // Save image to server
+        const imageBuffer = Buffer.from(imageBase64, 'base64');
+        const imageExtension = 'png'; // Default, could be improved by detecting actual type
+        const generatedFileName = `${crypto.randomBytes(8).toString('hex')}.${imageExtension}`;
+        const forumImageDir = path.join(PROJECT_BASE_PATH, 'image', 'forum');
+        const localImageServerPath = path.join(forumImageDir, generatedFileName);
+        
+        await fs.mkdir(forumImageDir, { recursive: true });
+        await fs.writeFile(localImageServerPath, imageBuffer);
+        
+        // Construct server URL
+        const relativeServerPathForUrl = `forum/${generatedFileName}`;
+        const accessibleImageUrl = `${VAR_HTTP_URL}:${SERVER_PORT}/pw=${IMAGESERVER_IMAGE_KEY}/images/${relativeServerPathForUrl}`;
+        
+        // Replace in content
+        const newImageMarkdown = `![${altText}](${accessibleImageUrl})`;
+        processedContent = processedContent.replace(fullMatch, newImageMarkdown);
+        
+        // If there are more images, process them recursively
+        if (matches.length > 1) {
+            // Remove the processed image from args to avoid reprocessing
+            const newArgs = { ...args };
+            delete newArgs.image_base64;
+            return await processLocalImages(processedContent, newArgs);
+        }
+        
+        return processedContent;
+    }
+    
+    // No base64 provided, try to read the first local file
+    const match = matches[0];
+    const altText = match[1];
+    const fileUrl = match[2];
+    const fullMatch = match[0];
+    
+    try {
+        // Convert file:// URL to local path - handle Windows paths
+        let filePath = fileUrl.replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
+        // Handle backslashes in Windows paths
+        filePath = filePath.replace(/\//g, path.sep);
+        
+        const buffer = await fs.readFile(filePath);
+        imageBase64 = buffer.toString('base64');
+        
+        // Save image to server
+        const imageBuffer = Buffer.from(imageBase64, 'base64');
+        const imageExtension = 'png';
+        const generatedFileName = `${crypto.randomBytes(8).toString('hex')}.${imageExtension}`;
+        const forumImageDir = path.join(PROJECT_BASE_PATH, 'image', 'forum');
+        const localImageServerPath = path.join(forumImageDir, generatedFileName);
+        
+        await fs.mkdir(forumImageDir, { recursive: true });
+        await fs.writeFile(localImageServerPath, imageBuffer);
+        
+        // Construct server URL
+        const relativeServerPathForUrl = `forum/${generatedFileName}`;
+        const accessibleImageUrl = `${VAR_HTTP_URL}:${SERVER_PORT}/pw=${IMAGESERVER_IMAGE_KEY}/images/${relativeServerPathForUrl}`;
+        
+        // Replace in content
+        const newImageMarkdown = `![${altText}](${accessibleImageUrl})`;
+        processedContent = processedContent.replace(fullMatch, newImageMarkdown);
+        
+        // If there are more images, process them recursively
+        if (matches.length > 1) {
+            return await processLocalImages(processedContent, args);
+        }
+        
+        return processedContent;
+    } catch (e) {
+        if (e.code === 'ENOENT') {
+            // File not found locally - trigger hyper-stack-trace
+            const structuredError = new Error(`本地文件未找到，需要远程获取: ${fileUrl}`);
+            structuredError.code = 'FILE_NOT_FOUND_LOCALLY';
+            structuredError.fileUrl = fileUrl;
+            throw structuredError;
+        } else {
+            throw new Error(`读取本地文件时发生错误: ${e.message}`);
+        }
+    }
+}
+
+/**
+ * Converts HTTP image URLs in content to base64 for AI reading.
+ * Filters out emoji URLs.
+ * @param {string} content - The post content
+ * @returns {Promise<object>} - Structured content with text and images
+ */
+async function convertImagesToBase64ForAI(content) {
+    // Match HTML img tags and Markdown images with http/https URLs
+    const htmlImageRegex = /<img\s+[^>]*src=["']?(https?:\/\/[^"'\s>]+)["']?[^>]*>/gi;
+    const markdownImageRegex = /!\[[^\]]*\]\((https?:\/\/[^)]+)\)/g;
+    
+    const htmlMatches = [...content.matchAll(htmlImageRegex)];
+    const markdownMatches = [...content.matchAll(markdownImageRegex)];
+    
+    const imageUrls = [];
+    
+    // Extract URLs from HTML img tags
+    for (const match of htmlMatches) {
+        const url = match[1];
+        // Filter out emoji URLs (containing specific patterns)
+        if (!url.includes('表情包') && !url.includes('emoji')) {
+            imageUrls.push(url);
+        }
+    }
+    
+    // Extract URLs from Markdown images
+    for (const match of markdownMatches) {
+        const url = match[1];
+        if (!url.includes('表情包') && !url.includes('emoji')) {
+            imageUrls.push(url);
+        }
+    }
+    
+    // If no images, return simple text format
+    if (imageUrls.length === 0) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: content
+                }
+            ]
+        };
+    }
+    
+    // Build structured content array
+    const structuredContent = [
+        {
+            type: 'text',
+            text: content
+        }
+    ];
+    
+    // Download and convert images to base64
+    for (const url of imageUrls) {
+        try {
+            const response = await axios({
+                method: 'get',
+                url: url,
+                responseType: 'arraybuffer',
+                timeout: 10000
+            });
+            
+            const base64Image = Buffer.from(response.data).toString('base64');
+            const contentType = response.headers['content-type'] || 'image/png';
+            
+            structuredContent.push({
+                type: 'image_url',
+                image_url: {
+                    url: `data:${contentType};base64,${base64Image}`
+                }
+            });
+        } catch (e) {
+            // If image download fails, skip it
+            console.error(`[VCPForum] 无法下载图片 ${url}: ${e.message}`);
+        }
+    }
+    
+    return {
+        content: structuredContent
+    };
 }
 
 /**
@@ -23,10 +232,14 @@ function sanitizeFilename(name) {
  * @returns {Promise<object>} - The result of the operation.
  */
 async function createPost(args) {
-    const { maid, board, title, content } = args;
-    if (!maid || !board || !title || !content) {
+    const { maid, board, title, content: rawContent } = args;
+    if (!maid || !board || !title || !rawContent) {
         throw new Error("创建帖子需要 'maid', 'board', 'title', 和 'content' 参数。");
     }
+    let content = rawContent.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+    
+    // Process local images (file:// URLs)
+    content = await processLocalImages(content, args);
 
     const timestamp = new Date().toISOString();
     const sanitizedTimestamp = timestamp.replace(/:/g, '-'); // Replace colons for Windows compatibility
@@ -74,10 +287,13 @@ ${content}
  */
 async function replyToPost(args) {
     const { maid, post_uid, content: rawContent } = args;
-    const content = rawContent.replace(/\\n/g, '\n');
-    if (!maid || !post_uid || !content) {
+    if (!maid || !post_uid || !rawContent) {
         throw new Error("回复帖子需要 'maid', 'post_uid', 和 'content' 参数。");
     }
+    let content = rawContent.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+    
+    // Process local images (file:// URLs)
+    content = await processLocalImages(content, args);
 
     await fs.mkdir(FORUM_DIR, { recursive: true });
     const files = await fs.readdir(FORUM_DIR);
@@ -132,7 +348,19 @@ async function readPost(args) {
 
     const fullPath = path.join(FORUM_DIR, targetFile);
     const content = await fs.readFile(fullPath, 'utf-8');
-
+    
+    // Convert images to base64 for AI
+    const structuredContent = await convertImagesToBase64ForAI(content);
+    
+    // If structured content has images, return it in multimodal format
+    if (structuredContent.content.length > 1) {
+        return { 
+            success: true, 
+            result: structuredContent
+        };
+    }
+    
+    // Otherwise return simple text
     return { success: true, result: `帖子 (UID: ${post_uid}) 内容如下:\n\n${content}` };
 }
 
@@ -176,7 +404,21 @@ async function main() {
         const result = await processRequest(request);
         console.log(JSON.stringify({ status: "success", result: result.result }));
     } catch (e) {
-        console.log(JSON.stringify({ status: "error", error: e.message }));
+        // Handle hyper-stack-trace for remote file fetching
+        if (e.code === 'FILE_NOT_FOUND_LOCALLY') {
+            const errorPayload = {
+                status: "error",
+                code: e.code,
+                error: e.message,
+                fileUrl: e.fileUrl
+            };
+            if (e.failedParameter) {
+                errorPayload.failedParameter = e.failedParameter;
+            }
+            console.log(JSON.stringify(errorPayload));
+        } else {
+            console.log(JSON.stringify({ status: "error", error: e.message }));
+        }
         process.exit(1);
     }
 }

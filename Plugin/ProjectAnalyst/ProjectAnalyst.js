@@ -489,6 +489,44 @@ async function handleQueryAnalysis(args) {
 }
 
 
+// 处理 "QueryProgress" 命令
+async function handleQueryProgress(args) {
+    const analysisId = args.analysisId || args.analysisID || args.analysis_id;
+    if (!analysisId || typeof analysisId !== 'string') {
+        return { status: 'error', error: 'Missing or invalid "analysisId" parameter.' };
+    }
+
+    if (analysisId.includes('..') || analysisId.includes('/') || analysisId.includes('\\')) {
+        return { status: 'error', error: 'Invalid characters in analysisId.' };
+    }
+
+    const logPath = path.join(DB_DIR, `${analysisId}.log`);
+
+    try {
+        const logContent = await fs.readFile(logPath, 'utf-8');
+        const logLines = logContent.trim().split('\n');
+        
+        // 检查分析是否完成
+        const isComplete = logLines.some(line => line.includes('所有文件分析完成！') || line.includes('快速分析完成') || line.includes('致命错误'));
+        
+        // 提取最后 15 行日志作为当前状态
+        const recentLogs = logLines.slice(-15).join('\n');
+        
+        const status = isComplete ? '已完成' : '进行中';
+        
+        return {
+            status: 'success',
+            result: `# 分析任务进度\n\n**分析ID:** ${analysisId}\n**状态:** ${status}\n\n---\n\n**最近日志:**\n\`\`\`\n${recentLogs}\n\`\`\``
+        };
+        
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            return { status: 'error', error: `Analysis with ID "${analysisId}" not found. The task may not have started yet.` };
+        }
+        return { status: 'error', error: `Error reading progress log: ${error.message}` };
+    }
+}
+
 // 主函数
 async function main() {
     try {
@@ -515,6 +553,9 @@ async function main() {
                 break;
             case 'QueryAnalysis':
                 response = await handleQueryAnalysis(args);
+                break;
+            case 'QueryProgress':
+                response = await handleQueryProgress(args);
                 break;
             default:
                 response = { status: 'error', error: `Unknown command: ${command}` };
