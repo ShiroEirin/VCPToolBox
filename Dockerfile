@@ -44,6 +44,8 @@ RUN npm cache clean --force && npm install --registry=https://registry.npmmirror
 
 # 复制 Python 依赖定义文件并安装
 COPY requirements.txt ./
+# 在 Linux 环境下构建时，注释掉仅适用于 Windows 的 win10toast 包
+RUN sed -i '/^win10toast/s/^/#/' requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages --target=/usr/src/app/pydeps -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
 # 复制所有源代码

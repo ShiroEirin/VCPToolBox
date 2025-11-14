@@ -31,7 +31,7 @@ function initialize(config, dependencies) {
     VCP_SERVER_ACCESS_KEY = config.Key;
     MAX_HISTORY_ROUNDS = parseInt(config.AGENT_ASSISTANT_MAX_HISTORY_ROUNDS || '7', 10);
     CONTEXT_TTL_HOURS = parseInt(config.AGENT_ASSISTANT_CONTEXT_TTL_HOURS || '24', 10);
-    DEBUG_MODE = (config.DebugMode || "False").toLowerCase() === "true";
+    DEBUG_MODE = String(config.DebugMode || 'false').toLowerCase() === 'true';
     VCP_API_TARGET_URL = `http://localhost:${VCP_SERVER_PORT}/v1`;
 
     if (DEBUG_MODE) {
