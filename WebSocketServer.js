@@ -17,6 +17,7 @@ const chromeObserverClients = new Map(); // 新增：ChromeObserver 客户端
 const adminPanelClients = new Map(); // 新增：管理面板客户端
 const pendingToolRequests = new Map(); // 跨服务器工具调用的待处理请求
 const distributedServerIPs = new Map(); // 新增：存储分布式服务器的IP信息
+const waitingControlClients = new Map(); // 新增：存储等待页面更新的ChromeControl客户端 (clientId -> requestId)
 
 function generateClientId() {
     // 用于生成客户端ID和请求ID
@@ -117,15 +118,22 @@ function initialize(httpServer, config) {
                     writeLog(`Distributed Server ${serverId} authenticated and connected.`);
                 } else if (clientType === 'ChromeObserver') {
                     console.log(`[WebSocketServer FORCE LOG] A client with type 'ChromeObserver' (ID: ${clientId}) has connected.`); // 强制日志
-                   const chromeObserverModule = pluginManager.getServiceModule('ChromeObserver');
-                   chromeObserverClients.set(clientId, ws); // 新增：将客户端存入Map
+                   chromeObserverClients.set(clientId, ws); // 将客户端存入Map
                    writeLog(`ChromeObserver client ${clientId} connected and stored.`);
-                   if (chromeObserverModule && typeof chromeObserverModule.handleNewClient === 'function') {
-                       console.log(`[WebSocketServer FORCE LOG] Found ChromeObserver module. Calling handleNewClient...`); // 强制日志
+                   
+                   // 优先尝试 ChromeBridge，回退到 ChromeObserver
+                   const chromeBridgeModule = pluginManager.getServiceModule('ChromeBridge');
+                   const chromeObserverModule = pluginManager.getServiceModule('ChromeObserver');
+                   
+                   if (chromeBridgeModule && typeof chromeBridgeModule.handleNewClient === 'function') {
+                       console.log(`[WebSocketServer] ✅ Found ChromeBridge module. Calling handleNewClient...`);
+                       chromeBridgeModule.handleNewClient(ws);
+                   } else if (chromeObserverModule && typeof chromeObserverModule.handleNewClient === 'function') {
+                       console.log(`[WebSocketServer] Found ChromeObserver module. Calling handleNewClient...`);
                        chromeObserverModule.handleNewClient(ws);
                    } else {
-                        writeLog(`Warning: ChromeObserver client connected, but module not found or handleNewClient is missing.`);
-                        console.log(`[WebSocketServer FORCE LOG] ChromeObserver module not found or handleNewClient is missing.`); // 强制日志
+                        writeLog(`Warning: ChromeObserver client connected, but neither ChromeBridge nor ChromeObserver module found.`);
+                        console.log(`[WebSocketServer FORCE LOG] Neither ChromeBridge nor ChromeObserver module found or handleNewClient is missing.`);
                    }
                 } else if (clientType === 'ChromeControl') {
                    chromeControlClients.set(clientId, ws);
@@ -157,13 +165,19 @@ function initialize(httpServer, config) {
         // 可以根据 ws.clientType 或其他标识符发送不同的欢迎消息
 
         ws.on('message', (message) => {
-            if (serverConfig.debugMode) {
-                // Buffer转为String以便日志记录
-                const messageString = message.toString();
-                console.log(`[WebSocketServer] Received message from ${ws.clientId} (${ws.clientType}): ${messageString.substring(0, 300)}...`);
-            }
+            const messageString = message.toString();
+            
             try {
                 const parsedMessage = JSON.parse(message);
+                
+                // 强制日志：ChromeObserver 的消息
+                if (ws.clientType === 'ChromeObserver') {
+                    console.log(`[WebSocketServer] 📨 收到 ChromeObserver 消息，类型: ${parsedMessage.type}`);
+                }
+                
+                if (serverConfig.debugMode) {
+                    console.log(`[WebSocketServer] Received message from ${ws.clientId} (${ws.clientType}): ${messageString.substring(0, 300)}...`);
+                }
                 if (ws.clientType === 'DistributedServer') {
                     handleDistributedServerMessage(ws.serverId, parsedMessage);
                 } else if (ws.clientType === 'ChromeObserver') {
@@ -198,12 +212,47 @@ function initialize(httpServer, config) {
                         }
                     }
 
-                    // 无论如何，都让ChromeObserver服务插件处理消息（例如，用于更新状态）
+                    // 无论如何，都让Chrome服务插件处理消息（优先ChromeBridge，回退ChromeObserver）
+                    const chromeBridgeModule = pluginManager.getServiceModule('ChromeBridge');
                     const chromeObserverModule = pluginManager.getServiceModule('ChromeObserver');
-                    if (chromeObserverModule && typeof chromeObserverModule.handleClientMessage === 'function') {
+                    const activeModule = chromeBridgeModule || chromeObserverModule;
+                    
+                    if (activeModule && typeof activeModule.handleClientMessage === 'function') {
                         // 避免将命令结果再次传递给状态处理器
                         if (parsedMessage.type !== 'command_result' && parsedMessage.type !== 'heartbeat') {
-                            chromeObserverModule.handleClientMessage(ws.clientId, parsedMessage);
+                            activeModule.handleClientMessage(ws.clientId, parsedMessage);
+
+                            // 新增：检查是否有等待的Control客户端，并转发页面信息
+                            if (parsedMessage.type === 'pageInfoUpdate') {
+                                console.log(`[WebSocketServer] 🔔 收到 pageInfoUpdate, 当前等待客户端数: ${waitingControlClients.size}`);
+                                
+                                if (waitingControlClients.size > 0) {
+                                    const pageInfoMarkdown = parsedMessage.data.markdown;
+                                    console.log(`[WebSocketServer] 📤 准备转发页面信息，markdown 长度: ${pageInfoMarkdown?.length || 0}`);
+                                    
+                                    // 遍历所有等待的客户端
+                                    waitingControlClients.forEach((requestId, clientId) => {
+                                        console.log(`[WebSocketServer] 🎯 尝试转发给客户端 ${clientId}, requestId: ${requestId}`);
+                                        const messageForControl = {
+                                            type: 'page_info_update',
+                                            data: {
+                                                requestId: requestId, // 关联到原始请求
+                                                markdown: pageInfoMarkdown
+                                            }
+                                        };
+                                        const sent = sendMessageToClient(clientId, messageForControl);
+                                        if (sent) {
+                                            console.log(`[WebSocketServer] ✅ 成功转发页面信息给客户端 ${clientId}`);
+                                            // 发送后即从等待列表移除
+                                            waitingControlClients.delete(clientId);
+                                        } else {
+                                            console.log(`[WebSocketServer] ❌ 转发失败，客户端 ${clientId} 可能已断开`);
+                                        }
+                                    });
+                                } else {
+                                    console.log(`[WebSocketServer] ⚠️ 收到 pageInfoUpdate 但没有等待的客户端`);
+                                }
+                            }
                         }
                     }
                 } else if (ws.clientType === 'ChromeControl') {
@@ -213,6 +262,14 @@ function initialize(httpServer, config) {
                         if (observerClient) {
                             // 附加源客户端ID以便结果可以被路由回来
                             parsedMessage.data.sourceClientId = ws.clientId;
+
+                            // 新增：如果命令请求等待页面信息，则注册该客户端
+                            if (parsedMessage.data.wait_for_page_info) {
+                                waitingControlClients.set(ws.clientId, parsedMessage.data.requestId);
+                                console.log(`[WebSocketServer] 📝 客户端 ${ws.clientId} 注册等待页面信息，requestId: ${parsedMessage.data.requestId}`);
+                                console.log(`[WebSocketServer] 📋 当前等待列表大小: ${waitingControlClients.size}`);
+                            }
+
                             observerClient.send(JSON.stringify(parsedMessage));
                         } else {
                             // 如果没有找到浏览器插件，立即返回错误
@@ -240,6 +297,7 @@ function initialize(httpServer, config) {
               writeLog(`ChromeObserver client ${ws.clientId} disconnected and removed.`);
            } else if (ws.clientType === 'ChromeControl') {
               chromeControlClients.delete(ws.clientId);
+              waitingControlClients.delete(ws.clientId); // 新增：确保客户端断开连接时被清理
               writeLog(`ChromeControl client ${ws.clientId} disconnected and removed.`);
            } else if (ws.clientType === 'AdminPanel') {
               adminPanelClients.delete(ws.clientId);

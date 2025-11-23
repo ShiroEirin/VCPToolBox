@@ -1,0 +1,72 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "DailyNote",
+  "version": "2.0.0",
+  "displayName": "日记系统 (创建与更新)",
+  "description": "一个多功能日记插件，提供创建(create)和更新(update)日记的功能。",
+  "author": "Roo",
+  "pluginType": "synchronous",
+  "entryPoint": {
+    "type": "nodejs",
+    "command": "node dailynote.js"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 30000
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "create",
+        "description": "“创建日记”: 用于创建一篇新的日记。AI必须提供maidName, dateString, 和 contentText。contentText的最后一行必须包含'Tag:'行，否则会报错。文件夹路径会根据maidName中的[tag]自动归类，并严格处理路径以防空格问题。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」DailyNote「末」,\ncommand:「始」create「末」,\nmaidName:「始」[VCP开发]Roo「末」,\ndateString:「始」2025-11-23「末」,\ncontentText:「始」今天我重构了DailyNote插件...\\nTag: VCP开发, 插件重构, Node.js「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "parameters": [
+          {
+            "name": "maidName",
+            "description": "作者署名，支持使用[文件夹]署名格式来指定存储目录。",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "dateString",
+            "description": "日记的日期，格式建议为 YYYY-MM-DD。",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "contentText",
+            "description": "日记的完整内容，最后一行必须是以'Tag:'开头的标签行。",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "commandIdentifier": "update",
+        "description": "“更新日记”: 用于编辑已存在的日记内容。AI需要提供要查找的旧内容(target)和替换的新内容(replace)。可选定'maid'来指定编辑范围。\n安全性检查: target字段长度不能少于15字符。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」DailyNote「末」,\ncommand:「始」update「末」,\nmaid:「始」[VCP开发]Roo「末」,\ntarget:「始」这是日记中要被替换掉的旧内容，至少15个字符长。「末」,\nreplace:「始」这是将要写入日记的新内容。「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "parameters": [
+          {
+            "name": "maid",
+            "description": "指定要编辑哪个角色的日记本。支持[文件夹]格式。如果未提供，则会在所有日记本中搜索。",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "target",
+            "description": "日记中需要被查找和替换的旧内容。必须至少包含15个字符。",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "replace",
+            "description": "用于替换target的新内容。",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    ]
+  },
+  "configSchema": {
+    "DebugMode": "boolean"
+  }
+}

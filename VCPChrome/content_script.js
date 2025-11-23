@@ -160,13 +160,25 @@ function formatInteractiveElement(el) {
     const vcpId = `vcp-id-${vcpIdCounter}`;
     el.setAttribute('vcp-id', vcpId);
 
-    let text = (el.innerText || el.value || el.placeholder || el.ariaLabel || el.title || '').trim().replace(/\s+/g, ' ');
     const tagName = el.tagName.toLowerCase();
     const role = el.getAttribute('role');
+    
+    // 对于输入类元素，使用专门的文本获取逻辑
+    const isInputElement = (tagName === 'input' || tagName === 'textarea' ||
+                           role === 'combobox' || role === 'searchbox' || role === 'textbox');
+    
+    let text;
+    if (isInputElement) {
+        // 输入元素：优先级 placeholder > aria-label > title > name > id > value
+        text = (el.placeholder || el.ariaLabel || el.title || el.name || el.id || el.value || '').trim().replace(/\s+/g, ' ');
+    } else {
+        // 非输入元素：保持原有逻辑
+        text = (el.innerText || el.value || el.placeholder || el.ariaLabel || el.title || '').trim().replace(/\s+/g, ' ');
+    }
 
     if (role === 'combobox' || role === 'searchbox') {
         const label = findLabelForInput(el);
-        return `[输入框: ${label || text || el.name || el.id || '无标题输入框'}](${vcpId})`;
+        return `[搜索框: ${label || text || '搜索'}](${vcpId})`;
     }
 
     if (tagName === 'a' && el.href) {
@@ -179,12 +191,18 @@ function formatInteractiveElement(el) {
 
     if (tagName === 'input' && !['button', 'submit', 'reset', 'hidden'].includes(el.type)) {
         const label = findLabelForInput(el);
-        return `[输入框: ${label || text || el.name || el.id || '无标题输入框'}](${vcpId})`;
+        // 根据input类型决定显示名称
+        const inputType = el.type || 'text';
+        const typeName = inputType === 'search' ? '搜索框' : '输入框';
+        return `[${typeName}: ${label || text || el.name || el.id || '无标题输入框'}](${vcpId})`;
     }
 
     if (tagName === 'textarea') {
         const label = findLabelForInput(el);
-        return `[文本区域: ${label || text || el.name || el.id || '无标题文本区域'}](${vcpId})`;
+        // 检查是否可能是搜索框（通过 placeholder 或其他属性判断）
+        const isSearchBox = /搜索|search/i.test(text) || /搜索|search/i.test(el.className);
+        const typeName = isSearchBox ? '搜索框' : '输入框';
+        return `[${typeName}: ${label || text || el.name || el.id || '文本输入'}](${vcpId})`;
     }
 
     if (tagName === 'select') {
@@ -460,8 +478,8 @@ function findElementWithLogging(target) {
 }
 
 function sendPageInfoUpdate() {
-    // 关键检查：只有活动标签页才发送更新
-    if (!isActiveTab && !document.hidden) {
+    // 关键检查：只有活动标签页才发送更新（或页面刚加载完成时）
+    if (!isActiveTab && document.hidden) {
         console.log('[VCP Content] ⚠️ 当前非活动标签页，跳过更新');
         return;
     }
@@ -589,20 +607,47 @@ window.addEventListener('load', () => {
     // 页面加载时检查是否为活动标签页
     isActiveTab = !document.hidden;
     console.log('[VCP Content] 📄 页面加载完成，活动状态:', isActiveTab);
-    if (isActiveTab) {
-        sendPageInfoUpdate();
-    }
+    // 页面加载完成后总是尝试发送一次更新
+    sendPageInfoUpdate();
 });
 
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         console.log('[VCP Content] 👁️ 标签页变为可见，标记为活动');
         isActiveTab = true;
-        sendPageInfoUpdate();
+        // 立即验证并发送更新
+        chrome.runtime.sendMessage({ type: 'VERIFY_ACTIVE_TAB' }, (response) => {
+            if (chrome.runtime.lastError) {
+                console.log('[VCP Content] ⚠️ 验证活动状态失败:', chrome.runtime.lastError.message);
+                return;
+            }
+            if (response && response.isActive) {
+                console.log('[VCP Content] ✅ 确认为活动标签页，清除缓存并发送更新');
+                lastPageContent = ''; // 清除缓存确保发送最新内容
+                sendPageInfoUpdate();
+            } else {
+                console.log('[VCP Content] ⚠️ 非活动标签页，不发送更新');
+                isActiveTab = false;
+            }
+        });
     } else {
         console.log('[VCP Content] 🙈 标签页变为隐藏，取消活动标记');
         isActiveTab = false;
     }
+});
+
+// 新增：窗口获得焦点时也检查并更新
+window.addEventListener('focus', () => {
+    console.log('[VCP Content] 🎯 窗口获得焦点，验证活动状态');
+    chrome.runtime.sendMessage({ type: 'VERIFY_ACTIVE_TAB' }, (response) => {
+        if (chrome.runtime.lastError) return;
+        if (response && response.isActive && !isActiveTab) {
+            console.log('[VCP Content] ✅ 焦点事件确认为活动标签页');
+            isActiveTab = true;
+            lastPageContent = '';
+            sendPageInfoUpdate();
+        }
+    });
 });
 
 // 定期更新，但只在活动标签页时发送

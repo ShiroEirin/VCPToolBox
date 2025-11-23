@@ -37,6 +37,11 @@
         "command": "google_scholar_search",
         "description": "使用Google Scholar进行学术搜索。\n参数:\n- q/query/text (字符串): 搜索查询。\n- cites (字符串, 可选): 文章的唯一ID，用于查找引用该文章的文献。\n- as_ylo (数字, 可选): 起始年份。\n- as_yhi (数字, 可选): 结束年份。\n- scisbd (数字, 可选): 按日期排序 (1=仅摘要, 2=所有)。\n- cluster (字符串, 可选): 文章的唯一ID，用于查找所有版本。\n- hl (字符串, 可选): 界面语言 (例如: en, es, fr)。\n- lr (字符串, 可选): 限制搜索的语言 (例如: lang_fr|lang_de)。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」SerpSearch「末」,\ncommand:「始」google_scholar_search「末」,\nq:「始」biology「末」,\nas_ylo:「始」2020「末」\n<<<[END_TOOL_REQUEST]>>>",
         "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」SerpSearch「末」,\ncommand:「始」google_scholar_search「末」,\nq:「始」artificial intelligence in medicine「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "google_search",
+        "description": "使用Google搜索引擎进行网页搜索。\n参数:\n- q/query/text (字符串, 必需): 需要搜索的关键词。\n- location (字符串, 可选): 指定搜索的地理位置 (例如: Austin, Texas, United States)。\n- hl (字符串, 可选): 界面语言 (例如: en, es, fr)。\n- gl (字符串, 可选): 指定搜索的国家代码 (例如: us, cn)。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」SerpSearch「末」,\ncommand:「始」google_search「末」,\nq:「始」Coffee「末」,\nlocation:「始」Austin, Texas, United States「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」SerpSearch「末」,\ncommand:「始」google_search「末」,\nq:「始」AI news「末」\n<<<[END_TOOL_REQUEST]>>>"
       }
     ]
   }

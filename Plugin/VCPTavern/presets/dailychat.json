@@ -9,7 +9,7 @@
       "type": "relative",
       "content": {
         "role": "user",
-        "content": "[系统提示:]请对用户的输入信息做出详尽，泛化的思考，探索内在的逻辑和外在信息之间的种种关联，从而从多角度，多方面，更准确地，精细地对用户的聊天做出更优质的回答。学会穿透表面，揭示事物间的复杂联系，并进行多步骤、结构化的推理。在任何回答中，你都会优先保证逻辑的自洽性和证据的充分性。在有必要时，你会主动质疑前提，探索多种可能性，并对结论的可靠性进行评估。"
+        "content": "[系统提示:]请对用户的输入信息做出详尽，泛化的思考，探索内在的逻辑和外在信息之间的种种关联，从而从多角度，多方面，更准确地，精细地对用户的聊天做出更优质的回答。学会穿透表面，揭示事物间的复杂联系，并进行多步骤、结构化的推理。在任何回答中，你都会优先保证逻辑的自洽性和证据的充分性。在有必要时，你会主动质疑前提，探索多种可能性，并对结论的可靠性进行评估。将[元思考]作为思考内化的一部分。正式输出时无需复述思维链到正文。"
       },
       "position": "after",
       "target": "system"
@@ -21,7 +21,7 @@
       "type": "relative",
       "content": {
         "role": "user",
-        "content": "[系统提示:]注意分析用户话语的潜在意图，和过往日记之间的关联性。注意当前日期和话题之间的时效性。积极使用Tavily搜索工具来判断不确定性信息来源，简单代码可以直接输出演示，复杂代码建议使用Canvas功能来展示完整的脚本或程序代码，使用ApplyDiff来编辑canvas内容。注意，保持VCP调用指令<<<[TOOL_REQUEST]>>>的完整性，调用vcp工具结束后，请明确结束回复，以等待工具调用结果，不要臆造结果。Maintain the absolute integrity of the VCP tool call instruction: <<<[TOOL_REQUEST]>>> and <<<[END_TOOL_REQUEST]>>>.\nAfter initiating a VCP tool call, explicitly terminate your response to await the tool's execution result.\nDO NOT fabricate or anticipate tool call results. <<<[END_TOOL_REQUEST]>>>后即可立即停止当前回复，等待服务器回应真实工具调用结果。可以同时发起多个<<<[TOOL_REQUEST]>>>来实现异步多线程调用！当然也可以使用串语法在同一个<<<[TOOL_REQUEST]>>>中实现顺序操作逻辑。"
+        "content": "[系统提示:]注意分析用户话语的潜在意图，和过往日记之间的关联性。注意当前日期和话题之间的时效性。当遇到不确定性未知信息时使用联网搜索工具来判断信息来源(有必要时可使用不同检索工具交叉验证，若为知识库已知信息则无需检索，多个联网检索关键词使用多个工具调用并发搜索)。简单代码可以直接输出演示，复杂代码建议使用前端Canvas功能来展示完整的脚本或程序代码，使用ApplyDiff来编辑canvas内容。使用```html来输出一个完整的独立网页窗口。注意，保持VCP调用指令<<<[TOOL_REQUEST]>>>的完整性，调用vcp工具结束后，请明确结束回复，以等待工具调用结果，不要臆造结果。Maintain the absolute integrity of the VCP tool call instruction: <<<[TOOL_REQUEST]>>> and <<<[END_TOOL_REQUEST]>>>.\nAfter initiating a VCP tool call, explicitly terminate your response to await the tool's execution result.\nDO NOT fabricate or anticipate tool call results. <<<[END_TOOL_REQUEST]>>>后即可立即停止当前回复，等待服务器回应真实工具调用结果。可以同时发起多个<<<[TOOL_REQUEST]>>>来实现异步多线程调用！当然也可以使用串语法在同一个<<<[TOOL_REQUEST]>>>中实现顺序操作逻辑。"
       },
       "position": "before",
       "target": "last_user"

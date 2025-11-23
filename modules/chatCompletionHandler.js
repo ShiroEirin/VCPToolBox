@@ -99,7 +99,13 @@ class ChatCompletionHandler {
     const abortController = new AbortController();
 
     if (id) {
-      activeRequests.set(id, { req, res, abortController, timestamp: Date.now() });
+      activeRequests.set(id, {
+        req,
+        res,
+        abortController,
+        timestamp: Date.now(),
+        aborted: false // 修复 Bug #4: 添加中止标志
+      });
     }
 
     let originalBody = req.body;
@@ -302,10 +308,21 @@ class ChatCompletionHandler {
               },
             ],
           };
-          res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
-          res.write('data: [DONE]\n\n', () => {
-            res.end();
-          });
+          try {
+            res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+            res.write('data: [DONE]\n\n', () => {
+              res.end();
+            });
+          } catch (writeError) {
+            console.error('[Upstream Error] Failed to write error to stream:', writeError.message);
+            if (!res.writableEnded) {
+              try {
+                res.end();
+              } catch (endError) {
+                console.error('[Upstream Error] Failed to end response:', endError.message);
+              }
+            }
+          }
 
           // We are done with this request. Return early.
           return;
@@ -344,10 +361,30 @@ class ChatCompletionHandler {
             let sseBuffer = ''; // Buffer for incomplete SSE lines
             let collectedContentThisTurn = ''; // Collects textual content from delta
             let rawResponseDataThisTurn = ''; // Collects all raw chunks for diary
-
             let sseLineBuffer = ''; // Buffer for incomplete SSE lines
+            let streamAborted = false; // 修复 Bug #5: 添加流中止标志
+
+            // 修复 Bug #5: 监听 abort 信号
+            const abortHandler = () => {
+              streamAborted = true;
+              if (DEBUG_MODE) console.log('[Stream Abort] Abort signal received, stopping stream processing.');
+              
+              // 销毁响应流以停止数据接收
+              if (aiResponse.body && !aiResponse.body.destroyed) {
+                aiResponse.body.destroy();
+              }
+              
+              // 立即 resolve 以退出流处理
+              resolve({ content: collectedContentThisTurn, raw: rawResponseDataThisTurn });
+            };
+            
+            if (abortController && abortController.signal) {
+              abortController.signal.addEventListener('abort', abortHandler);
+            }
 
             aiResponse.body.on('data', chunk => {
+              // 修复 Bug #5: 如果已中止，忽略后续数据
+              if (streamAborted) return;
               const chunkString = chunk.toString('utf-8');
               rawResponseDataThisTurn += chunkString;
               sseLineBuffer += chunkString;
@@ -423,8 +460,14 @@ class ChatCompletionHandler {
                 }
               }
 
-              if (!res.writableEnded && chunkToWrite.trim().length > 0) {
-                res.write(chunkToWrite);
+              // 修复 Bug #5: 写入前检查响应状态和中止标志
+              if (!streamAborted && !res.writableEnded && !res.destroyed && chunkToWrite.trim().length > 0) {
+                try {
+                  res.write(chunkToWrite);
+                } catch (writeError) {
+                  if (DEBUG_MODE) console.error('[Stream Write Error]', writeError.message);
+                  streamAborted = true; // 标记为已中止，停止后续写入
+                }
               }
 
               if (containsDoneMarker) {
@@ -478,9 +521,18 @@ class ChatCompletionHandler {
                   }
                 }
               }
+              // 修复 Bug #5: 移除 abort 监听器
+              if (abortController && abortController.signal) {
+                abortController.signal.removeEventListener('abort', abortHandler);
+              }
               resolve({ content: collectedContentThisTurn, raw: rawResponseDataThisTurn });
             }
+            
             aiResponse.body.on('error', streamError => {
+              // 修复 Bug #5: 移除 abort 监听器
+              if (abortController && abortController.signal) {
+                abortController.signal.removeEventListener('abort', abortHandler);
+              }
               console.error('Error reading AI response stream in loop:', streamError);
               if (!res.writableEnded) {
                 // Try to send an error message before closing if possible
@@ -587,10 +639,21 @@ class ChatCompletionHandler {
                   },
                 ],
               };
-              res.write(`data: ${JSON.stringify(finalChunkPayload)}\n\n`);
-              res.write('data: [DONE]\n\n', () => {
-                res.end();
-              });
+              try {
+                res.write(`data: ${JSON.stringify(finalChunkPayload)}\n\n`);
+                res.write('data: [DONE]\n\n', () => {
+                  res.end();
+                });
+              } catch (writeError) {
+                console.error('[VCP Stream Loop] Failed to write final chunk:', writeError.message);
+                if (!res.writableEnded && !res.destroyed) {
+                  try {
+                    res.end();
+                  } catch (endError) {
+                    console.error('[VCP Stream Loop] Failed to end response:', endError.message);
+                  }
+                }
+              }
             }
             break;
           }
@@ -696,10 +759,21 @@ class ChatCompletionHandler {
                 model: originalBody.model,
                 choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
               };
-              res.write(`data: ${JSON.stringify(finalChunkPayload)}\n\n`);
-              res.write('data: [DONE]\n\n', () => {
-                res.end();
-              });
+              try {
+                res.write(`data: ${JSON.stringify(finalChunkPayload)}\n\n`);
+                res.write('data: [DONE]\n\n', () => {
+                  res.end();
+                });
+              } catch (writeError) {
+                console.error('[VCP Stream Loop Archery] Failed to write final chunk:', writeError.message);
+                if (!res.writableEnded && !res.destroyed) {
+                  try {
+                    res.end();
+                  } catch (endError) {
+                    console.error('[VCP Stream Loop Archery] Failed to end response:', endError.message);
+                  }
+                }
+              }
             }
             break; // Exit the VCP loop
           }
@@ -818,8 +892,16 @@ class ChatCompletionHandler {
                     console.log(`[VCP Stream Loop] WebSocket push for ${toolCall.name} (success) processed.`);
                 }
 
-                if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult, abortController);
+                // 修复无头数据Bug: 检查 abort 状态后再写入HTTP流
+                if (shouldShowVCP) {
+                  const requestData = activeRequests.get(id);
+                  if (requestData && !requestData.aborted && !res.writableEnded && !res.destroyed) {
+                    try {
+                      vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult, abortController);
+                    } catch (writeError) {
+                      if (DEBUG_MODE) console.error(`[VCP Write Error] Failed to write VCP info for ${toolCall.name}:`, writeError.message);
+                    }
+                  }
                 }
               } catch (pluginError) {
                 console.error(
@@ -843,8 +925,16 @@ class ChatCompletionHandler {
                   'VCPLog',
                   abortController,
                 );
-                if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
+                // 修复无头数据Bug: 检查 abort 状态后再写入HTTP流
+                if (shouldShowVCP) {
+                  const requestData = activeRequests.get(id);
+                  if (requestData && !requestData.aborted && !res.writableEnded && !res.destroyed) {
+                    try {
+                      vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
+                    } catch (writeError) {
+                      if (DEBUG_MODE) console.error(`[VCP Write Error] Failed to write VCP error info for ${toolCall.name}:`, writeError.message);
+                    }
+                  }
                 }
               }
             } else {
@@ -864,8 +954,16 @@ class ChatCompletionHandler {
                 'VCPLog',
                 abortController,
               );
-              if (shouldShowVCP && !res.writableEnded) {
-                vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
+              // 修复无头数据Bug: 检查 abort 状态后再写入HTTP流
+              if (shouldShowVCP) {
+                const requestData = activeRequests.get(id);
+                if (requestData && !requestData.aborted && !res.writableEnded && !res.destroyed) {
+                  try {
+                    vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
+                  } catch (writeError) {
+                    if (DEBUG_MODE) console.error(`[VCP Write Error] Failed to write VCP error info for plugin not found:`, writeError.message);
+                  }
+                }
               }
             }
             return toolResultContentForAI;
@@ -899,9 +997,11 @@ class ChatCompletionHandler {
               body: JSON.stringify({ ...originalBody, messages: currentMessagesForLoop, stream: true }),
               signal: abortController.signal, // 传递中止信号
             },
-            apiRetries,
-            apiRetryDelay,
-            DEBUG_MODE,
+            {
+              retries: apiRetries,
+              delay: apiRetryDelay,
+              debugMode: DEBUG_MODE
+            }
           );
 
           if (!nextAiAPIResponse.ok) {
@@ -953,10 +1053,21 @@ class ChatCompletionHandler {
               },
             ],
           };
-          res.write(`data: ${JSON.stringify(finalChunkPayload)}\n\n`);
-          res.write('data: [DONE]\n\n', () => {
-            res.end();
-          });
+          try {
+            res.write(`data: ${JSON.stringify(finalChunkPayload)}\n\n`);
+            res.write('data: [DONE]\n\n', () => {
+              res.end();
+            });
+          } catch (writeError) {
+            console.error('[VCP Stream Loop Max Recursion] Failed to write final chunk:', writeError.message);
+            if (!res.writableEnded && !res.destroyed) {
+              try {
+                res.end();
+              } catch (endError) {
+                console.error('[VCP Stream Loop Max Recursion] Failed to end response:', endError.message);
+              }
+            }
+          }
         }
       } else {
         // Non-streaming (originalBody.stream === false)
@@ -1274,16 +1385,21 @@ class ChatCompletionHandler {
                       console.log(`[Multi-Tool] WebSocket push for ${toolCall.name} (success) processed.`);
                   }
 
+                  // 修复无头数据Bug: Non-stream模式也需要检查 abort 状态
                   if (shouldShowVCP) {
-                    const vcpText = vcpInfoHandler.streamVcpInfo(
-                      null,
-                      originalBody.model,
-                      toolCall.name,
-                      'success',
-                      pluginResult,
-                      abortController,
-                    );
-                    if (vcpText) conversationHistoryForClient.push(vcpText);
+                    const requestData = activeRequests.get(id);
+                    // Non-stream 不直接写HTTP流，但仍需检查abort避免污染响应
+                    if (!requestData || !requestData.aborted) {
+                      const vcpText = vcpInfoHandler.streamVcpInfo(
+                        null,
+                        originalBody.model,
+                        toolCall.name,
+                        'success',
+                        pluginResult,
+                        abortController,
+                      );
+                      if (vcpText) conversationHistoryForClient.push(vcpText);
+                    }
                   }
                 } catch (pluginError) {
                   console.error(
@@ -1307,16 +1423,20 @@ class ChatCompletionHandler {
                     'VCPLog',
                     abortController,
                   );
+                  // 修复无头数据Bug: Non-stream模式也需要检查 abort 状态
                   if (shouldShowVCP) {
-                    const vcpText = vcpInfoHandler.streamVcpInfo(
-                      null,
-                      originalBody.model,
-                      toolCall.name,
-                      'error',
-                      toolResultText,
-                      abortController,
-                    );
-                    if (vcpText) conversationHistoryForClient.push(vcpText);
+                    const requestData = activeRequests.get(id);
+                    if (!requestData || !requestData.aborted) {
+                      const vcpText = vcpInfoHandler.streamVcpInfo(
+                        null,
+                        originalBody.model,
+                        toolCall.name,
+                        'error',
+                        toolResultText,
+                        abortController,
+                      );
+                      if (vcpText) conversationHistoryForClient.push(vcpText);
+                    }
                   }
                 }
               } else {
@@ -1336,16 +1456,20 @@ class ChatCompletionHandler {
                   'VCPLog',
                   abortController,
                 );
+                // 修复无头数据Bug: Non-stream模式也需要检查 abort 状态
                 if (shouldShowVCP) {
-                  const vcpText = vcpInfoHandler.streamVcpInfo(
-                    null,
-                    originalBody.model,
-                    toolCall.name,
-                    'error',
-                    toolResultText,
-                    abortController,
-                  );
-                  if (vcpText) conversationHistoryForClient.push(vcpText);
+                  const requestData = activeRequests.get(id);
+                  if (!requestData || !requestData.aborted) {
+                    const vcpText = vcpInfoHandler.streamVcpInfo(
+                      null,
+                      originalBody.model,
+                      toolCall.name,
+                      'error',
+                      toolResultText,
+                      abortController,
+                    );
+                    if (vcpText) conversationHistoryForClient.push(vcpText);
+                  }
                 }
               }
               return toolResultContentForAI;
@@ -1373,9 +1497,11 @@ class ChatCompletionHandler {
                 body: JSON.stringify({ ...originalBody, messages: currentMessagesForNonStreamLoop, stream: false }),
                 signal: abortController.signal, // 传递中止信号
               },
-              apiRetries,
-              apiRetryDelay,
-              DEBUG_MODE,
+              {
+                retries: apiRetries,
+                delay: apiRetryDelay,
+                debugMode: DEBUG_MODE
+              }
             );
 
             if (!recursionAiResponse.ok) {
@@ -1450,31 +1576,30 @@ class ChatCompletionHandler {
           };
         }
 
-        if (!res.writableEnded) {
-          res.send(Buffer.from(JSON.stringify(finalJsonResponse)));
+        if (!res.writableEnded && !res.destroyed) {
+          try {
+            res.send(Buffer.from(JSON.stringify(finalJsonResponse)));
+          } catch (sendError) {
+            console.error('[Non-Stream Response] Failed to send final response:', sendError.message);
+            if (!res.writableEnded && !res.destroyed) {
+              try {
+                res.end();
+              } catch (endError) {
+                console.error('[Non-Stream Response] Failed to end response:', endError.message);
+              }
+            }
+          }
         }
         // Handle diary for the *first* AI response in non-streaming mode
         await handleDiaryFromAIResponse(firstResponseRawDataForClientAndDiary);
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.log(`[Abort] Request ${id} was aborted by the user.`);
-        if (!res.headersSent) {
-          res.status(200).json({
-            choices: [
-              {
-                index: 0,
-                message: { role: 'assistant', content: '请求已中止' },
-                finish_reason: 'stop',
-              },
-            ],
-          });
-        } else if (!res.writableEnded) {
-          res.write('data: [DONE]\n\n', () => {
-            res.end();
-          });
-        }
-        return;
+        // When a request is aborted, the '/v1/interrupt' handler is responsible for closing the response stream.
+        // This catch block should simply log the event and stop processing to prevent race conditions
+        // and avoid throwing an uncaught exception if it also tries to write to the already-closed stream.
+        console.log(`[Abort] Caught AbortError for request ${id}. Execution will be halted. The interrupt handler is responsible for the client response.`);
+        return; // Stop processing and allow the 'finally' block to clean up.
       }
       // Only log full stack trace for non-abort errors
       console.error('处理请求或转发时出错:', error.message, error.stack);
@@ -1506,10 +1631,21 @@ class ChatCompletionHandler {
               },
             ],
           };
-          res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
-          res.write('data: [DONE]\n\n', () => {
-            res.end();
-          });
+          try {
+            res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+            res.write('data: [DONE]\n\n', () => {
+              res.end();
+            });
+          } catch (writeError) {
+            console.error('[Error Handler Stream] Failed to write error:', writeError.message);
+            if (!res.writableEnded && !res.destroyed) {
+              try {
+                res.end();
+              } catch (endError) {
+                console.error('[Error Handler Stream] Failed to end response:', endError.message);
+              }
+            }
+          }
         } else {
           // Non-streaming failure
           res.status(500).json({ error: 'Internal Server Error', details: error.message });
@@ -1520,16 +1656,42 @@ class ChatCompletionHandler {
           '[STREAM ERROR] Headers already sent. Cannot send JSON error. Ending stream if not already ended.',
         );
         // Send [DONE] marker before ending the stream for graceful termination
-        res.write('data: [DONE]\n\n', () => {
-          res.end();
-        });
+        try {
+          res.write('data: [DONE]\n\n', () => {
+            res.end();
+          });
+        } catch (writeError) {
+          console.error('[Error Handler Stream Cleanup] Failed to write [DONE]:', writeError.message);
+          if (!res.writableEnded && !res.destroyed) {
+            try {
+              res.end();
+            } catch (endError) {
+              console.error('[Error Handler Stream Cleanup] Failed to end response:', endError.message);
+            }
+          }
+        }
       }
     } finally {
       if (id) {
         const requestData = activeRequests.get(id);
         if (requestData) {
-          requestData.abortController.abort();
-          activeRequests.delete(id);
+          // 修复 Bug #4: 只有在未被 interrupt 路由中止时才执行清理
+          if (!requestData.aborted) {
+            // 标记为已中止（防止重复 abort）
+            requestData.aborted = true;
+            
+            // 安全地 abort（检查是否已经 aborted）
+            if (requestData.abortController && !requestData.abortController.signal.aborted) {
+              requestData.abortController.abort();
+            }
+          }
+          
+          // 无论如何都要删除 Map 条目以释放内存
+          // 但使用 setImmediate 延迟删除，确保 interrupt 路由完成操作
+          setImmediate(() => {
+            activeRequests.delete(id);
+            if (DEBUG_MODE) console.log(`[ChatHandler Cleanup] Removed request ${id} from activeRequests.`);
+          });
         }
       }
     }

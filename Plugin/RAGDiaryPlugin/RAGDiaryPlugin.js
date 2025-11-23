@@ -245,6 +245,29 @@ class RAGDiaryPlugin {
         this.metaChainThemeVectors = {}; // 新增：元思考链主题向量缓存
         this.aiMemoHandler = null; // <--- 延迟初始化，在 loadConfig 之后
         this.isInitialized = false; // <--- 新增：初始化状态标志
+        
+        // ✅ 新增：查询结果缓存系统
+        this.queryResultCache = new Map(); // 缓存容器
+        this.maxCacheSize = 200; // 最大缓存条目数（可配置）
+        this.cacheHits = 0; // 统计缓存命中次数
+        this.cacheMisses = 0; // 统计缓存未命中次数
+        this.cacheTTL = 3600000; // 缓存有效期 1小时（毫秒）
+        this.lastConfigHash = null; // 用于检测配置变更
+        
+        this.queryCacheEnabled = true; // ✅ 新增：查询缓存开关
+        
+        // ✅ 新增：向量缓存（文本 -> 向量的映射）
+        this.embeddingCache = new Map();
+        this.embeddingCacheMaxSize = 500; // 可配置
+        this.embeddingCacheTTL = 7200000; // 2小时（向量相对稳定，可以更长）
+        this.embeddingCacheHits = 0; // 统计向量缓存命中次数
+        this.embeddingCacheMisses = 0; // 统计向量缓存未命中次数
+        
+        // ✅ 新增：AIMemo 缓存
+        this.aiMemoCache = new Map();
+        this.aiMemoCacheMaxSize = 50; // 可配置
+        this.aiMemoCacheTTL = 1800000; // 30分钟
+        
         // 注意：不在构造函数中调用 loadConfig()，而是在 initialize() 中调用
     }
 
@@ -252,6 +275,27 @@ class RAGDiaryPlugin {
         // --- 加载插件独立的 .env 文件 ---
         const envPath = path.join(__dirname, 'config.env');
         dotenv.config({ path: envPath });
+
+        // ✅ 从环境变量读取缓存配置
+        this.maxCacheSize = parseInt(process.env.RAG_CACHE_MAX_SIZE) || 100;
+        this.cacheTTL = parseInt(process.env.RAG_CACHE_TTL_MS) || 3600000;
+        this.queryCacheEnabled = (process.env.RAG_QUERY_CACHE_ENABLED || 'true').toLowerCase() === 'true';
+
+        if (this.queryCacheEnabled) {
+            console.log(`[RAGDiaryPlugin] 查询缓存已启用 (最大: ${this.maxCacheSize}条, TTL: ${this.cacheTTL}ms)`);
+        } else {
+            console.log(`[RAGDiaryPlugin] 查询缓存已禁用`);
+        }
+
+        // ✅ 从环境变量读取向量缓存配置
+        this.embeddingCacheMaxSize = parseInt(process.env.EMBEDDING_CACHE_MAX_SIZE) || 500;
+        this.embeddingCacheTTL = parseInt(process.env.EMBEDDING_CACHE_TTL_MS) || 7200000;
+        console.log(`[RAGDiaryPlugin] 向量缓存已启用 (最大: ${this.embeddingCacheMaxSize}条, TTL: ${this.embeddingCacheTTL}ms)`);
+
+        // ✅ 从环境变量读取 AIMemo 缓存配置
+        this.aiMemoCacheMaxSize = parseInt(process.env.AIMEMO_CACHE_MAX_SIZE) || 50;
+        this.aiMemoCacheTTL = parseInt(process.env.AIMEMO_CACHE_TTL_MS) || 1800000;
+        console.log(`[RAGDiaryPlugin] AIMemo缓存已启用 (最大: ${this.aiMemoCacheMaxSize}条, TTL: ${this.aiMemoCacheTTL}ms)`);
 
         // --- 加载 Rerank 配置 ---
         this.rerankConfig = {
@@ -268,7 +312,8 @@ class RAGDiaryPlugin {
 
         // --- 初始化并加载 AIMemo 配置 ---
         console.log('[RAGDiaryPlugin] Initializing AIMemo handler...');
-        this.aiMemoHandler = new AIMemoHandler(this); // 在环境变量加载后初始化
+        // ✅ 注入 AIMemo 缓存
+        this.aiMemoHandler = new AIMemoHandler(this, this.aiMemoCache);
         await this.aiMemoHandler.loadConfig();
         console.log('[RAGDiaryPlugin] AIMemo handler initialized.');
 
@@ -277,6 +322,14 @@ class RAGDiaryPlugin {
 
         try {
             const currentConfigHash = await this._getFileHash(configPath);
+            
+            // ✅ 如果配置哈希变化，清空查询缓存
+            if (this.lastConfigHash && this.lastConfigHash !== currentConfigHash) {
+                console.log('[RAGDiaryPlugin] 配置文件已更新，清空查询缓存');
+                this.clearQueryCache();
+            }
+            this.lastConfigHash = currentConfigHash;
+            
             if (!currentConfigHash) {
                 console.log('[RAGDiaryPlugin] 未找到 rag_tags.json 文件，跳过缓存处理。');
                 this.ragConfig = {};
@@ -477,7 +530,17 @@ class RAGDiaryPlugin {
         // ✅ 关键修复：确保配置加载完成后再处理消息
         console.log('[RAGDiaryPlugin] 开始加载配置...');
         await this.loadConfig();
-        console.log('[RAGDiaryPlugin] 插件初始化完成，AIMemoHandler已就绪');
+        
+        // ✅ 启动缓存清理任务
+        this._startCacheCleanupTask();
+        
+        // ✅ 启动向量缓存清理任务
+        this._startEmbeddingCacheCleanupTask();
+        
+        // ✅ 启动 AIMemo 缓存清理任务
+        this._startAiMemoCacheCleanupTask();
+        
+        console.log('[RAGDiaryPlugin] 插件初始化完成，AIMemoHandler已就绪，查询缓存和向量缓存系统已启动');
     }
     
     cosineSimilarity(vecA, vecB) {
@@ -716,20 +779,27 @@ class RAGDiaryPlugin {
                 : userContent;
 
             console.log(`[RAGDiaryPlugin] 准备向量化 - User: ${userContent.substring(0, 100)}...`);
-            const userVector = userContent ? await this.getSingleEmbedding(userContent) : null;
-            const aiVector = aiContent ? await this.getSingleEmbedding(aiContent) : null;
+            // ✅ 关键修复：使用带缓存的向量化方法
+            const userVector = userContent ? await this.getSingleEmbeddingCached(userContent) : null;
+            const aiVector = aiContent ? await this.getSingleEmbeddingCached(aiContent) : null;
 
             let queryVector = null;
             if (aiVector && userVector) {
-                queryVector = this._getWeightedAverageVector([userVector, aiVector], [0.85, 0.15]);
+                queryVector = this._getWeightedAverageVector([userVector, aiVector], [0.7, 0.3]);
             } else {
                 queryVector = userVector || aiVector;
             }
 
             if (!queryVector) {
-                console.error('[RAGDiaryPlugin] 查询向量化失败，跳过RAG处理。');
-                console.error('[RAGDiaryPlugin] userContent length:', userContent?.length);
-                console.error('[RAGDiaryPlugin] aiContent length:', aiContent?.length);
+                // 检查是否是系统提示导致的空内容（这是正常情况）
+                const isSystemPrompt = !userContent || userContent.length === 0;
+                if (isSystemPrompt) {
+                    console.log('[RAGDiaryPlugin] 检测到系统提示消息，无需向量化，跳过RAG处理。');
+                } else {
+                    console.error('[RAGDiaryPlugin] 查询向量化失败，跳过RAG处理。');
+                    console.error('[RAGDiaryPlugin] userContent length:', userContent?.length);
+                    console.error('[RAGDiaryPlugin] aiContent length:', aiContent?.length);
+                }
                 // 安全起见，移除所有占位符
                 const newMessages = JSON.parse(JSON.stringify(messages));
                 for (const index of targetSystemMessageIndices) {
@@ -807,7 +877,7 @@ class RAGDiaryPlugin {
             const placeholder = match[0];
             const modifiersAndParams = match[1] || '';
             
-            console.log(`[RAGDiaryPlugin] 检测到VCP元思考占位符: ${placeholder}`);
+            // 静默处理元思考占位符
 
             // 解析参数：链名称、修饰符和K值序列
             // 格式: [[VCP元思考:<链名称>::<修饰符>:<k1-k2-k3-k4-k5>]]
@@ -861,7 +931,7 @@ class RAGDiaryPlugin {
                 }
             }
 
-            console.log(`[RAGDiaryPlugin] 元思考参数: 链名称="${chainName}", 自动模式=${isAutoMode}, 阈值=${autoThreshold}, 使用语义组=${useGroup}, K序列=[${kSequence.join(',')}]`);
+            // 参数已解析，开始处理
 
             try {
                 const metaResult = await this._processMetaThinkingChain(
@@ -876,7 +946,7 @@ class RAGDiaryPlugin {
                 );
                 
                 processedContent = processedContent.replace(placeholder, metaResult);
-                console.log(`[RAGDiaryPlugin] VCP元思考链处理完成`);
+                // 元思考链处理完成（静默）
             } catch (error) {
                 console.error(`[RAGDiaryPlugin] 处理VCP元思考链时发生错误:`, error);
                 processedContent = processedContent.replace(
@@ -932,18 +1002,35 @@ class RAGDiaryPlugin {
             const dbName = match[1];
             if (processedDiaries.has(dbName)) {
                 console.warn(`[RAGDiaryPlugin] Detected circular reference to "${dbName}" in <<...>>. Skipping.`);
-                processingPromises.push(Promise.resolve({ placeholder, content: `[检测到循环引用，已跳过“${dbName}日记本”的解析]` }));
+                processingPromises.push(Promise.resolve({ placeholder, content: `[检测到循环引用，已跳过"${dbName}日记本"的解析]` }));
                 continue;
             }
             processedDiaries.add(dbName);
 
+            // ✅ 新增：为<<>>模式生成缓存键
+            const cacheKey = this._generateCacheKey({
+                userContent,
+                aiContent: aiContent || '',
+                dbName,
+                modifiers: '' // 全文模式无修饰符
+            });
+
+            // ✅ 尝试从缓存获取
+            const cachedResult = this._getCachedResult(cacheKey);
+            if (cachedResult) {
+                processingPromises.push(Promise.resolve({ placeholder, content: cachedResult.content }));
+                continue; // ⭐ 跳过后续的阈值判断和内容读取
+            }
+
             processingPromises.push((async () => {
                 const diaryConfig = this.ragConfig[dbName] || {};
                 const localThreshold = diaryConfig.threshold || GLOBAL_SIMILARITY_THRESHOLD;
-                const dbNameVector = this.vectorDBManager.getDiaryNameVector(dbName); // <--- 使用缓存
+                const dbNameVector = await this.vectorDBManager.getDiaryNameVector(dbName); // <--- 使用缓存
                 if (!dbNameVector) {
                     console.warn(`[RAGDiaryPlugin] Could not find cached vector for diary name: "${dbName}". Skipping.`);
-                    return { placeholder, content: '' };
+                    const emptyResult = '';
+                    this._setCachedResult(cacheKey, { content: emptyResult }); // ✅ 缓存空结果
+                    return { placeholder, content: emptyResult };
                 }
 
                 const baseSimilarity = this.cosineSimilarity(queryVector, dbNameVector);
@@ -957,9 +1044,16 @@ class RAGDiaryPlugin {
                         .replace(/\[\[.*日记本.*\]\]/g, '[循环占位符已移除]')
                         .replace(/<<.*日记本>>/g, '[循环占位符已移除]')
                         .replace(/《《.*日记本.*》》/g, '[循环占位符已移除]');
+                    
+                    // ✅ 缓存结果
+                    this._setCachedResult(cacheKey, { content: safeContent });
                     return { placeholder, content: safeContent };
                 }
-                return { placeholder, content: '' };
+                
+                // ✅ 缓存空结果（阈值不匹配）
+                const emptyResult = '';
+                this._setCachedResult(cacheKey, { content: emptyResult });
+                return { placeholder, content: emptyResult };
             })());
         }
 
@@ -976,14 +1070,31 @@ class RAGDiaryPlugin {
             }
             processedDiaries.add(dbName);
 
+            // ✅ 新增：为《《》》模式生成缓存键
+            const cacheKey = this._generateCacheKey({
+                userContent,
+                aiContent: aiContent || '',
+                dbName,
+                modifiers
+            });
+
+            // ✅ 尝试从缓存获取
+            const cachedResult = this._getCachedResult(cacheKey);
+            if (cachedResult) {
+                processingPromises.push(Promise.resolve({ placeholder, content: cachedResult.content }));
+                continue; // ⭐ 跳过后续的阈值判断
+            }
+
             processingPromises.push((async () => {
                 try {
                     const diaryConfig = this.ragConfig[dbName] || {};
                     const localThreshold = diaryConfig.threshold || GLOBAL_SIMILARITY_THRESHOLD;
-                    const dbNameVector = this.vectorDBManager.getDiaryNameVector(dbName);
+                    const dbNameVector = await this.vectorDBManager.getDiaryNameVector(dbName);
                     if (!dbNameVector) {
                         console.warn(`[RAGDiaryPlugin] Could not find cached vector for diary name: "${dbName}". Skipping.`);
-                        return { placeholder, content: '' };
+                        const emptyResult = '';
+                        this._setCachedResult(cacheKey, { content: emptyResult });
+                        return { placeholder, content: emptyResult };
                     }
 
                     const baseSimilarity = this.cosineSimilarity(queryVector, dbNameVector);
@@ -999,22 +1110,30 @@ class RAGDiaryPlugin {
                             console.log(`[RAGDiaryPlugin] AIMemo licensed and activated for "${dbName}" in hybrid mode. Similarity: ${finalSimilarity.toFixed(4)} >= ${localThreshold}`);
                             // ✅ 修复：只有在阈值匹配时才收集 AIMemo 请求
                             aiMemoRequests.push({ placeholder, dbName });
-                            return { placeholder, content: '' }; // 暂时返回空，稍后统一处理
+                            return { placeholder, content: '' }; // ⚠️ AIMemo不缓存，因为聚合处理
                         } else {
+                            // ✅ 混合模式也传递TagMemo参数
                             const retrievedContent = await this._processRAGPlaceholder({
                                 dbName, modifiers, queryVector, userContent, combinedQueryForDisplay,
                                 dynamicK, timeRanges, allowTimeAndGroup: true
                             });
+                            
+                            // ✅ 缓存结果（RAG已在内部缓存，这里是额外保险）
+                            this._setCachedResult(cacheKey, { content: retrievedContent });
                             return { placeholder, content: retrievedContent };
                         }
                     } else {
                         // ✅ 修复：阈值不匹配时，即使有 ::AIMemo 修饰符也不处理
                         console.log(`[RAGDiaryPlugin] "${dbName}" similarity (${finalSimilarity.toFixed(4)}) below threshold (${localThreshold}). Skipping ${modifiers.includes('::AIMemo') ? 'AIMemo' : 'RAG'}.`);
+                        const emptyResult = '';
+                        this._setCachedResult(cacheKey, { content: emptyResult }); // ✅ 缓存空结果
+                        return { placeholder, content: emptyResult };
                     }
-                    return { placeholder, content: '' };
                 } catch (error) {
                     console.error(`[RAGDiaryPlugin] 处理混合模式占位符时出错 (${dbName}):`, error);
-                    return { placeholder, content: `[处理失败: ${error.message}]` };
+                    const errorResult = `[处理失败: ${error.message}]`;
+                    this._setCachedResult(cacheKey, { content: errorResult }); // ✅ 缓存错误结果
+                    return { placeholder, content: errorResult };
                 }
             })());
         }
@@ -1088,16 +1207,47 @@ class RAGDiaryPlugin {
             modifiers,
             queryVector,
             userContent,
+            aiContent,
             combinedQueryForDisplay,
             dynamicK,
             timeRanges,
             allowTimeAndGroup = true
         } = options;
 
+        // 1️⃣ 生成缓存键
+        const cacheKey = this._generateCacheKey({
+            userContent,
+            aiContent: aiContent || '',
+            dbName,
+            modifiers
+        });
+
+        // 2️⃣ 尝试从缓存获取
+        const cachedResult = this._getCachedResult(cacheKey);
+        if (cachedResult) {
+            // 缓存命中时，仍需广播VCP Info（可选）
+            if (this.pushVcpInfo && cachedResult.vcpInfo) {
+                this.pushVcpInfo({
+                    ...cachedResult.vcpInfo,
+                    fromCache: true // 标记为缓存结果
+                });
+            }
+            return cachedResult.content;
+        }
+
+        // 3️⃣ 缓存未命中，执行原有逻辑
+        console.log(`[RAGDiaryPlugin] 缓存未命中，执行RAG检索...`);
+
         const kMultiplier = this._extractKMultiplier(modifiers);
         const useTime = allowTimeAndGroup && modifiers.includes('::Time');
         const useGroup = allowTimeAndGroup && modifiers.includes('::Group');
         const useRerank = modifiers.includes('::Rerank');
+        
+        // ✅ 新增：解析TagMemo修饰符和权重
+        const tagMemoMatch = modifiers.match(/::TagMemo([\d.]+)/);
+        const tagWeight = tagMemoMatch ? parseFloat(tagMemoMatch[1]) : null;
+        
+        // TagMemo修饰符检测（静默）
 
         const displayName = dbName + '日记本';
         const finalK = Math.max(1, Math.round(dynamicK * kMultiplier));
@@ -1109,6 +1259,7 @@ class RAGDiaryPlugin {
         let finalQueryVector = queryVector;
         let activatedGroups = null;
         let finalResultsForBroadcast = null;
+        let vcpInfoData = null;
 
         if (useGroup) {
             activatedGroups = this.semanticGroups.detectAndActivateGroups(userContent);
@@ -1120,7 +1271,8 @@ class RAGDiaryPlugin {
 
         if (useTime && timeRanges && timeRanges.length > 0) {
             // --- Time-aware path ---
-            let ragResults = await this.vectorDBManager.search(dbName, finalQueryVector, kForSearch);
+            // ✅ Time模式下也传递tagWeight
+            let ragResults = await this.vectorDBManager.search(dbName, finalQueryVector, kForSearch, tagWeight);
 
             if (useRerank) {
                 ragResults = await this._rerankDocuments(userContent, ragResults, finalK);
@@ -1147,7 +1299,8 @@ class RAGDiaryPlugin {
 
         } else {
             // --- Standard path (no time filter) ---
-            let searchResults = await this.vectorDBManager.search(dbName, finalQueryVector, kForSearch);
+            // ✅ 传递tagWeight参数到search方法
+            let searchResults = await this.vectorDBManager.search(dbName, finalQueryVector, kForSearch, tagWeight);
             
             if (useRerank) {
                 searchResults = await this._rerankDocuments(userContent, searchResults, finalK);
@@ -1164,8 +1317,15 @@ class RAGDiaryPlugin {
         
         if (this.pushVcpInfo && finalResultsForBroadcast) {
             try {
+                // ✅ 新增：根据相关度分数对结果进行排序
+                finalResultsForBroadcast.sort((a, b) => {
+                    const scoreA = a.rerank_score ?? a.score ?? -1;
+                    const scoreB = b.rerank_score ?? b.score ?? -1;
+                    return scoreB - scoreA;
+                });
+                
                 const cleanedResults = this._cleanResultsForBroadcast(finalResultsForBroadcast);
-                const infoData = {
+                vcpInfoData = {
                     type: 'RAG_RETRIEVAL_DETAILS',
                     dbName: dbName,
                     query: combinedQueryForDisplay,
@@ -1173,14 +1333,24 @@ class RAGDiaryPlugin {
                     useTime: useTime,
                     useGroup: useGroup,
                     useRerank: useRerank,
+                    useTagMemo: tagWeight !== null, // ✅ 添加Tag模式标识
+                    tagWeight: tagWeight, // ✅ 添加Tag权重
                     timeRanges: useTime ? timeRanges.map(r => ({ start: r.start.toISOString(), end: r.end.toISOString() })) : undefined,
-                    results: cleanedResults
+                    results: cleanedResults,
+                    // ✅ 新增：汇总Tag统计信息
+                    tagStats: tagWeight !== null ? this._aggregateTagStats(cleanedResults) : undefined
                 };
-                this.pushVcpInfo(infoData);
+                this.pushVcpInfo(vcpInfoData);
             } catch (broadcastError) {
                 console.error(`[RAGDiaryPlugin] Error during VCPInfo broadcast (RAG path):`, broadcastError);
             }
         }
+
+        // 4️⃣ 保存到缓存
+        this._setCachedResult(cacheKey, {
+            content: retrievedContent,
+            vcpInfo: vcpInfoData
+        });
         
         return retrievedContent;
     }
@@ -1201,6 +1371,30 @@ class RAGDiaryPlugin {
      * @returns {string} 格式化的思维链结果
      */
     async _processMetaThinkingChain(chainName, queryVector, userContent, combinedQueryForDisplay, kSequence, useGroup, isAutoMode = false, autoThreshold = 0.65) {
+        
+        // 1️⃣ 生成缓存键（元思考链）
+        const cacheKey = this._generateCacheKey({
+            userContent,
+            chainName,
+            kSequence,
+            useGroup,
+            isAutoMode
+        });
+
+        // 2️⃣ 尝试从缓存获取
+        const cachedResult = this._getCachedResult(cacheKey);
+        if (cachedResult) {
+            if (this.pushVcpInfo && cachedResult.vcpInfo) {
+                this.pushVcpInfo({
+                    ...cachedResult.vcpInfo,
+                    fromCache: true
+                });
+            }
+            return cachedResult.content;
+        }
+
+        // 3️⃣ 缓存未命中，执行原有逻辑
+        console.log(`[RAGDiaryPlugin][MetaThinking] 缓存未命中，执行元思考链...`);
         
         // 如果是自动模式，需要先决定使用哪个 chain
         if (isAutoMode) {
@@ -1268,7 +1462,7 @@ class RAGDiaryPlugin {
             // 两种模式都应该尊重链本身定义的k序列
             const k = kSequence[i];
             
-            console.log(`[RAGDiaryPlugin][MetaThinking] 阶段 ${i + 1}/${chain.length}: 查询"${clusterName}"，k=${k}`);
+            // 静默查询阶段 ${i + 1}/${chain.length}
 
             try {
                 // 使用当前查询向量搜索当前簇
@@ -1313,7 +1507,7 @@ class RAGDiaryPlugin {
                             [queryVector, avgResultVector],
                             [0.8, 0.2]
                         );
-                        console.log(`[RAGDiaryPlugin][MetaThinking] 向量已融合，准备进入下一阶段`);
+                        // 向量融合完成（静默）
                     } else {
                         console.warn(`[RAGDiaryPlugin][MetaThinking] 无法获取结果向量，中断递归`);
                         break;
@@ -1333,9 +1527,10 @@ class RAGDiaryPlugin {
         }
 
         // VCP Info 广播：发送完整的思维链执行详情
+        let vcpInfoData = null;
         if (this.pushVcpInfo) {
             try {
-                const infoData = {
+                vcpInfoData = {
                     type: 'META_THINKING_CHAIN',
                     chainName,
                     query: combinedQueryForDisplay,
@@ -1344,15 +1539,21 @@ class RAGDiaryPlugin {
                     stages: chainDetailedInfo,
                     totalStages: chain.length
                 };
-                this.pushVcpInfo(infoData);
-                console.log(`[RAGDiaryPlugin][MetaThinking] VCP Info 已广播`);
+                this.pushVcpInfo(vcpInfoData);
+                // VCP Info 已广播（静默）
             } catch (broadcastError) {
                 console.error(`[RAGDiaryPlugin][MetaThinking] VCP Info 广播失败:`, broadcastError);
             }
         }
 
-        // 两种模式都返回完整结果，仅在格式化时加以区分
-        return this._formatMetaThinkingResults(chainResults, chainName, activatedGroups, isAutoMode);
+        // 4️⃣ 保存到缓存
+        const formattedResult = this._formatMetaThinkingResults(chainResults, chainName, activatedGroups, isAutoMode);
+        this._setCachedResult(cacheKey, {
+            content: formattedResult,
+            vcpInfo: vcpInfoData
+        });
+
+        return formattedResult;
     }
 
     /**
@@ -1568,7 +1769,7 @@ class RAGDiaryPlugin {
             console.warn('[RAGDiaryPlugin] Rerank called, but is not configured. Skipping.');
             return documents.slice(0, originalK);
         }
-        console.log(`[RAGDiaryPlugin] Starting rerank process for ${documents.length} documents.`);
+        // Rerank开始（静默）
 
         const rerankUrl = new URL('v1/rerank', this.rerankConfig.url).toString();
         const headers = {
@@ -1600,7 +1801,7 @@ class RAGDiaryPlugin {
             batches.push(currentBatch);
         }
 
-        console.log(`[RAGDiaryPlugin] Split documents into ${batches.length} batches for reranking.`);
+        // 文档已分批（静默）
 
         let allRerankedDocs = [];
         for (let i = 0; i < batches.length; i++) {
@@ -1615,7 +1816,7 @@ class RAGDiaryPlugin {
                     top_n: docTexts.length // Rerank all documents within the batch
                 };
 
-                console.log(`[RAGDiaryPlugin] Reranking batch ${i + 1}/${batches.length} with ${docTexts.length} documents.`);
+                // Reranking批次 ${i + 1}/${batches.length}（静默）
                 const response = await axios.post(rerankUrl, body, { headers });
 
                 if (response.data && Array.isArray(response.data.results)) {
@@ -1648,7 +1849,7 @@ class RAGDiaryPlugin {
         allRerankedDocs.sort((a, b) => b.rerank_score - a.rerank_score);
 
         const finalDocs = allRerankedDocs.slice(0, originalK);
-        console.log(`[RAGDiaryPlugin] Rerank process finished. Returning ${finalDocs.length} documents.`);
+        console.log(`[RAGDiaryPlugin] Rerank完成: ${finalDocs.length}篇文档`);
         return finalDocs;
     }
     
@@ -1656,14 +1857,46 @@ class RAGDiaryPlugin {
         if (!Array.isArray(results)) return [];
         return results.map(r => {
             // 仅保留可序列化的关键属性
-            return {
+            const cleaned = {
                 text: r.text || '',
                 score: r.score || undefined,
                 source: r.source || undefined,
                 date: r.date || undefined,
-                // 移除所有可能导致 JSON.stringify 失败的复杂对象或循环引用
             };
+            
+            // ✅ 新增：包含Tag相关信息（如果存在）
+            if (r.originalScore !== undefined) cleaned.originalScore = r.originalScore;
+            if (r.tagMatchScore !== undefined) cleaned.tagMatchScore = r.tagMatchScore;
+            if (r.matchedTags && Array.isArray(r.matchedTags)) cleaned.matchedTags = r.matchedTags;
+            if (r.tagMatchCount !== undefined) cleaned.tagMatchCount = r.tagMatchCount;
+            if (r.boostFactor !== undefined) cleaned.boostFactor = r.boostFactor;
+            
+            return cleaned;
         });
+    }
+    
+    /**
+     * ✅ 新增：汇总Tag统计信息
+     */
+    _aggregateTagStats(results) {
+        const allMatchedTags = new Set();
+        let totalBoostFactor = 0;
+        let resultsWithTags = 0;
+        
+        for (const r of results) {
+            if (r.matchedTags && r.matchedTags.length > 0) {
+                r.matchedTags.forEach(tag => allMatchedTags.add(tag));
+                resultsWithTags++;
+                if (r.boostFactor) totalBoostFactor += r.boostFactor;
+            }
+        }
+        
+        return {
+            uniqueMatchedTags: Array.from(allMatchedTags),
+            totalTagMatches: allMatchedTags.size,
+            resultsWithTags: resultsWithTags,
+            avgBoostFactor: resultsWithTags > 0 ? (totalBoostFactor / resultsWithTags).toFixed(3) : 1.0
+        };
     }
 
     async getSingleEmbedding(text) {
@@ -1722,6 +1955,256 @@ class RAGDiaryPlugin {
             }
         }
         return null; // Should not be reached, but as a fallback
+    }
+
+    //####################################################################################
+    //## Query Result Cache - 查询结果缓存系统
+    //####################################################################################
+
+    /**
+     * ✅ 生成稳定的缓存键
+     * @param {Object} params - 缓存键参数
+     * @returns {string} SHA256哈希键
+     */
+    _generateCacheKey(params) {
+        const {
+            userContent = '',
+            aiContent = '',
+            dbName = '',
+            modifiers = '',
+            chainName = '',
+            kSequence = [],
+            useGroup = false,
+            isAutoMode = false
+        } = params;
+
+        // 时间敏感的查询需要包含当前日期
+        const currentDate = modifiers.includes('::Time')
+            ? dayjs().tz(DEFAULT_TIMEZONE).format('YYYY-MM-DD')
+            : 'static';
+
+        const normalized = {
+            user: userContent.trim(),
+            ai: aiContent ? aiContent.trim() : null,
+            db: dbName,
+            mod: modifiers,
+            chain: chainName,
+            k: kSequence.join('-'),
+            group: useGroup,
+            auto: isAutoMode,
+            date: currentDate
+        };
+
+        const keyString = JSON.stringify(normalized);
+        return crypto.createHash('sha256').update(keyString).digest('hex');
+    }
+
+    /**
+     * ✅ 从缓存获取结果
+     */
+    _getCachedResult(cacheKey) {
+        if (!this.queryCacheEnabled) {
+            this.cacheMisses++; // 仍然记录 miss，以便统计
+            return null;
+        }
+        const cached = this.queryResultCache.get(cacheKey);
+        
+        if (!cached) {
+            this.cacheMisses++;
+            return null;
+        }
+
+        // 检查缓存是否过期
+        const now = Date.now();
+        if (now - cached.timestamp > this.cacheTTL) {
+            console.log(`[RAGDiaryPlugin] 缓存已过期，删除键: ${cacheKey.substring(0, 8)}...`);
+            this.queryResultCache.delete(cacheKey);
+            this.cacheMisses++;
+            return null;
+        }
+
+        // 缓存命中
+        this.cacheHits++;
+        const hitRate = (this.cacheHits / (this.cacheHits + this.cacheMisses) * 100).toFixed(1);
+        console.log(`[RAGDiaryPlugin] ✅ 缓存命中! (命中率: ${hitRate}%, 键: ${cacheKey.substring(0, 8)}...)`);
+        
+        return cached.result;
+    }
+
+    /**
+     * ✅ 将结果存入缓存（带LRU淘汰策略）
+     */
+    _setCachedResult(cacheKey, result) {
+        if (!this.queryCacheEnabled) return;
+        // LRU策略：超过容量时删除最早的条目
+        if (this.queryResultCache.size >= this.maxCacheSize) {
+            const firstKey = this.queryResultCache.keys().next().value;
+            this.queryResultCache.delete(firstKey);
+            console.log(`[RAGDiaryPlugin] 缓存已满，淘汰最早条目`);
+        }
+
+        this.queryResultCache.set(cacheKey, {
+            result: result,
+            timestamp: Date.now()
+        });
+
+        console.log(`[RAGDiaryPlugin] 缓存已保存 (当前: ${this.queryResultCache.size}/${this.maxCacheSize})`);
+    }
+
+    /**
+     * ✅ 清空所有查询缓存（配置更新时调用）
+     */
+    clearQueryCache() {
+        const oldSize = this.queryResultCache.size;
+        this.queryResultCache.clear();
+        this.cacheHits = 0;
+        this.cacheMisses = 0;
+        console.log(`[RAGDiaryPlugin] 查询缓存已清空 (删除了 ${oldSize} 条记录)`);
+    }
+
+    /**
+     * ✅ 定期清理过期缓存
+     */
+    _startCacheCleanupTask() {
+        setInterval(() => {
+            const now = Date.now();
+            let expiredCount = 0;
+            
+            for (const [key, value] of this.queryResultCache.entries()) {
+                if (now - value.timestamp > this.cacheTTL) {
+                    this.queryResultCache.delete(key);
+                    expiredCount++;
+                }
+            }
+            
+            if (expiredCount > 0) {
+                console.log(`[RAGDiaryPlugin] 清理了 ${expiredCount} 条过期缓存`);
+            }
+        }, this.cacheTTL); // 每个TTL周期清理一次
+    }
+
+    //####################################################################################
+    //## Embedding Cache - 向量缓存系统
+    //####################################################################################
+
+    /**
+     * ✅ 带缓存的向量化方法（替代原 getSingleEmbedding）
+     */
+    async getSingleEmbeddingCached(text) {
+        if (!text) {
+            console.error('[RAGDiaryPlugin] getSingleEmbeddingCached was called with no text.');
+            return null;
+        }
+
+        // 生成缓存键（使用文本hash）
+        const cacheKey = crypto.createHash('sha256').update(text.trim()).digest('hex');
+        
+        // 尝试从缓存获取
+        const cached = this.embeddingCache.get(cacheKey);
+        if (cached) {
+            const now = Date.now();
+            if (now - cached.timestamp <= this.embeddingCacheTTL) {
+                console.log(`[RAGDiaryPlugin] ✅ 向量缓存命中 (键: ${cacheKey.substring(0, 8)}...)`);
+                return cached.vector;
+            } else {
+                // 过期，删除
+                this.embeddingCache.delete(cacheKey);
+            }
+        }
+
+        // 缓存未命中，调用API
+        console.log(`[RAGDiaryPlugin] 向量缓存未命中，调用Embedding API...`);
+        const vector = await this.getSingleEmbedding(text);
+        
+        if (vector) {
+            // LRU策略：超过容量时删除最早的条目
+            if (this.embeddingCache.size >= this.embeddingCacheMaxSize) {
+                const firstKey = this.embeddingCache.keys().next().value;
+                this.embeddingCache.delete(firstKey);
+                console.log(`[RAGDiaryPlugin] 向量缓存已满，淘汰最早条目`);
+            }
+            
+            this.embeddingCache.set(cacheKey, {
+                vector: vector,
+                timestamp: Date.now()
+            });
+            
+            console.log(`[RAGDiaryPlugin] 向量已缓存 (当前: ${this.embeddingCache.size}/${this.embeddingCacheMaxSize})`);
+        }
+        
+        return vector;
+    }
+
+    /**
+     * ✅ 定期清理过期向量缓存
+     */
+    _startEmbeddingCacheCleanupTask() {
+        setInterval(() => {
+            const now = Date.now();
+            let expiredCount = 0;
+            
+            for (const [key, value] of this.embeddingCache.entries()) {
+                if (now - value.timestamp > this.embeddingCacheTTL) {
+                    this.embeddingCache.delete(key);
+                    expiredCount++;
+                }
+            }
+            
+            if (expiredCount > 0) {
+                console.log(`[RAGDiaryPlugin] 清理了 ${expiredCount} 条过期向量缓存`);
+            }
+        }, this.embeddingCacheTTL);
+    }
+
+    /**
+     * ✅ 清空向量缓存
+     */
+    clearEmbeddingCache() {
+        const oldSize = this.embeddingCache.size;
+        this.embeddingCache.clear();
+        console.log(`[RAGDiaryPlugin] 向量缓存已清空 (删除了 ${oldSize} 条记录)`);
+    }
+
+    /**
+     * ✅ 获取缓存统计信息
+     */
+    getCacheStats() {
+        const totalRequests = this.cacheHits + this.cacheMisses;
+        const hitRate = totalRequests > 0 ? (this.cacheHits / totalRequests * 100).toFixed(1) : '0.0';
+        
+        return {
+            size: this.queryResultCache.size,
+            maxSize: this.maxCacheSize,
+            hits: this.cacheHits,
+            misses: this.cacheMisses,
+            hitRate: `${hitRate}%`,
+            ttl: this.cacheTTL
+        };
+    }
+    
+    //####################################################################################
+    //## AIMemo Cache - AIMemo缓存系统
+    //####################################################################################
+    
+    /**
+     * ✅ 定期清理过期AIMemo缓存
+     */
+    _startAiMemoCacheCleanupTask() {
+        setInterval(() => {
+            const now = Date.now();
+            let expiredCount = 0;
+            
+            for (const [key, value] of this.aiMemoCache.entries()) {
+                if (now - value.timestamp > this.aiMemoCacheTTL) {
+                    this.aiMemoCache.delete(key);
+                    expiredCount++;
+                }
+            }
+            
+            if (expiredCount > 0) {
+                console.log(`[RAGDiaryPlugin] 清理了 ${expiredCount} 条过期AIMemo缓存`);
+            }
+        }, this.aiMemoCacheTTL);
     }
 }
 

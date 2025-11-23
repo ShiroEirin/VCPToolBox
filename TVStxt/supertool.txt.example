@@ -116,23 +116,37 @@ expression:「始」您要计算的完整数学表达式「末」
 - 置信区间: confidence_interval([data_list], confidence_level)
 
 2.联网搜索工具
-tavily搜索(API)，强大的AI搜索，可定制化功能强。搜索引擎内封装网页图片转译器。
+tavily搜索(API)，强大的AI搜索，可定制化功能强。搜索引擎内封装网页图片转译器（支持文搜图，且会将搜到的图片转化为描述文本+URL）。
 tool_name:「始」TavilySearch「末」,
 query:「始」(必需) 搜索的关键词或问题。「末」,
 topic:「始」(可选, 默认为 general) 搜索的主题，其它还有 news, finance两个模式。如果AI不确定，可以省略此参数或使用 general。「末」,
+search_depth:「始」advanced「末」, // 可选字段，默认basic关键词搜索，advanced则为语义搜索，二者行为逻辑有所不同。
 max_results:「始」(可选, 默认为 10) 返回的最大结果数量，范围 5-100。「末」,
 include_raw_content:「始」(可选) 如果需要获取网页原始内容，请将此值设为 'text' 或 'markdown'。「末」,
-
-谷歌搜索(网页搜索)，老牌搜索，信源广，适合作为交叉信源。
-tool_name:「始」GoogleSearch「末」,
-query:「始」如何学习编程？「末」
+country:「始」(可选) 搜索结果的国家来源，例如united states或者china,需要输入“完整国家单词”。「末」,
+start_date:「始」(可选) 搜索开始日期，格式为 YYYY-MM-DD。「末」,
+end_date:「始」(可选) 搜索结束日期，格式为 YYYY-MM-DD。「末」,  // 日期范围一定要一起使用，不可只输入单边范围。
+days:「始」7「末」 // (可选) 返回最近7天的信息，默认为null，和上面2个参数冲突不能一起选
 
 基于SerpAPI实现————
 使用DuckDuckGo搜索引擎进行网页搜索。
 tool_name:「始」SerpSearch「末」,
 command:「始」duckduckgo_search「末」,
 q:「始」需要搜索的关键词「末」,
-kl:「始」us-en「末」 //指定搜索的区域和语言
+kl:「始」us-en「末」 //可选，指定搜索的区域和语言
+
+使用谷歌搜索。
+command:「始」google_search「末」,
+q:「始」Coffee「末」,
+可选额外参数
+- q/query/text (字符串, 必需): 需要搜索的关键词。
+- location (字符串, 可选): 指定搜索的地理位置 (例如: Austin, Texas, United States)。
+- hl (字符串, 可选): 界面语言 (例如: en, es, fr)。
+- gl (字符串, 可选): 指定搜索的国家代码 (例如: us, cn)。
+
+使用谷歌搜图反向代理引擎进行图片检索获取图片信息和近似图。
+command:「始」google_reverse_image_search「末」,
+image_url:「始」file://H:\MCP\VCPChat\AppData\UserData\attachments\c6df70296cc035aab5a61b971f933f97de00b45f2eed404f488481550d942912.png「末」 //可以是本地url也可以是https url。
 
 
 3.网页超级爬虫，强大的网页内容爬取器。

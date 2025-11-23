@@ -1,0 +1,35 @@
+{
+  "name": "vcp-diary-tag-processor",
+  "version": "1.0.0",
+  "description": "VCP日记批量Tag处理工具 - 智能检测、修复格式、AI自动生成Tag",
+  "main": "diary-tag-batch-processor.js",
+  "scripts": {
+    "start": "node diary-tag-batch-processor.js",
+    "process": "node diary-tag-batch-processor.js"
+  },
+  "keywords": [
+    "vcp",
+    "diary",
+    "tag",
+    "processor",
+    "ai",
+    "knowledge-graph",
+    "rag"
+  ],
+  "author": "VCP Team",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-repo/VCPToolBox.git"
+  },
+  "bin": {
+    "tag-processor": "./diary-tag-batch-processor.js"
+  }
+}

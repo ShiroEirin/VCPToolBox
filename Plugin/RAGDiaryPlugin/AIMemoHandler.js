@@ -14,13 +14,11 @@ dayjs.extend(timezone);
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
 
 class AIMemoHandler {
-    constructor(ragPlugin) {
+    constructor(ragPlugin, cache) {
         this.ragPlugin = ragPlugin;
         this.config = {};
         this.promptTemplate = '';
-        this.cache = new Map();
-        this.cacheMaxSize = parseInt(process.env.AIMemoCacheSize) || 10; // 缓存大小
-        this.cacheTTL = (parseInt(process.env.AIMemoCacheTTL) || 10) * 60 * 1000; // 缓存有效期（分钟）
+        this.cache = cache; // ✅ 使用注入的缓存
         // 不在构造函数中调用 loadConfig，而是在主插件初始化时调用
     }
 
@@ -74,7 +72,13 @@ class AIMemoHandler {
             const cached = this._getCache(cacheKey);
             if (cached) {
                 console.log(`[AIMemoHandler] 命中缓存，直接返回结果。Key: ${cacheKey}`);
-                return cached;
+                if (this.ragPlugin.pushVcpInfo && cached.vcpInfo) {
+                    this.ragPlugin.pushVcpInfo({
+                        ...cached.vcpInfo,
+                        fromCache: true
+                    });
+                }
+                return cached.content;
             }
             console.log(`[AIMemoHandler] 未命中缓存，继续处理。Key: ${cacheKey}`);
             // --- 缓存机制结束 ---
@@ -107,15 +111,24 @@ class AIMemoHandler {
             console.log(`[AIMemoHandler] Token估算 - 文件总计: ${totalFileTokens}, 固定开销: ${FIXED_OVERHEAD}, 总计: ${totalTokens}`);
 
             // 3. 处理（单次或分批）
-            let result;
+            let resultObject;
             if (totalTokens > this.config.maxTokensPerBatch) {
-                result = await this._processBatchedAggregated(loadedDiaries, allDiaryFiles, userContent, aiContent, combinedQueryForDisplay);
+                resultObject = await this._processBatchedAggregated(loadedDiaries, allDiaryFiles, userContent, aiContent, combinedQueryForDisplay);
             } else {
-                result = await this._processSingleAggregated(loadedDiaries, allDiaryFiles, userContent, aiContent, combinedQueryForDisplay);
+                resultObject = await this._processSingleAggregated(loadedDiaries, allDiaryFiles, userContent, aiContent, combinedQueryForDisplay);
             }
 
-            this._setCache(cacheKey, result);
-            return result;
+            // VCP Info 广播 (非缓存)
+            if (this.ragPlugin.pushVcpInfo && resultObject.vcpInfo) {
+                try {
+                    this.ragPlugin.pushVcpInfo(resultObject.vcpInfo);
+                } catch (broadcastError) {
+                    console.error('[AIMemoHandler] VCP Info broadcast failed:', broadcastError);
+                }
+            }
+
+            this._setCache(cacheKey, resultObject);
+            return resultObject.content;
 
         } catch (error) {
             console.error(`[AIMemoHandler] 聚合处理失败:`, error);
@@ -137,7 +150,7 @@ class AIMemoHandler {
             return null;
         }
 
-        if (Date.now() - entry.timestamp > this.cacheTTL) {
+        if (Date.now() - entry.timestamp > this.ragPlugin.aiMemoCacheTTL) {
             console.log(`[AIMemoHandler] 缓存条目已过期，删除。Key: ${key}`);
             this.cache.delete(key);
             return null;
@@ -147,7 +160,7 @@ class AIMemoHandler {
     }
 
     _setCache(key, result) {
-        if (this.cache.size >= this.cacheMaxSize) {
+        if (this.cache.size >= this.ragPlugin.aiMemoCacheMaxSize) {
             // 删除最旧的条目 (Map an insertion order)
             const oldestKey = this.cache.keys().next().value;
             this.cache.delete(oldestKey);
@@ -176,25 +189,19 @@ class AIMemoHandler {
 
         const extractedMemories = this._extractMemories(aiResponse);
         
-        // VCP Info 广播
-        if (this.ragPlugin.pushVcpInfo) {
-            try {
-                this.ragPlugin.pushVcpInfo({
-                    type: 'AI_MEMO_RETRIEVAL',
-                    dbNames: dbNames,
-                    query: combinedQueryForDisplay,
-                    mode: 'aggregated_single',
-                    diaryCount: dbNames.length,
-                    fileCount: diaryFiles.length,
-                    rawResponse: aiResponse,
-                    extractedMemories: extractedMemories
-                });
-            } catch (broadcastError) {
-                console.error('[AIMemoHandler] VCP Info broadcast failed:', broadcastError);
-            }
-        }
+        const content = `[跨库联合检索: ${dbNames.join(' + ')}]\n${extractedMemories}`;
+        const vcpInfo = {
+            type: 'AI_MEMO_RETRIEVAL',
+            dbNames: dbNames,
+            query: combinedQueryForDisplay,
+            mode: 'aggregated_single',
+            diaryCount: dbNames.length,
+            fileCount: diaryFiles.length,
+            rawResponse: aiResponse,
+            extractedMemories: extractedMemories
+        };
 
-        return `[跨库联合检索: ${dbNames.join(' + ')}]\n${extractedMemories}`;
+        return { content, vcpInfo };
     }
 
     /**
@@ -225,25 +232,19 @@ class AIMemoHandler {
 
         const mergedMemories = this._mergeBatchResults(batchResults);
 
-        // VCP Info 广播
-        if (this.ragPlugin.pushVcpInfo) {
-            try {
-                this.ragPlugin.pushVcpInfo({
-                    type: 'AI_MEMO_RETRIEVAL',
-                    dbNames: dbNames,
-                    query: combinedQueryForDisplay,
-                    mode: 'aggregated_batched',
-                    diaryCount: dbNames.length,
-                    fileCount: diaryFiles.length,
-                    batchCount: batches.length,
-                    extractedMemories: mergedMemories
-                });
-            } catch (broadcastError) {
-                console.error('[AIMemoHandler] VCP Info broadcast failed:', broadcastError);
-            }
-        }
+        const content = `[跨库联合检索: ${dbNames.join(' + ')}]\n${mergedMemories}`;
+        const vcpInfo = {
+            type: 'AI_MEMO_RETRIEVAL',
+            dbNames: dbNames,
+            query: combinedQueryForDisplay,
+            mode: 'aggregated_batched',
+            diaryCount: dbNames.length,
+            fileCount: diaryFiles.length,
+            batchCount: batches.length,
+            extractedMemories: mergedMemories
+        };
 
-        return `[跨库联合检索: ${dbNames.join(' + ')}]\n${mergedMemories}`;
+        return { content, vcpInfo };
     }
 
     /**

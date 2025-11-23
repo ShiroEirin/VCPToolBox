@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const http = require('http'); // 用于向主服务器发送回调
 const fs = require('fs').promises; // 添加 fs 模块
+require('dotenv').config({ path: path.join(__dirname, 'config.env') });
 
 // 用于向主服务器发送回调的函数
 function sendCallback(requestId, status, result) {
@@ -136,6 +137,27 @@ async function main() {
                 commands.push(args[`command${i}`]);
                 i++;
             }
+
+            // --- 安全性检查 ---
+            const forbiddenCommands = (process.env.FORBIDDEN_COMMANDS || '').toLowerCase().split(',').map(cmd => cmd.trim()).filter(Boolean);
+            const authRequiredCommands = (process.env.AUTH_REQUIRED_COMMANDS || '').toLowerCase().split(',').map(cmd => cmd.trim()).filter(Boolean);
+            let isAuthRequiredByConfig = false;
+
+            for (const cmd of commands) {
+                const lowerCaseCmd = cmd.toLowerCase();
+
+                // 1. 检查是否包含被禁止的指令
+                if (forbiddenCommands.length > 0 && forbiddenCommands.some(forbidden => lowerCaseCmd.includes(forbidden))) {
+                    throw new Error(`执行被拒绝：指令 "${cmd.substring(0, 50)}..." 包含被禁止的关键字。`);
+                }
+
+                // 2. 检查是否需要管理员授权
+                if (!isAuthRequiredByConfig && authRequiredCommands.length > 0 && authRequiredCommands.some(authCmd => lowerCaseCmd.includes(authCmd))) {
+                    isAuthRequiredByConfig = true;
+                }
+            }
+            // --- 安全性检查结束 ---
+
             let command;
             const isMultiCommand = commands.length > 1;
             if (isMultiCommand) {
@@ -165,6 +187,10 @@ async function main() {
             }
 
             // 管理员模式验证
+            if (isAuthRequiredByConfig && !requireAdmin) {
+                throw new Error('此操作需要管理员授权，但未提供验证码 (requireAdmin)。');
+            }
+
             if (requireAdmin) {
                 if (executionType !== 'background') {
                     notice = '管理员模式请求被强制切换为 "background" 执行类型。';

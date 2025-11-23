@@ -10,6 +10,9 @@ def backup_user_data(backup_filename):
     # 定义要备份的文件扩展名
     file_extensions = ['.txt', '.md', '.env', '.json']
 
+    # 定义要排除的特定目录路径
+    excluded_paths = [os.path.normpath('dailynote/MusicDiary')]
+
     # 获取当前目录
     source_dir = '.'
 
@@ -20,7 +23,12 @@ def backup_user_data(backup_filename):
         # 遍历目录
         for root, dirs, files in os.walk(source_dir):
             # 排除备份脚本本身和常见的非用户数据目录
-            dirs[:] = [d for d in dirs if d not in ['.git', '__pycache__', 'node_modules']]
+            # 排除常见的非用户数据目录和指定的路径
+            dirs[:] = [
+                d for d in dirs
+                if d not in ['.git', '__pycache__', 'node_modules'] and
+                   os.path.normpath(os.path.join(root, d)) not in excluded_paths
+            ]
             
             for file in files:
                 # 检查文件扩展名
