@@ -56,6 +56,52 @@ async function replaceOtherVariables(text, model, role, context) {
     if (text == null) return '';
     let processedText = String(text);
 
+    // SarModel 高级预设注入，对 system 角色或 VCPTavern 注入的 user 角色生效
+    if (role === 'system' || (role === 'user' && processedText.startsWith('[系统'))) {
+        // 查找所有独特的 SarPrompt 占位符，例如 {{SarPrompt1}}, {{SarPrompt2}}
+        const sarPlaceholderRegex = /\{\{(SarPrompt\d+)\}\}/g;
+        const matches = [...processedText.matchAll(sarPlaceholderRegex)];
+        const uniquePlaceholders = [...new Set(matches.map(match => match[0]))];
+
+        for (const placeholder of uniquePlaceholders) {
+            // 从 {{SarPrompt4}} 中提取 SarPrompt4
+            const promptKey = placeholder.substring(2, placeholder.length - 2);
+            // 从 SarPrompt4 中提取数字 4
+            const numberMatch = promptKey.match(/\d+$/);
+            if (!numberMatch) continue;
+
+            const index = numberMatch[0];
+            const modelKey = `SarModel${index}`;
+
+            const models = process.env[modelKey];
+            let promptValue = process.env[promptKey];
+            let replacementText = ''; // 默认替换为空字符串
+
+            // 检查模型和提示是否存在
+            if (models && promptValue) {
+                const modelList = models.split(',').map(m => m.trim().toLowerCase());
+                // 检查当前模型是否在列表中
+                if (model && modelList.includes(model.toLowerCase())) {
+                    // 模型匹配，准备注入的文本
+                    if (typeof promptValue === 'string' && promptValue.toLowerCase().endsWith('.txt')) {
+                        const fileContent = await tvsManager.getContent(promptValue);
+                        if (fileContent.startsWith('[变量文件') || fileContent.startsWith('[处理变量文件')) {
+                            promptValue = fileContent;
+                        } else {
+                            // 递归解析文件内容中的变量
+                            promptValue = await replaceOtherVariables(fileContent, model, role, context);
+                        }
+                    }
+                    replacementText = promptValue;
+                }
+            }
+            
+            // 对当前文本中所有匹配的占位符进行替换
+            const placeholderRegExp = new RegExp(placeholder.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
+            processedText = processedText.replace(placeholderRegExp, replacementText);
+        }
+    }
+
     if (role === 'system') {
         for (const envKey in process.env) {
             if (envKey.startsWith('Tar') || envKey.startsWith('Var')) {
@@ -76,44 +122,6 @@ async function replaceOtherVariables(text, model, role, context) {
                     }
                 }
             }
-        }
-
-        let sarPromptToInject = null;
-        const modelToPromptMap = new Map();
-        for (const envKey in process.env) {
-            if (/^SarModel\d+$/.test(envKey)) {
-                const index = envKey.substring(8);
-                const promptKey = `SarPrompt${index}`;
-                let promptValue = process.env[promptKey];
-                const models = process.env[envKey];
-
-                if (promptValue && models) {
-                    if (typeof promptValue === 'string' && promptValue.toLowerCase().endsWith('.txt')) {
-                        const fileContent = await tvsManager.getContent(promptValue);
-                        // 检查内容是否表示错误
-                        if (fileContent.startsWith('[变量文件') || fileContent.startsWith('[处理变量文件')) {
-                            promptValue = fileContent;
-                        } else {
-                            promptValue = await replaceOtherVariables(fileContent, model, role, context);
-                        }
-                    }
-                    const modelList = models.split(',').map(m => m.trim()).filter(m => m);
-                    for (const m of modelList) {
-                        modelToPromptMap.set(m, promptValue);
-                    }
-                }
-            }
-        }
-
-        if (model && modelToPromptMap.has(model)) {
-            sarPromptToInject = modelToPromptMap.get(model);
-        }
-
-        const sarPlaceholderRegex = /\{\{Sar[a-zA-Z0-9_]+\}\}/g;
-        if (sarPromptToInject !== null) {
-            processedText = processedText.replaceAll(sarPlaceholderRegex, sarPromptToInject);
-        } else {
-            processedText = processedText.replaceAll(sarPlaceholderRegex, '');
         }
 
         const now = new Date();

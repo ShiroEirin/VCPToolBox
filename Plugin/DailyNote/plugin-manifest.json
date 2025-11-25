@@ -18,22 +18,22 @@
     "invocationCommands": [
       {
         "commandIdentifier": "create",
-        "description": "“创建日记”: 用于创建一篇新的日记。AI必须提供maidName, dateString, 和 contentText。contentText的最后一行必须包含'Tag:'行，否则会报错。文件夹路径会根据maidName中的[tag]自动归类，并严格处理路径以防空格问题。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」DailyNote「末」,\ncommand:「始」create「末」,\nmaidName:「始」[VCP开发]Roo「末」,\ndateString:「始」2025-11-23「末」,\ncontentText:「始」今天我重构了DailyNote插件...\\nTag: VCP开发, 插件重构, Node.js「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "description": "“创建日记”: 用于创建一篇新的日记。AI必须提供maid, Date, 和 Content。Content的最后一行必须包含'Tag:'行，否则会报错。文件夹路径会根据maid中的[tag]自动归类，并严格处理路径以防空格问题。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」DailyNote「末」,\ncommand:「始」create「末」,\nmaid:「始」[VCP开发]Roo「末」,\nDate:「始」2025-11-23「末」,\nContent:「始」今天我重构了DailyNote插件...\\nTag: VCP开发, 插件重构, Node.js「末」\n<<<[END_TOOL_REQUEST]>>>",
         "parameters": [
           {
-            "name": "maidName",
+            "name": "maid",
             "description": "作者署名，支持使用[文件夹]署名格式来指定存储目录。",
             "required": true,
             "type": "string"
           },
           {
-            "name": "dateString",
+            "name": "Date",
             "description": "日记的日期，格式建议为 YYYY-MM-DD。",
             "required": true,
             "type": "string"
           },
           {
-            "name": "contentText",
+            "name": "Content",
             "description": "日记的完整内容，最后一行必须是以'Tag:'开头的标签行。",
             "required": true,
             "type": "string"

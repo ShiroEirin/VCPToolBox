@@ -41,17 +41,16 @@ async function initialize(wss) {
  * @returns {Promise<{buffer: Buffer, mimeType: string}>}
  */
 async function fetchFile(fileUrl, requestIp) {
-    // --- 新增：快速循环检测 ---
+    // --- 快速循环检测 (保留) ---
     const now = Date.now();
     if (recentRequests.has(fileUrl)) {
         const lastRequestTime = recentRequests.get(fileUrl);
         if (now - lastRequestTime < REQ_CACHE_EXPIRATION_MS) {
-            recentRequests.set(fileUrl, now); // 更新时间戳以便后续的连锁错误能够显示最新的时间
+            recentRequests.set(fileUrl, now);
             throw new Error(`在 ${REQ_CACHE_EXPIRATION_MS}ms 内检测到对同一文件 '${fileUrl}' 的重复请求。为防止无限循环，已中断操作。`);
         }
     }
     recentRequests.set(fileUrl, now);
-    // 在一段时间后清除缓存以防内存泄漏
     setTimeout(() => {
         if (recentRequests.get(fileUrl) === now) {
             recentRequests.delete(fileUrl);
@@ -63,56 +62,46 @@ async function fetchFile(fileUrl, requestIp) {
         throw new Error('FileFetcher 目前只支持 file:// 协议。');
     }
 
-    const filePath = fileURLToPath(fileUrl);
-    const mimeType = mime.lookup(filePath) || 'application/octet-stream';
-
-    // --- 健壮的缓存逻辑 ---
-    const cacheKey = crypto.createHash('sha256').update(filePath).digest('hex');
-    const originalExtension = path.extname(filePath);
+    // --- 平台无关的缓存逻辑 ---
+    // 关键：直接使用原始 fileUrl 作为缓存键，不进行任何本地解析。
+    const cacheKey = crypto.createHash('sha256').update(fileUrl).digest('hex');
+    let originalExtension = '';
+    try {
+        // 以平台无关的方式从URL中提取路径名以获取扩展名
+        const pathname = new URL(fileUrl).pathname;
+        originalExtension = path.extname(pathname);
+    } catch (e) {
+        console.warn(`[FileFetcherServer] 无法从URL解析路径名以获取扩展名: ${fileUrl}`);
+    }
     const cachedFilePath = path.join(CACHE_DIR, cacheKey + originalExtension);
 
     // 1. 尝试从本地缓存读取
     try {
         const buffer = await fs.readFile(cachedFilePath);
-        console.log(`[FileFetcherServer] 成功从本地缓存读取文件: ${cachedFilePath} (原始路径: ${filePath})`);
+        const mimeType = mime.lookup(cachedFilePath) || 'application/octet-stream';
+        console.log(`[FileFetcherServer] 成功从本地缓存读取文件: ${cachedFilePath} (原始URL: ${fileUrl})`);
         return { buffer, mimeType };
     } catch (e) {
         if (e.code !== 'ENOENT') {
             throw new Error(`读取缓存文件时发生意外错误: ${e.message}`);
         }
-        // 缓存未命中，继续执行
+        // 缓存未命中，继续从远程获取
+        console.log(`[FileFetcherServer] URL缓存未命中: ${fileUrl}。将尝试从来源服务器获取。`);
     }
 
-    // 2. 尝试直接读取本地文件 (以防主服务器有直接访问权限)
-    try {
-        const buffer = await fs.readFile(filePath);
-        console.log(`[FileFetcherServer] 成功直接读取本地文件: ${filePath}`);
-        return { buffer, mimeType };
-    } catch (e) {
-        if (e.code !== 'ENOENT') {
-            throw new Error(`读取本地文件时发生意外错误: ${e.message}`);
-        }
-        console.log(`[FileFetcherServer] 本地文件未找到: ${filePath}。将尝试从来源服务器获取。`);
-    }
+    // 2. 缓存未命中，直接从来源的分布式服务器获取
+    // 已移除：在主服务器上直接读取本地文件的尝试，因为这是逻辑缺陷。
 
-    // 3. 本地文件不存在，尝试从来源的分布式服务器获取
-
-    // --- 检查失败缓存以防止循环 ---
+    // --- 失败缓存逻辑 (保留) ---
     const cachedFailure = failedFetchCache.get(fileUrl);
-    if (cachedFailure) {
-        if (Date.now() - cachedFailure.timestamp < CACHE_EXPIRATION_MS) {
-            // 缓存仍然有效，直接抛出错误
-            throw new Error(`文件获取在短时间内已失败，为防止循环已中断。错误: ${cachedFailure.error}`);
-        } else {
-            // 缓存已过期，将其删除，然后继续尝试获取
-            failedFetchCache.delete(fileUrl);
-        }
+    if (cachedFailure && (Date.now() - cachedFailure.timestamp < CACHE_EXPIRATION_MS)) {
+        throw new Error(`文件获取在短时间内已失败，为防止循环已中断。错误: ${cachedFailure.error}`);
     }
+    failedFetchCache.delete(fileUrl);
 
     if (!requestIp) {
         throw new Error('无法确定请求来源，因为缺少 requestIp。');
     }
-    
     if (!webSocketServer) {
         throw new Error('FileFetcherServer 尚未初始化。');
     }
@@ -125,25 +114,23 @@ async function fetchFile(fileUrl, requestIp) {
     console.log(`[FileFetcherServer] 确定文件来源服务器为: ${serverId} (IP: ${requestIp})。正在请求文件...`);
 
     try {
-        const result = await webSocketServer.executeDistributedTool(serverId, 'internal_request_file', { filePath }, 60000);
+        // 关键：将原始的、未经修改的 fileUrl 作为参数传递给远程工具。
+        const result = await webSocketServer.executeDistributedTool(serverId, 'internal_request_file', { fileUrl: fileUrl }, 60000);
 
         if (result && result.status === 'success' && result.fileData) {
-            console.log(`[FileFetcherServer] 成功从服务器 ${serverId} 获取到文件 ${filePath} 的 Base64 数据。`);
+            console.log(`[FileFetcherServer] 成功从服务器 ${serverId} 获取到文件 ${fileUrl} 的 Base64 数据。`);
             const buffer = Buffer.from(result.fileData, 'base64');
 
-            // --- 将获取的文件写入健壮的本地缓存 ---
+            // 将获取的文件写入本地缓存
             try {
                 await fs.writeFile(cachedFilePath, buffer);
                 console.log(`[FileFetcherServer] 已将获取的文件缓存到本地: ${cachedFilePath}`);
             } catch (writeError) {
-                // 这个错误现在不应再发生，但保留日志以防万一
                 console.error(`[FileFetcherServer] 无法将获取的文件写入本地缓存: ${writeError.message}`);
             }
 
-            return {
-                buffer: buffer,
-                mimeType: result.mimeType || mimeType
-            };
+            const mimeType = result.mimeType || mime.lookup(originalExtension) || 'application/octet-stream';
+            return { buffer, mimeType };
         } else {
             const errorMsg = result ? result.error : '未知错误';
             throw new Error(`从服务器 ${serverId} 获取文件失败: ${errorMsg}`);

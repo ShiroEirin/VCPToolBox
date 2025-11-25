@@ -83,14 +83,15 @@ async function getImageDataFromUrl(url) {
             console.error(`[NanoBananaGenOR] 成功直接读取本地文件: ${filePath}`);
             return { buffer, mimeType };
         } catch (e) {
-            if (e.code === 'ENOENT') {
-                // 文件在本地未找到。抛出一个特定结构的错误，让主服务器处理。
-                const structuredError = new Error("本地文件未找到，需要远程获取。");
+            // 关键改进：当文件不存在(ENOENT)或路径格式对当前系统无效时(跨平台场景)，
+            // 都应触发远程获取流程。
+            if (e.code === 'ENOENT' || e.code === 'ERR_INVALID_FILE_URL_PATH') {
+                const structuredError = new Error("本地文件无法直接访问，需要远程获取。");
                 structuredError.code = 'FILE_NOT_FOUND_LOCALLY';
                 structuredError.fileUrl = url;
                 throw structuredError;
             } else {
-                // 对于其他错误（如权限问题），正常抛出。
+                // 对于其他错误（如权限问题 EACCES），则视为真正的、不可恢复的错误
                 throw new Error(`读取本地文件时发生意外错误: ${e.message}`);
             }
         }

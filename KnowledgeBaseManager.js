@@ -34,7 +34,8 @@ class KnowledgeBaseManager {
             
             batchWindow: 2000,
             maxBatchSize: 50,
-            indexSaveDelay: 60000,
+            indexSaveDelay: 120000, // 日记索引的保存延迟 (2分钟)
+            tagIndexSaveDelay: 300000, // 全局Tag索引的保存延迟 (5分钟)
             
             ignoreFolders: (process.env.IGNORE_FOLDERS || 'VCP论坛').split(',').map(f => f.trim()).filter(Boolean),
             ignorePrefixes: (process.env.IGNORE_PREFIX || '已整理').split(',').map(p => p.trim()).filter(Boolean),
@@ -958,10 +959,11 @@ class KnowledgeBaseManager {
 
     _scheduleIndexSave(name) {
         if (this.saveTimers.has(name)) return;
+        const delay = name === 'global_tags' ? this.config.tagIndexSaveDelay : this.config.indexSaveDelay;
         const timer = setTimeout(() => {
             this._saveIndexToDisk(name);
             this.saveTimers.delete(name);
-        }, this.config.indexSaveDelay);
+        }, delay);
         this.saveTimers.set(name, timer);
     }
 
@@ -1021,8 +1023,18 @@ class KnowledgeBaseManager {
     }
 
     async shutdown() {
+        console.log('[KnowledgeBase] shutting down...');
         await this.watcher?.close();
+
+        // 确保所有待保存的索引都被写入磁盘
+        for (const [name, timer] of this.saveTimers) {
+            clearTimeout(timer);
+            this._saveIndexToDisk(name);
+        }
+        this.saveTimers.clear();
+
         this.db?.close();
+        console.log('[KnowledgeBase] Shutdown complete.');
     }
 }
 
