@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name           OpenWebUI Force HTML Image Renderer
-// @version        5.0.0
-// @description    Render fragmented HTML images + Advanced Lightbox (Wheel Zoom, Pinch Zoom, Drag & Pan).
-// @author         B3000Kcn
+// @version        6.0.0
+// @description    Render fragmented HTML images + Auto-complete Secure VCP URL + Advanced Lightbox + Link Management.
+// @author         B3000Kcn (Modified)
 // @match          https://your.openwebui.url/*
 // @run-at         document-idle
 // @license        MIT
@@ -15,6 +15,41 @@
   document.__OWUI_IMG_RENDERER_INIT__ = true;
 
   // ==========================================
+  // 0. VCP 安全配置区域 (请在此处填写)
+  // ==========================================
+  const VCP_CONFIG = {
+    // 填写你的域名，包含协议，末尾不要带斜杠。例如: https://aaa.bbb.ccc
+    BASE_URL: "https://aaa.bbb.ccc",
+
+    // 填写你的访问密钥
+    KEY: "xxxxxxxxxxxxxxxxxxxxxxxxx"
+  };
+
+  /**
+   * 核心替换函数：
+   * 无论AI在 /images/ 前面填了什么，统统替换为标准格式
+   */
+  function fixVcpUrl(originalSrc) {
+    if (!originalSrc) return originalSrc;
+
+    // 锚点路径，这是判断是否为VCP图片的关键特征
+    const anchor = "/images/";
+    const index = originalSrc.indexOf(anchor);
+
+    // 如果链接中不包含 /images/，则原样返回（可能是外链头像等）
+    if (index === -1) return originalSrc;
+
+    // 截取 /images/ 及之后的所有路径部分
+    const pathPart = originalSrc.substring(index);
+
+    // 处理 BaseURL，防止用户手误多写了斜杠
+    let cleanBase = VCP_CONFIG.BASE_URL.replace(/\/+$/, "");
+
+    // 拼接最终链接: host + /pw=key + /images/path...
+    return `${cleanBase}/pw=${VCP_CONFIG.KEY}${pathPart}`;
+  }
+
+  // ==========================================
   // 1. 高级灯箱逻辑 (Zoom, Pan, Pinch)
   // ==========================================
   const LIGHTBOX_CSS = `
@@ -22,12 +57,12 @@
       position: fixed; inset: 0; background: rgba(0,0,0,.9);
       display: flex; justify-content: center; align-items: center;
       z-index: 99999; opacity: 0; animation: gm-fadein .2s forwards;
-      overflow: hidden; touch-action: none; /* 禁止移动端默认滚动 */
+      overflow: hidden; touch-action: none;
     }
     .gm-lightbox-image-container {
       width: 100%; height: 100%; display: flex;
       justify-content: center; align-items: center;
-      pointer-events: none; /* 让事件穿透给图片或背景 */
+      pointer-events: none;
     }
     .gm-lightbox-image {
       max-width: 90vw; max-height: 90vh; display: block;
@@ -55,17 +90,16 @@
     container.className = 'gm-lightbox-image-container';
 
     const img = document.createElement('img');
-    img.src = src;
+    // 灯箱里的图片也确保经过URL修复（双重保险）
+    img.src = fixVcpUrl(src);
     img.className = 'gm-lightbox-image';
 
-    // 阻止图片默认拖拽行为
     img.ondragstart = (e) => e.preventDefault();
 
     container.appendChild(img);
     overlay.appendChild(container);
     document.body.appendChild(overlay);
 
-    // 初始化缩放控制
     initZoomAndPan(img, overlay);
   }
 
@@ -75,7 +109,7 @@
     let start = { x: 0, y: 0 };
     let initialPinchDistance = 0;
     let initialScale = 1;
-    let didMove = false; // 用于区分点击和拖拽
+    let didMove = false;
 
     const updateTransform = (noAnim = false) => {
       if(noAnim) img.style.transition = 'none';
@@ -83,7 +117,6 @@
       img.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
     };
 
-    // --- 关闭逻辑 ---
     container.addEventListener('click', (e) => {
       if (e.target === container || (e.target === img && !didMove)) {
         container.remove();
@@ -91,7 +124,6 @@
       }
     });
 
-    // --- 滚轮缩放 (PC) ---
     container.addEventListener('wheel', (e) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
@@ -100,24 +132,19 @@
       updateTransform();
     }, { passive: false });
 
-    // --- 双击还原 ---
     img.addEventListener('dblclick', (e) => {
       e.preventDefault();
       state = { scale: 1, x: 0, y: 0 };
       updateTransform();
     });
 
-    // --- 触摸/鼠标 通用处理 ---
-    // 使用 Pointer Events 统一处理单指拖拽
     img.addEventListener('pointerdown', (e) => {
-      // 如果是多点触控(双指)，交给 touch 事件处理，这里忽略
       if (e.pointerType === 'touch' && !e.isPrimary) return;
-
       isDragging = true;
       didMove = false;
       start = { x: e.clientX - state.x, y: e.clientY - state.y };
       img.setPointerCapture(e.pointerId);
-      img.style.transition = 'none'; // 拖拽时移除动画，保证跟手
+      img.style.transition = 'none';
     });
 
     img.addEventListener('pointermove', (e) => {
@@ -125,10 +152,7 @@
       e.preventDefault();
       const newX = e.clientX - start.x;
       const newY = e.clientY - start.y;
-
-      // 只有移动超过一定距离才算拖拽，否则算点击
       if (Math.abs(newX - state.x) > 2 || Math.abs(newY - state.y) > 2) didMove = true;
-
       state.x = newX;
       state.y = newY;
       img.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
@@ -137,10 +161,9 @@
     img.addEventListener('pointerup', (e) => {
       isDragging = false;
       img.releasePointerCapture(e.pointerId);
-      img.style.transition = ''; // 恢复缓动
+      img.style.transition = '';
     });
 
-    // --- 触屏双指缩放 (Mobile Pinch) ---
     const getDist = (touches) => {
       return Math.hypot(
         touches[0].clientX - touches[1].clientX,
@@ -150,7 +173,7 @@
 
     container.addEventListener('touchstart', (e) => {
       if (e.touches.length === 2) {
-        isDragging = false; // 双指时禁止单指拖拽逻辑
+        isDragging = false;
         initialPinchDistance = getDist(e.touches);
         initialScale = state.scale;
       }
@@ -161,9 +184,7 @@
         e.preventDefault();
         const currentDist = getDist(e.touches);
         const ratio = currentDist / initialPinchDistance;
-        // 限制缩放范围 0.5x ~ 10x
         state.scale = Math.min(Math.max(0.5, initialScale * ratio), 10);
-
         img.style.transition = 'none';
         img.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
       }
@@ -171,7 +192,7 @@
   }
 
   // ==========================================
-  // 2. 渲染器逻辑 (Chain Consumer - v4.0 Core)
+  // 2. 渲染器逻辑 (Chain Consumer)
   // ==========================================
   const IGNORE_SELECTOR = [
     'pre', 'code', 'textarea', 'input',
@@ -199,7 +220,11 @@
     wrapper.style.cssText = 'display: block; margin: 4px 0; width: 100%;';
 
     const img = document.createElement('img');
-    img.src = src;
+
+    // [修改点]: 这里调用 URL 修复逻辑
+    // 无论原始 src 是什么，只要包含 /images/，就会被重写为 Config 中的 BaseUrl + Key
+    img.src = fixVcpUrl(src);
+
     img.setAttribute('data-force-rendered', 'true');
     img.style.cssText = "max-width: 100%; display: block; cursor: zoom-in; border-radius: 4px;";
     if (w) img.style.width = w.replace(/px$/i, '') + 'px';
@@ -225,7 +250,7 @@
     let combinedText = text;
     let currentNode = startNode;
     let foundEnd = false;
-    const MAX_LOOKAHEAD = 50; // 增加一点贪婪深度以防万一
+    const MAX_LOOKAHEAD = 50;
 
     for (let i = 0; i < MAX_LOOKAHEAD; i++) {
       const next = currentNode.nextSibling;
@@ -280,7 +305,6 @@
   // ==========================================
   // 3. 启动部分
   // ==========================================
-  // 全局事件代理，监听点击图片打开灯箱
   document.addEventListener('click', e => {
     if (e.target.matches('img[data-force-rendered="true"]')) {
       e.preventDefault();
@@ -325,5 +349,5 @@
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', start);
   else start();
 
-  console.log('OpenWebUI Renderer v5.0 (Zoomable Lightbox) Active');
+  console.log('OpenWebUI VCP-Renderer v5.1 Active');
 })();
