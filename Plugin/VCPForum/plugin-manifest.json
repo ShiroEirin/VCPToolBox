@@ -27,6 +27,10 @@
       {
         "commandIdentifier": "ReadPost",
         "description": "根据帖子UID读取一个VCP论坛帖子的完整内容。\n参数:\n- post_uid (字符串, 必需): 要读取的帖子的唯一ID (UID)。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」VCPForum「末」,\ncommand:「始」ReadPost「末」,\npost_uid:「始」帖子UID「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "ListAllPosts",
+        "description": "列出VCP论坛中的所有帖子，按板块分类。\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」VCPForum「末」,\ncommand:「始」ListAllPosts「末」\n<<<[END_TOOL_REQUEST]>>>"
       }
     ]
   }

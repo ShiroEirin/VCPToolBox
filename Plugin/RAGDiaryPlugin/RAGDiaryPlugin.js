@@ -1,4 +1,4 @@
-// Plugin/MessagePreprocessor/RAGDiaryPlugin/index.js
+// Plugin/MessagePreprocessor/RAGDiaryPlugin/RAGDiaryPlugin.js
 
 const axios = require('axios');
 const fs = require('fs').promises;
@@ -9,6 +9,7 @@ const cheerio = require('cheerio'); // <--- 新增：用于解析和清理HTML
 const TIME_EXPRESSIONS = require('./timeExpressions.config.js');
 const SemanticGroupManager = require('./SemanticGroupManager.js');
 const AIMemoHandler = require('./AIMemoHandler.js'); // <--- 新增：引入AIMemoHandler
+const { chunkText } = require('../../TextChunker.js'); // <--- 新增：引入文本分块器
 
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
@@ -562,34 +563,42 @@ class RAGDiaryPlugin {
     }
 
     _getWeightedAverageVector(vectors, weights) {
-        const [vecA, vecB] = vectors;
-        let [weightA, weightB] = weights;
-        
-        if (!vecA && !vecB) return null;
-        if (vecA && !vecB) return vecA;
-        if (!vecA && vecB) return vecB;
+        // 1. 过滤掉无效的向量及其对应的权重
+        const validVectors = [];
+        const validWeights = [];
+        for (let i = 0; i < vectors.length; i++) {
+            if (vectors[i] && vectors[i].length > 0) {
+                validVectors.push(vectors[i]);
+                validWeights.push(weights[i] || 0);
+            }
+        }
 
-        if (vecA.length !== vecB.length) {
-            console.error('[RAGDiaryPlugin] Vector dimensions do not match.');
-            return null;
-        }
-        
-        // 归一化权重
-        const sum = weightA + weightB;
-        if (sum === 0) {
+        if (validVectors.length === 0) return null;
+        if (validVectors.length === 1) return validVectors[0];
+
+        // 2. 归一化权重
+        let weightSum = validWeights.reduce((sum, w) => sum + w, 0);
+        if (weightSum === 0) {
             console.warn('[RAGDiaryPlugin] Weight sum is zero, using equal weights.');
-            weightA = 0.5;
-            weightB = 0.5;
-        } else {
-            weightA /= sum;
-            weightB /= sum;
+            validWeights.fill(1 / validVectors.length);
+            weightSum = 1;
         }
         
-        const dimension = vecA.length;
-        const result = new Array(dimension);
-        
-        for (let i = 0; i < dimension; i++) {
-            result[i] = (vecA[i] * weightA) + (vecB[i] * weightB);
+        const normalizedWeights = validWeights.map(w => w / weightSum);
+        const dimension = validVectors[0].length;
+        const result = new Array(dimension).fill(0);
+
+        // 3. 计算加权平均值
+        for (let i = 0; i < validVectors.length; i++) {
+            const vector = validVectors[i];
+            const weight = normalizedWeights[i];
+            if (vector.length !== dimension) {
+                 console.error('[RAGDiaryPlugin] Vector dimensions do not match. Skipping mismatched vector.');
+                 continue;
+            }
+            for (let j = 0; j < dimension; j++) {
+                result[j] += vector[j] * weight;
+            }
         }
         
         return result;
@@ -1201,6 +1210,61 @@ class RAGDiaryPlugin {
         return kMultiplierMatch ? parseFloat(kMultiplierMatch[1]) : 1.0;
     }
 
+    /**
+     * 刷新一个RAG区块
+     * @param {object} metadata - 从HTML注释中解析出的元数据 {dbName, modifiers, k, originalQuery}
+     * @param {string} newQueryContext - 工具返回的最新结果文本，用于生成新的查询向量
+     * @returns {Promise<string>} 返回完整的、带有新元数据的新区块文本
+     */
+    async refreshRagBlock(metadata, contextData) {
+        console.log(`[VCP Refresh] 正在刷新 "${metadata.dbName}" 的记忆区块 (U:0.5, A:0.35, T:0.15 权重)...`);
+        const { lastAiMessage, toolResultsText } = contextData;
+        const originalUserQuery = metadata.originalQuery || '';
+
+        // 1. 分别净化用户、AI 和工具的内容
+        const sanitizedUserContent = this._stripEmoji(this._stripHtml(originalUserQuery));
+        const sanitizedAiContent = this._stripEmoji(this._stripHtml(lastAiMessage || ''));
+        const sanitizedToolContent = this._stripEmoji(this._stripHtml(toolResultsText || ''));
+
+        // 2. 并行获取所有向量
+        const [userVector, aiVector, toolVector] = await Promise.all([
+            sanitizedUserContent ? this.getSingleEmbeddingCached(sanitizedUserContent) : null,
+            sanitizedAiContent ? this.getSingleEmbeddingCached(sanitizedAiContent) : null,
+            sanitizedToolContent ? this.getSingleEmbeddingCached(sanitizedToolContent) : null
+        ]);
+
+        // 3. 按 0.5:0.35:0.15 权重合并向量
+        const vectors = [userVector, aiVector, toolVector];
+        const weights = [0.5, 0.35, 0.15];
+        console.log('[VCP Refresh] 合并用户、AI意图和工具结果向量 (权重 0.5 : 0.35 : 0.15)');
+        const queryVector = this._getWeightedAverageVector(vectors, weights);
+
+        if (!queryVector) {
+            const combinedForError = `${sanitizedUserContent} ${sanitizedAiContent} ${sanitizedToolContent}`;
+            console.error(`[VCP Refresh] 记忆刷新失败: 无法向量化新的上下文: "${combinedForError.substring(0, 100)}..."`);
+            return `[记忆刷新失败: 无法向量化新的上下文]`;
+        }
+
+        // 4. 准备用于日志记录和时间解析的组合文本
+        const combinedSanitizedContext = `[User]: ${sanitizedUserContent}\n[AI]: ${sanitizedAiContent}\n[Tool]: ${sanitizedToolContent}`;
+
+        // 5. 复用 _processRAGPlaceholder 的逻辑来获取刷新后的内容
+        const refreshedContent = await this._processRAGPlaceholder({
+            dbName: metadata.dbName,
+            modifiers: metadata.modifiers,
+            queryVector: queryVector, // ✅ 使用加权后的向量
+            userContent: combinedSanitizedContext, // ✅ 使用组合后的上下文进行内容处理
+            aiContent: null,
+            combinedQueryForDisplay: combinedSanitizedContext, // ✅ 使用组合后的上下文进行显示
+            dynamicK: metadata.k || 5,
+            timeRanges: this.timeParser.parse(combinedSanitizedContext), // ✅ 基于组合后的上下文重新解析时间
+            allowTimeAndGroup: true
+        });
+
+        // 6. 返回完整的、带有新元数据的新区块文本
+        return refreshedContent;
+    }
+
     async _processRAGPlaceholder(options) {
         const {
             dbName,
@@ -1254,6 +1318,14 @@ class RAGDiaryPlugin {
         const kForSearch = useRerank
             ? Math.max(1, Math.round(finalK * this.rerankConfig.multiplier))
             : finalK;
+        
+        // 准备元数据用于生成自描述区块
+        const metadata = {
+            dbName: dbName,
+            modifiers: modifiers,
+            k: finalK,
+            originalQuery: userContent // 保存原始查询
+        };
 
         let retrievedContent = '';
         let finalQueryVector = queryVector;
@@ -1295,7 +1367,7 @@ class RAGDiaryPlugin {
             }
 
             finalResultsForBroadcast = Array.from(allEntries.values());
-            retrievedContent = this.formatCombinedTimeAwareResults(finalResultsForBroadcast, timeRanges, dbName);
+            retrievedContent = this.formatCombinedTimeAwareResults(finalResultsForBroadcast, timeRanges, dbName, metadata);
 
         } else {
             // --- Standard path (no time filter) ---
@@ -1309,9 +1381,9 @@ class RAGDiaryPlugin {
             finalResultsForBroadcast = searchResults.map(r => ({ ...r, source: 'rag' }));
 
             if (useGroup) {
-                retrievedContent = this.formatGroupRAGResults(searchResults, displayName, activatedGroups);
+                retrievedContent = this.formatGroupRAGResults(searchResults, displayName, activatedGroups, metadata);
             } else {
-                retrievedContent = this.formatStandardResults(searchResults, displayName);
+                retrievedContent = this.formatStandardResults(searchResults, displayName, metadata);
             }
         }
         
@@ -1679,78 +1751,83 @@ class RAGDiaryPlugin {
         return diariesInRange;
     }
 
-    formatStandardResults(searchResults, displayName) {
-        let content = `\n[--- 从"${displayName}"中检索到的相关记忆片段 ---]\n`;
+    formatStandardResults(searchResults, displayName, metadata) {
+        let innerContent = `\n[--- 从"${displayName}"中检索到的相关记忆片段 ---]\n`;
         if (searchResults && searchResults.length > 0) {
-            content += searchResults.map(r => `* ${r.text.trim()}`).join('\n');
+            innerContent += searchResults.map(r => `* ${r.text.trim()}`).join('\n');
         } else {
-            content += "没有找到直接相关的记忆片段。";
+            innerContent += "没有找到直接相关的记忆片段。";
         }
-        content += `\n[--- 记忆片段结束 ---]\n`;
-        return content;
+        innerContent += `\n[--- 记忆片段结束 ---]\n`;
+
+        const metadataString = JSON.stringify(metadata).replace(/-->/g, '--\\>');
+        return `<!-- VCP_RAG_BLOCK_START ${metadataString} -->${innerContent}<!-- VCP_RAG_BLOCK_END -->`;
     }
 
-    formatCombinedTimeAwareResults(results, timeRanges, dbName) {
+    formatCombinedTimeAwareResults(results, timeRanges, dbName, metadata) {
         const displayName = dbName + '日记本';
         const formatDate = (date) => {
             const d = new Date(date);
             return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
         }
     
-        let content = `\n[--- "${displayName}" 多时间感知检索结果 ---]\n`;
+        let innerContent = `\n[--- "${displayName}" 多时间感知检索结果 ---]\n`;
         
         const formattedRanges = timeRanges.map(tr => `"${formatDate(tr.start)} ~ ${formatDate(tr.end)}"`).join(' 和 ');
-        content += `[合并查询的时间范围: ${formattedRanges}]\n`;
+        innerContent += `[合并查询的时间范围: ${formattedRanges}]\n`;
     
         const ragEntries = results.filter(e => e.source === 'rag');
         const timeEntries = results.filter(e => e.source === 'time');
         
-        content += `[统计: 共找到 ${results.length} 条不重复记忆 (语义相关 ${ragEntries.length}条, 时间范围 ${timeEntries.length}条)]\n\n`;
+        innerContent += `[统计: 共找到 ${results.length} 条不重复记忆 (语义相关 ${ragEntries.length}条, 时间范围 ${timeEntries.length}条)]\n\n`;
     
         if (ragEntries.length > 0) {
-            content += '【语义相关记忆】\n';
+            innerContent += '【语义相关记忆】\n';
             ragEntries.forEach(entry => {
                 const dateMatch = entry.text.match(/^\[(\d{4}-\d{2}-\d{2})\]/);
                 const datePrefix = dateMatch ? `[${dateMatch[1]}] ` : '';
-                content += `* ${datePrefix}${entry.text.replace(/^\[.*?\]\s*-\s*.*?\n?/, '').trim()}\n`;
+                innerContent += `* ${datePrefix}${entry.text.replace(/^\[.*?\]\s*-\s*.*?\n?/, '').trim()}\n`;
             });
         }
     
         if (timeEntries.length > 0) {
-            content += '\n【时间范围记忆】\n';
+            innerContent += '\n【时间范围记忆】\n';
             // 按日期从新到旧排序
             timeEntries.sort((a, b) => new Date(b.date) - new Date(a.date));
             timeEntries.forEach(entry => {
-                content += `* [${entry.date}] ${entry.text.replace(/^\[.*?\]\s*-\s*.*?\n?/, '').trim()}\n`;
+                innerContent += `* [${entry.date}] ${entry.text.replace(/^\[.*?\]\s*-\s*.*?\n?/, '').trim()}\n`;
             });
         }
     
-        content += `[--- 检索结束 ---]\n`;
-        return content;
+        innerContent += `[--- 检索结束 ---]\n`;
+        
+        const metadataString = JSON.stringify(metadata).replace(/-->/g, '--\\>');
+        return `<!-- VCP_RAG_BLOCK_START ${metadataString} -->${innerContent}<!-- VCP_RAG_BLOCK_END -->`;
     }
 
-    formatGroupRAGResults(searchResults, displayName, activatedGroups) {
-        let content = `\n[--- "${displayName}" 语义组增强检索结果 ---]\n`;
+    formatGroupRAGResults(searchResults, displayName, activatedGroups, metadata) {
+        let innerContent = `\n[--- "${displayName}" 语义组增强检索结果 ---]\n`;
         
         if (activatedGroups && activatedGroups.size > 0) {
-            content += `[激活的语义组:]\n`;
+            innerContent += `[激活的语义组:]\n`;
             for (const [groupName, data] of activatedGroups) {
-                content += `  • ${groupName} (${(data.strength * 100).toFixed(0)}%激活): 匹配到 "${data.matchedWords.join(', ')}"\n`;
+                innerContent += `  • ${groupName} (${(data.strength * 100).toFixed(0)}%激活): 匹配到 "${data.matchedWords.join(', ')}"\n`;
             }
-            content += '\n';
+            innerContent += '\n';
         } else {
-            content += `[未激活特定语义组]\n\n`;
+            innerContent += `[未激活特定语义组]\n\n`;
         }
         
-        content += `[检索到 ${searchResults ? searchResults.length : 0} 条相关记忆]\n`;
+        innerContent += `[检索到 ${searchResults ? searchResults.length : 0} 条相关记忆]\n`;
         if (searchResults && searchResults.length > 0) {
-            content += searchResults.map(r => `* ${r.text.trim()}`).join('\n');
+            innerContent += searchResults.map(r => `* ${r.text.trim()}`).join('\n');
         } else {
-            content += "没有找到直接相关的记忆片段。";
+            innerContent += "没有找到直接相关的记忆片段。";
         }
-        content += `\n[--- 检索结束 ---]\n`;
+        innerContent += `\n[--- 检索结束 ---]\n`;
         
-        return content;
+        const metadataString = JSON.stringify(metadata).replace(/-->/g, '--\\>');
+        return `<!-- VCP_RAG_BLOCK_START ${metadataString} -->${innerContent}<!-- VCP_RAG_BLOCK_END -->`;
     }
 
     // Helper for token estimation
@@ -1904,37 +1981,61 @@ class RAGDiaryPlugin {
             console.error('[RAGDiaryPlugin] getSingleEmbedding was called with no text.');
             return null;
         }
-
+    
         const apiKey = process.env.API_Key;
         const apiUrl = process.env.API_URL;
         const embeddingModel = process.env.WhitelistEmbeddingModel;
-
+    
         if (!apiKey || !apiUrl || !embeddingModel) {
             console.error('[RAGDiaryPlugin] Embedding API credentials or model is not configured in environment variables.');
             return null;
         }
-
+    
+        // 1. 使用 TextChunker 分割文本以避免超长
+        const textChunks = chunkText(text);
+        if (!textChunks || textChunks.length === 0) {
+            console.log('[RAGDiaryPlugin] Text chunking resulted in no chunks.');
+            return null;
+        }
+        
+        if (textChunks.length > 1) {
+            console.log(`[RAGDiaryPlugin] Text is too long, split into ${textChunks.length} chunks for embedding.`);
+        }
+    
         const maxRetries = 3;
         const retryDelay = 1000; // 1 second
-
+    
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 const response = await axios.post(`${apiUrl}/v1/embeddings`, {
                     model: embeddingModel,
-                    input: [text]
+                    input: textChunks // 传入所有文本块
                 }, {
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
                         'Content-Type': 'application/json'
                     }
                 });
-
-                const vector = response.data?.data?.[0]?.embedding;
-                if (!vector) {
-                    console.error('[RAGDiaryPlugin] Valid embedding vector was not found in the API response.');
-                    return null; // Do not retry on valid response with no vector
+    
+                const embeddings = response.data?.data;
+                if (!embeddings || embeddings.length === 0) {
+                    console.error('[RAGDiaryPlugin] No embeddings found in the API response.');
+                    return null;
                 }
-                return vector;
+    
+                const vectors = embeddings.map(e => e.embedding).filter(Boolean);
+                if (vectors.length === 0) {
+                    console.error('[RAGDiaryPlugin] No valid embedding vectors in the API response data.');
+                    return null;
+                }
+    
+                // 如果只有一个向量，直接返回；否则，计算平均向量
+                if (vectors.length === 1) {
+                    return vectors[0];
+                } else {
+                    console.log(`[RAGDiaryPlugin] Averaging ${vectors.length} vectors into one.`);
+                    return this._getAverageVector(vectors);
+                }
             } catch (error) {
                 const status = error.response ? error.response.status : null;
                 
@@ -1943,7 +2044,7 @@ class RAGDiaryPlugin {
                     await new Promise(resolve => setTimeout(resolve, retryDelay));
                     continue;
                 }
-
+    
                 if (error.response) {
                     console.error(`[RAGDiaryPlugin] Embedding API call failed with status ${status}: ${JSON.stringify(error.response.data)}`);
                 } else if (error.request) {

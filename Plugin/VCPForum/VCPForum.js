@@ -364,6 +364,73 @@ async function readPost(args) {
     return { success: true, result: `帖子 (UID: ${post_uid}) 内容如下:\n\n${content}` };
 }
 
+/**
+ * Lists all posts, grouped by board.
+ * @returns {Promise<object>} - The result of the operation.
+ */
+async function listAllPosts() {
+    await fs.mkdir(FORUM_DIR, { recursive: true });
+    const files = await fs.readdir(FORUM_DIR);
+    const mdFiles = files.filter(file => file.endsWith('.md'));
+
+    if (mdFiles.length === 0) {
+        return { success: true, result: "VCP论坛中尚无帖子。" };
+    }
+
+    const postsByBoard = {};
+
+    for (const file of mdFiles) {
+        const fullPath = path.join(FORUM_DIR, file);
+        const content = await fs.readFile(fullPath, 'utf-8');
+
+        const fileMatch = file.match(/^\[(.*?)\]\[\[(.*?)\]\]\[(.*?)\]\[(.*?)\]\[(.*?)\]\.md$/);
+
+        let displayLine;
+
+        if (fileMatch) {
+            const title = fileMatch[2];
+            const author = fileMatch[3];
+            const postTimestamp = fileMatch[4];
+            const uid = fileMatch[5];
+            
+            const formattedPostTime = new Date(postTimestamp).toLocaleString('zh-CN', { hour12: false });
+
+            displayLine = `[${author}] ${title} (UID: ${uid}) (发布于: ${formattedPostTime})`;
+        } else {
+            displayLine = file;
+        }
+
+        const replyMatches = [...content.matchAll(/\*\*回复者:\*\* (.*?)\s*\n\*\*时间:\*\* (.*?)\s*\n/g)];
+        if (replyMatches.length > 0) {
+            const lastReply = replyMatches[replyMatches.length - 1];
+            const replier = lastReply[1].trim();
+            const replyTimestamp = lastReply[2].trim();
+            const formattedReplyTime = new Date(replyTimestamp).toLocaleString('zh-CN', { hour12: false });
+
+            displayLine += ` (最后回复: ${replier} at ${formattedReplyTime})`;
+        }
+
+        const match = file.match(/^\[(.*?)\]/);
+        if (match && match[1]) {
+            const board = match[1];
+            if (!postsByBoard[board]) {
+                postsByBoard[board] = [];
+            }
+            postsByBoard[board].push(displayLine);
+        }
+    }
+
+    let output = "VCP论坛帖子列表:\n";
+
+    for (const board in postsByBoard) {
+        output += `\n————[${board}]————\n`;
+        postsByBoard[board].forEach(line => {
+            output += `${line}\n`;
+        });
+    }
+
+    return { success: true, result: output.trim() };
+}
 
 /**
  * Processes the incoming request from the plugin manager.
@@ -380,6 +447,8 @@ async function processRequest(request) {
             return await replyToPost(parameters);
         case 'ReadPost':
             return await readPost(parameters);
+        case 'ListAllPosts':
+            return await listAllPosts();
         default:
             throw new Error(`未知的指令: ${command}`);
     }

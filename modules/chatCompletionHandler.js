@@ -64,6 +64,85 @@ async function fetchWithRetry(
   }
   throw new Error('Fetch failed after all retries.');
 }
+// 辅助函数：根据新上下文刷新对话历史中的RAG区块
+// 辅助函数：根据新上下文刷新对话历史中的RAG区块
+async function _refreshRagBlocksIfNeeded(messages, newContext, pluginManager, debugMode = false) {
+    const ragPlugin = pluginManager.messagePreprocessors?.get('RAGDiaryPlugin');
+    // 检查插件是否存在且是否实现了refreshRagBlock方法
+    if (!ragPlugin || typeof ragPlugin.refreshRagBlock !== 'function') {
+        if (debugMode) {
+            console.log('[VCP Refresh] RAGDiaryPlugin 未找到或版本不兼容 (缺少 refreshRagBlock)，跳过刷新。');
+        }
+        return messages;
+    }
+
+    // 创建消息数组的深拷贝以安全地进行修改
+    const newMessages = JSON.parse(JSON.stringify(messages));
+    let hasRefreshed = false;
+
+    // 🟢 改进点1：使用更健壮的正则 [\s\S]*? 匹配跨行内容，并允许标签周围有空格
+    const ragBlockRegex = /<!-- VCP_RAG_BLOCK_START ([\s\S]*?) -->([\s\S]*?)<!-- VCP_RAG_BLOCK_END -->/g;
+
+    for (let i = 0; i < newMessages.length; i++) {
+        // 只处理 assistant 和 system 角色中的字符串内容
+        // 🟢 改进点2：有些场景下 RAG 可能会被注入到 user 消息中，建议也检查 user
+        if (['assistant', 'system', 'user'].includes(newMessages[i].role) && typeof newMessages[i].content === 'string') {
+            let messageContent = newMessages[i].content;
+            
+            // 快速检查是否存在标记，避免无效正则匹配
+            if (!messageContent.includes('VCP_RAG_BLOCK_START')) {
+                continue;
+            }
+
+            // 使用 replace 的回调函数模式来处理异步逻辑通常比较麻烦
+            // 所以我们先收集所有匹配项，然后串行处理替换
+            const matches = [...messageContent.matchAll(ragBlockRegex)];
+            
+            if (matches.length > 0) {
+                if (debugMode) console.log(`[VCP Refresh] 消息[${i}]中发现 ${matches.length} 个 RAG 区块，准备刷新...`);
+                
+                // 我们从后往前替换，这样替换操作不会影响前面匹配项的索引位置（虽然 replace(str) 不依赖索引，但这是一个好习惯）
+                // 这里为了简单，我们直接构建一个新的 content 字符串或使用 split/join 策略
+                
+                for (const match of matches) {
+                    const fullMatchString = match[0]; // 完整的 ... const metadataJson = match[1];    // 第一个捕获组：元数据 JSON
+                    const metadataJson = match[1];
+                    
+                    try {
+                        // 🟢 改进点3：解析元数据时如果不严谨可能会报错，增加容错
+                        const metadata = JSON.parse(metadataJson);
+                        
+                        if (debugMode) {
+                            console.log(`[VCP Refresh] 正在刷新区块 (${metadata.dbName})...`);
+                        }
+
+                        // 调用 RAG 插件的刷新接口
+                        const newBlock = await ragPlugin.refreshRagBlock(metadata, newContext);
+                        
+                        // 🟢 改进点4：关键修复！使用回调函数进行替换，防止 newBlock 中的 "$" 符号被解析为正则特殊字符
+                        // 这是一个极其常见的 Bug，导致包含 $ 的内容（如公式、代码）替换失败或乱码
+                        messageContent = messageContent.replace(fullMatchString, () => newBlock);
+                        
+                        hasRefreshed = true;
+
+                    } catch (e) {
+                        console.error("[VCP Refresh] 刷新 RAG 区块失败:", e.message);
+                        if (debugMode) console.error(e);
+                        // 出错时保持原样，不中断流程
+                    }
+                }
+                newMessages[i].content = messageContent;
+            }
+        }
+    }
+    
+    if(hasRefreshed && debugMode) {
+        console.log("[VCP Refresh] ✅ 对话历史中的 RAG 记忆区块已根据新上下文成功刷新。");
+    }
+
+    return newMessages;
+}
+
 class ChatCompletionHandler {
   constructor(config) {
     this.config = config;
@@ -972,6 +1051,13 @@ class ChatCompletionHandler {
           const toolResults = await Promise.all(toolExecutionPromises);
           const combinedToolResultsForAI = toolResults.flat(); // Flatten the array of content arrays
           await writeDebugLog('LogToolResultForAI-Stream', { role: 'user', content: combinedToolResultsForAI });
+          
+          // --- VCP RAG 刷新注入点 (流式) ---
+          const toolResultsText = JSON.stringify(combinedToolResultsForAI);
+          const lastAiMessage = currentAIContentForLoop;
+          currentMessagesForLoop = await _refreshRagBlocksIfNeeded(currentMessagesForLoop, { lastAiMessage, toolResultsText }, pluginManager, DEBUG_MODE);
+          // --- 注入点结束 ---
+
           currentMessagesForLoop.push({ role: 'user', content: combinedToolResultsForAI });
           if (DEBUG_MODE)
             console.log(
@@ -1480,6 +1566,13 @@ class ChatCompletionHandler {
 
             const combinedToolResultsForAI = toolResults.flat(); // Flatten the array of content arrays
             await writeDebugLog('LogToolResultForAI-NonStream', { role: 'user', content: combinedToolResultsForAI });
+            
+            // --- VCP RAG 刷新注入点 (非流式) ---
+            const toolResultsText = JSON.stringify(combinedToolResultsForAI);
+            const lastAiMessage = currentAIContentForLoop;
+            currentMessagesForNonStreamLoop = await _refreshRagBlocksIfNeeded(currentMessagesForNonStreamLoop, { lastAiMessage, toolResultsText }, pluginManager, DEBUG_MODE);
+            // --- 注入点结束 ---
+
             currentMessagesForNonStreamLoop.push({ role: 'user', content: combinedToolResultsForAI });
 
             // Fetch the next AI response

@@ -74,18 +74,27 @@ function fixTagFormat(tagLine) {
 }
 
 
-async function processTagsInContent(contentText) {
-    debugLog('Processing tags in content...');
+async function processTags(contentText, externalTag) {
+    debugLog('Processing tags...');
+    // Prioritize externalTag if provided
+    if (externalTag && typeof externalTag === 'string' && externalTag.trim() !== '') {
+        debugLog('External tag provided, using it:', externalTag);
+        const fixedTag = fixTagFormat(externalTag);
+        return contentText.trimEnd() + '\n' + fixedTag;
+    }
+
+    // Fallback to detecting tag in content
+    debugLog('No external tag, detecting tag in content...');
     const detection = detectTagLine(contentText);
     if (detection.hasTag) {
-        debugLog('Tag detected, fixing format...');
+        debugLog('Tag detected in content, fixing format...');
         const fixedTag = fixTagFormat(detection.lastLine);
         // Ensure there's exactly one newline before the tag.
         return detection.contentWithoutLastLine.trimEnd() + '\n' + fixedTag;
     } else {
-        // No tag found, throw an error to be sent back to the AI.
-        debugLog('No tag detected. Throwing error.');
-        throw new Error("Tag line is missing. Please add a 'Tag:' line at the end of the content with appropriate keywords.");
+        // No tag found in either place, throw an error.
+        debugLog('No tag detected in content or as an argument. Throwing error.');
+        throw new Error("Tag is missing. Please provide a 'Tag' argument or add a 'Tag:' line at the end of the 'Content'.");
     }
 }
 
@@ -95,6 +104,7 @@ async function handleCreateCommand(args) {
     const maid = args.maid || args.maidName || args.Maid || args.MAID;
     const dateString = args.dateString || args.Date;
     const contentText = args.contentText || args.Content;
+    const tag = args.Tag || args.tag;
 
     debugLog(`Processing 'create' for Maid: ${maid}, Date: ${dateString}`);
     if (!maid || !dateString || !contentText) {
@@ -102,7 +112,7 @@ async function handleCreateCommand(args) {
     }
 
     try {
-        const processedContent = await processTagsInContent(contentText);
+        const processedContent = await processTags(contentText, tag);
         debugLog('Content after tag processing (length):', processedContent.length);
 
         const trimmedMaidName = maid.trim();
