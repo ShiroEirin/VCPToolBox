@@ -143,6 +143,15 @@ config.docker.env
 *.env
 *.env.*
 config.*.env
+config.env.new
+config.env.old
+config.env.backup_*
+
+# Configuration migration files (contain sensitive data and migration logs)
+config-backups/
+migration-report.txt
+APPLY_CONFIG.md
+MIGRATION_GUIDE.md
 Plugin/EmojiListGenerator/generated_lists/
 Plugin/ImageProcessor/image_cache.json
 Plugin/WeatherReporter/weather_cache.txt
