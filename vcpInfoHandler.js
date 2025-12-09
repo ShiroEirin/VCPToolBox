@@ -78,7 +78,7 @@ function formatVcpInfoToText(toolName, status, pluginResult) {
 - 工具名称: ${toolName}
 - 执行状态: ${statusIcon} ${status.toUpperCase()}
 - 返回内容: ${readableContent}
-]]`;
+VCP调用结果结束]]`;
 
     // 在前后添加换行符，使其在聊天流中作为独立的块出现
     return `\n${textBlock}\n`;

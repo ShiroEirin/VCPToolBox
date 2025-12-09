@@ -4,6 +4,7 @@ const vcpInfoHandler = require('../vcpInfoHandler.js');
 const fs = require('fs').promises;
 const path = require('path');
 const { getAuthCode} = require('./captchaDecoder'); // 导入统一的解码函数
+const { StringDecoder } = require('string_decoder'); // 修复中文编码截断问题
 
 async function getRealAuthCode(debugMode = false) {
   try {
@@ -116,8 +117,27 @@ async function _refreshRagBlocksIfNeeded(messages, newContext, pluginManager, de
                             console.log(`[VCP Refresh] 正在刷新区块 (${metadata.dbName})...`);
                         }
 
-                        // 调用 RAG 插件的刷新接口
-                        const newBlock = await ragPlugin.refreshRagBlock(metadata, newContext);
+                        // V4.0: Find the last *true* user message to use as the original query
+                        let originalUserQuery = '';
+                        // Search backwards from the message *before* the one containing the RAG block
+                        for (let j = i - 1; j >= 0; j--) {
+                            const prevMsg = newMessages[j];
+                            if (prevMsg.role === 'user' && typeof prevMsg.content === 'string' &&
+                                !prevMsg.content.startsWith('<!-- VCP_TOOL_PAYLOAD -->') &&
+                                !prevMsg.content.startsWith('[系统提示:]') &&
+                                !prevMsg.content.startsWith('[系统邀请指令:]')
+                            ) {
+                                originalUserQuery = prevMsg.content;
+                                if (debugMode) console.log(`[VCP Refresh] Found original user query for refresh at index ${j}.`);
+                                break; // Found it, stop searching
+                            }
+                        }
+                        if (!originalUserQuery && debugMode) {
+                            console.warn(`[VCP Refresh] Could not find a true user query for the RAG block at index ${i}. Refresh may be inaccurate.`);
+                        }
+
+                        // 调用 RAG 插件的刷新接口, now with originalUserQuery
+                        const newBlock = await ragPlugin.refreshRagBlock(metadata, newContext, originalUserQuery);
                         
                         // 🟢 改进点4：关键修复！使用回调函数进行替换，防止 newBlock 中的 "$" 符号被解析为正则特殊字符
                         // 这是一个极其常见的 Bug，导致包含 $ 的内容（如公式、代码）替换失败或乱码
@@ -437,6 +457,7 @@ class ChatCompletionHandler {
         // Helper function to process an AI response stream
         async function processAIResponseStreamHelper(aiResponse, isInitialCall) {
           return new Promise((resolve, reject) => {
+            const decoder = new StringDecoder('utf8'); // 修复中文编码截断问题：初始化解码器
             let sseBuffer = ''; // Buffer for incomplete SSE lines
             let collectedContentThisTurn = ''; // Collects textual content from delta
             let rawResponseDataThisTurn = ''; // Collects all raw chunks for diary
@@ -464,7 +485,9 @@ class ChatCompletionHandler {
             aiResponse.body.on('data', chunk => {
               // 修复 Bug #5: 如果已中止，忽略后续数据
               if (streamAborted) return;
-              const chunkString = chunk.toString('utf-8');
+              
+              // 修复中文编码截断问题：使用 decoder.write 代替 chunk.toString
+              const chunkString = decoder.write(chunk);
               rawResponseDataThisTurn += chunkString;
               sseLineBuffer += chunkString;
 
@@ -498,7 +521,15 @@ class ChatCompletionHandler {
 
             // Process any remaining data in the buffer on stream end
             aiResponse.body.on('end', () => {
+              // 修复中文编码截断问题：确保将解码器中剩余的字节也输出
+              const remainingString = decoder.end();
+              if (remainingString) {
+                sseLineBuffer += remainingString;
+                rawResponseDataThisTurn += remainingString;
+              }
+
               if (sseLineBuffer.trim()) {
+                // 注意：这里用 Buffer.from 是安全的，因为 sseLineBuffer 已经是完整的 JS 字符串了
                 const modifiedChunk = Buffer.from(sseLineBuffer, 'utf-8');
                 processChunk(modifiedChunk);
               }
@@ -1052,13 +1083,16 @@ class ChatCompletionHandler {
           const combinedToolResultsForAI = toolResults.flat(); // Flatten the array of content arrays
           await writeDebugLog('LogToolResultForAI-Stream', { role: 'user', content: combinedToolResultsForAI });
           
-          // --- VCP RAG 刷新注入点 (流式) ---
+          // V4.0: Create a unified tool payload with a hidden marker
           const toolResultsText = JSON.stringify(combinedToolResultsForAI);
+          const toolPayloadForAI = `<!-- VCP_TOOL_PAYLOAD -->\n${toolResultsText}`;
+
+          // --- VCP RAG 刷新注入点 (流式) ---
           const lastAiMessage = currentAIContentForLoop;
           currentMessagesForLoop = await _refreshRagBlocksIfNeeded(currentMessagesForLoop, { lastAiMessage, toolResultsText }, pluginManager, DEBUG_MODE);
           // --- 注入点结束 ---
 
-          currentMessagesForLoop.push({ role: 'user', content: combinedToolResultsForAI });
+          currentMessagesForLoop.push({ role: 'user', content: toolPayloadForAI });
           if (DEBUG_MODE)
             console.log(
               '[VCP Stream Loop] Combined tool results for next AI call (first 200):',
@@ -1067,7 +1101,22 @@ class ChatCompletionHandler {
 
           // --- Make next AI call (stream: true) ---
           if (!res.writableEnded) {
-            res.write('\n'); // 在下一个AI响应开始前，向客户端发送一个换行符
+            const sepChunk = {
+              id: `chatcmpl-VCP-separator-${Date.now()}`,
+              object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000),
+              model: originalBody.model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    content: '\n',  // 或者 '---\n'
+                  },
+                  finish_reason: null,
+                },
+              ],
+            };
+            res.write(`data: ${JSON.stringify(sepChunk)}\n\n`);
           }
           if (DEBUG_MODE) console.log('[VCP Stream Loop] Fetching next AI response.');
           const nextAiAPIResponse = await fetchWithRetry(
@@ -1567,13 +1616,16 @@ class ChatCompletionHandler {
             const combinedToolResultsForAI = toolResults.flat(); // Flatten the array of content arrays
             await writeDebugLog('LogToolResultForAI-NonStream', { role: 'user', content: combinedToolResultsForAI });
             
-            // --- VCP RAG 刷新注入点 (非流式) ---
+            // V4.0: Create a unified tool payload with a hidden marker
             const toolResultsText = JSON.stringify(combinedToolResultsForAI);
+            const toolPayloadForAI = `<!-- VCP_TOOL_PAYLOAD -->\n${toolResultsText}`;
+
+            // --- VCP RAG 刷新注入点 (非流式) ---
             const lastAiMessage = currentAIContentForLoop;
             currentMessagesForNonStreamLoop = await _refreshRagBlocksIfNeeded(currentMessagesForNonStreamLoop, { lastAiMessage, toolResultsText }, pluginManager, DEBUG_MODE);
             // --- 注入点结束 ---
 
-            currentMessagesForNonStreamLoop.push({ role: 'user', content: combinedToolResultsForAI });
+            currentMessagesForNonStreamLoop.push({ role: 'user', content: toolPayloadForAI });
 
             // Fetch the next AI response
             if (DEBUG_MODE) console.log('[Multi-Tool] Fetching next AI response after processing tools.');
