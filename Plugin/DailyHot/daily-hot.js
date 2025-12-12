@@ -136,9 +136,4 @@ async function readCacheOnError() {
         // Ensure all output is written before exiting.
         process.exit(0);
     });
-<<<<<<< HEAD
 })();
-                                                                                                         
-=======
-})();
->>>>>>> upstream/main
