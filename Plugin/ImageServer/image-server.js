@@ -1,6 +1,4 @@
 
-// 冻结原型链，防止原型链污染攻击
-Object.freeze(Object.prototype);
 
 // Plugin/ImageServer/image-server.js
 const express = require('express');
