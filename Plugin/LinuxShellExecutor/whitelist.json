@@ -1,0 +1,193 @@
+{
+    "commands": {
+        "ls": {
+            "description": "列出目录内容",
+            "allowedArgs": ["-l", "-a", "-la", "-lh", "-lah", "-R", "-t", "-S", "-1"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log", "/opt", "/usr/share"],
+                "denied": ["/etc/shadow", "/etc/passwd", "/root", "/proc", "/sys"]
+            },
+            "maxPathDepth": 5
+        },
+        "cat": {
+            "description": "查看文件内容",
+            "allowedArgs": ["-n", "-b", "-s", "-A"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/etc/shadow", "/etc/passwd", "/root", "/proc", "/sys"]
+            },
+            "maxFileSize": "10MB"
+        },
+        "grep": {
+            "description": "文本搜索",
+            "allowedArgs": ["-i", "-n", "-r", "-v", "-c", "-l", "-E", "-w", "-o", "-h"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/etc", "/root", "/proc", "/sys"]
+            }
+        },
+        "find": {
+            "description": "查找文件",
+            "allowedArgs": ["-name", "-type", "-size", "-mtime", "-maxdepth", "-iname"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/", "/etc", "/root", "/proc", "/sys"]
+            },
+            "maxDepth": 3
+        },
+        "ps": {
+            "description": "查看进程",
+            "allowedArgs": ["aux", "-ef", "-u", "--forest", "-o"],
+            "noPathRequired": true
+        },
+        "df": {
+            "description": "磁盘使用情况",
+            "allowedArgs": ["-h", "-T", "-i", "-a"],
+            "noPathRequired": true
+        },
+        "free": {
+            "description": "内存使用情况",
+            "allowedArgs": ["-m", "-h", "-g", "-b"],
+            "noPathRequired": true
+        },
+        "top": {
+            "description": "系统监控",
+            "allowedArgs": ["-b", "-n"],
+            "maxIterations": 1,
+            "noPathRequired": true
+        },
+        "head": {
+            "description": "查看文件头部",
+            "allowedArgs": ["-n", "-c"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/etc/shadow", "/etc/passwd", "/root"]
+            }
+        },
+        "tail": {
+            "description": "查看文件尾部",
+            "allowedArgs": ["-n", "-f", "-c"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/etc/shadow", "/etc/passwd", "/root"]
+            }
+        },
+        "wc": {
+            "description": "统计行数/字数",
+            "allowedArgs": ["-l", "-w", "-c", "-m"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/etc", "/root"]
+            }
+        },
+        "echo": {
+            "description": "输出文本",
+            "allowedArgs": ["-n", "-e"],
+            "noPathRequired": true,
+            "noRedirect": true
+        },
+        "pwd": {
+            "description": "显示当前目录",
+            "allowedArgs": [],
+            "noPathRequired": true
+        },
+        "whoami": {
+            "description": "显示当前用户",
+            "allowedArgs": [],
+            "noPathRequired": true
+        },
+        "date": {
+            "description": "显示日期时间",
+            "allowedArgs": ["+%Y-%m-%d", "+%H:%M:%S", "+%s", "-u", "-R"],
+            "noPathRequired": true
+        },
+        "uname": {
+            "description": "系统信息",
+            "allowedArgs": ["-a", "-r", "-m", "-n", "-s", "-v"],
+            "noPathRequired": true
+        },
+        "hostname": {
+            "description": "主机名",
+            "allowedArgs": ["-f", "-i"],
+            "noPathRequired": true
+        },
+        "uptime": {
+            "description": "系统运行时间",
+            "allowedArgs": ["-p", "-s"],
+            "noPathRequired": true
+        },
+        "id": {
+            "description": "用户ID信息",
+            "allowedArgs": ["-u", "-g", "-n"],
+            "noPathRequired": true
+        },
+        "env": {
+            "description": "环境变量",
+            "allowedArgs": [],
+            "noPathRequired": true
+        },
+        "which": {
+            "description": "查找命令路径",
+            "allowedArgs": ["-a"],
+            "noPathRequired": true
+        },
+        "file": {
+            "description": "文件类型检测",
+            "allowedArgs": ["-b", "-i"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/etc", "/root", "/proc", "/sys"]
+            }
+        },
+        "stat": {
+            "description": "文件状态",
+            "allowedArgs": ["-c"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/etc", "/root", "/proc", "/sys"]
+            }
+        },
+        "du": {
+            "description": "目录大小",
+            "allowedArgs": ["-h", "-s", "-a", "-c"],
+            "pathRestrictions": {
+                "allowed": ["/home", "/tmp", "/var/log"],
+                "denied": ["/", "/etc", "/root", "/proc", "/sys"]
+            }
+        },
+        "sort": {
+            "description": "排序",
+            "allowedArgs": ["-n", "-r", "-u", "-k", "-t"],
+            "noPathRequired": true
+        },
+        "uniq": {
+            "description": "去重",
+            "allowedArgs": ["-c", "-d", "-u"],
+            "noPathRequired": true
+        },
+        "cut": {
+            "description": "字段切割",
+            "allowedArgs": ["-d", "-f", "-c"],
+            "noPathRequired": true
+        },
+        "awk": {
+            "description": "文本处理",
+            "allowedArgs": ["-F"],
+            "noPathRequired": true,
+            "restrictedPatterns": ["system\\(", "getline", "/dev/"]
+        },
+        "sed": {
+            "description": "流编辑器",
+            "allowedArgs": ["-n", "-e"],
+            "noPathRequired": true,
+            "restrictedPatterns": ["w\\s+/", "e\\s+", "r\\s+/"]
+        }
+    },
+    "globalRestrictions": {
+        "maxCommandLength": 1000,
+        "maxPipelineDepth": 3,
+        "allowedPipeCommands": ["grep", "head", "tail", "wc", "sort", "uniq", "cut", "awk", "sed"],
+        "forbiddenCharacters": [";", "&&", "||", "`", "$(", "${", ">", ">>", "<", "<<", "&"],
+        "forbiddenInPipe": ["rm", "mv", "cp", "chmod", "chown", "dd", "mkfs"]
+    }
+}

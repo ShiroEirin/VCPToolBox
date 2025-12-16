@@ -1,12 +1,253 @@
 // modules/logger.js
 const fsSync = require('fs');
+const fs = require('fs').promises; // 用于异步文件操作
 const path = require('path');
 
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
 
 const DEBUG_LOG_DIR = path.join(path.dirname(__dirname), 'DebugLog');
-let currentServerLogPath = '';
-let serverLogWriteStream = null;
+const ARCHIVE_DIR = path.join(DEBUG_LOG_DIR, 'archive');
+
+// ============================================
+// RotatingLogger 类 - 日志轮转核心实现
+// ============================================
+class RotatingLogger {
+  constructor(options = {}) {
+    // 配置项
+    this.maxFileSize = options.maxFileSize || 5 * 1024 * 1024; // 默认 5MB
+    this.maxDays = options.maxDays || 7; // 默认保留 7 天
+    this.logDir = options.logDir || DEBUG_LOG_DIR;
+    this.archiveDir = options.archiveDir || ARCHIVE_DIR;
+    this.timezone = options.timezone || DEFAULT_TIMEZONE;
+    
+    // 状态
+    this.currentDate = null;
+    this.currentFileIndex = 0;
+    this.currentFilePath = null;
+    this.writeStream = null;
+    this.currentFileSize = 0;
+    this.isRotating = false;
+    this.pendingWrites = [];
+  }
+
+  // 获取当前日期字符串 (YYYY-MM-DD)
+  _getDateString() {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      timeZone: this.timezone
+    });
+    return formatter.format(new Date());
+  }
+
+  // 生成主日志文件路径（固定文件名）
+  _generateMainFilePath() {
+    return path.join(this.logDir, 'ServerLog.txt');
+  }
+
+  // 生成归档文件路径
+  _generateArchiveFilePath(dateStr, index) {
+    const archiveDateDir = path.join(this.archiveDir, dateStr, 'ServerLog');
+    const suffix = index.toString().padStart(3, '0');
+    return path.join(archiveDateDir, `${suffix}.txt`);
+  }
+
+  // 确保归档目录存在
+  _ensureArchiveDir(dateStr) {
+    const archiveDateDir = path.join(this.archiveDir, dateStr, 'ServerLog');
+    if (!fsSync.existsSync(archiveDateDir)) {
+      fsSync.mkdirSync(archiveDateDir, { recursive: true });
+    }
+    return archiveDateDir;
+  }
+
+  // 检查是否需要轮转
+  shouldRotate() {
+    const today = this._getDateString();
+    if (today !== this.currentDate) return 'date';
+    if (this.currentFileSize >= this.maxFileSize) return 'size';
+    return false;
+  }
+
+  // 归档当前日志文件
+  async _archiveCurrentLog() {
+    const mainFilePath = this._generateMainFilePath();
+    if (!fsSync.existsSync(mainFilePath)) return;
+    
+    // 确保归档目录存在
+    this._ensureArchiveDir(this.currentDate);
+    
+    // 找到下一个可用的归档索引
+    let archiveIndex = 1;
+    let archivePath = this._generateArchiveFilePath(this.currentDate, archiveIndex);
+    while (fsSync.existsSync(archivePath)) {
+      archiveIndex++;
+      archivePath = this._generateArchiveFilePath(this.currentDate, archiveIndex);
+    }
+    
+    // 移动文件到归档目录
+    try {
+      await fs.rename(mainFilePath, archivePath);
+      originalConsoleLog(`[Logger] 日志已归档: ${archivePath}`);
+    } catch (err) {
+      originalConsoleError(`[Logger] 归档失败:`, err);
+    }
+  }
+
+  // 打开新的写入流（始终写入固定文件名）
+  _openNewStream() {
+    this.currentFilePath = this._generateMainFilePath();
+    
+    // 如果文件已存在，获取其大小
+    if (fsSync.existsSync(this.currentFilePath)) {
+      const stats = fsSync.statSync(this.currentFilePath);
+      this.currentFileSize = stats.size;
+    } else {
+      this.currentFileSize = 0;
+    }
+    
+    this.writeStream = fsSync.createWriteStream(this.currentFilePath, { flags: 'a' });
+    
+    // 写入启动标记
+    const startTime = new Date().toLocaleString('zh-CN', { timeZone: this.timezone });
+    const header = `[${startTime}] Log file started.\n`;
+    this.writeStream.write(header);
+    this.currentFileSize += Buffer.byteLength(header);
+  }
+
+  // 关闭当前写入流
+  async _closeCurrentStream() {
+    if (this.writeStream) {
+      return new Promise((resolve) => {
+        this.writeStream.end(() => {
+          this.writeStream = null;
+          resolve();
+        });
+      });
+    }
+  }
+
+  // 执行轮转
+  async rotate(reason) {
+    if (this.isRotating) return;
+    this.isRotating = true;
+    
+    try {
+      await this._closeCurrentStream();
+      
+      // 归档当前日志
+      await this._archiveCurrentLog();
+      
+      if (reason === 'date') {
+        this.currentDate = this._getDateString();
+      }
+      
+      this._openNewStream();
+      
+      // 异步清理旧日志（不阻塞写入）
+      this._cleanOldLogs().catch(err => {
+        originalConsoleError('[Logger] 清理旧日志失败:', err);
+      });
+    } finally {
+      this.isRotating = false;
+      // 处理轮转期间积压的写入
+      this._flushPendingWrites();
+    }
+  }
+
+  // 处理积压的写入
+  _flushPendingWrites() {
+    while (this.pendingWrites.length > 0) {
+      const message = this.pendingWrites.shift();
+      this._doWrite(message);
+    }
+  }
+
+  // 实际写入操作
+  _doWrite(message) {
+    if (this.writeStream) {
+      this.writeStream.write(message, (err) => {
+        if (err) originalConsoleError('[Logger] 写入失败:', err);
+      });
+      this.currentFileSize += Buffer.byteLength(message);
+    }
+  }
+
+  // 写入日志（带缓冲队列）
+  write(message) {
+    // 如果正在轮转，先缓存
+    if (this.isRotating) {
+      this.pendingWrites.push(message);
+      return;
+    }
+    
+    // 每次写入前检查轮转条件（确保文件大小精确控制）
+    const rotateReason = this.shouldRotate();
+    if (rotateReason) {
+      this.pendingWrites.push(message);
+      this.rotate(rotateReason);
+      return;
+    }
+    
+    this._doWrite(message);
+  }
+
+  // 清理旧日志（清理归档目录中的旧日期文件夹）
+  async _cleanOldLogs() {
+    try {
+      if (!fsSync.existsSync(this.archiveDir)) return;
+      
+      const dateDirs = await fs.readdir(this.archiveDir);
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - this.maxDays);
+      
+      const deletePromises = [];
+      for (const dateDir of dateDirs) {
+        // 匹配日期目录格式：YYYY-MM-DD
+        const match = dateDir.match(/^(\d{4}-\d{2}-\d{2})$/);
+        if (match) {
+          const dirDate = new Date(match[1] + 'T00:00:00');
+          if (dirDate < cutoffDate) {
+            const dirPath = path.join(this.archiveDir, dateDir);
+            deletePromises.push(
+              fs.rm(dirPath, { recursive: true, force: true })
+                .then(() => originalConsoleLog(`[Logger] 已删除旧归档目录: ${dateDir}`))
+                .catch(err => originalConsoleError(`[Logger] 删除 ${dateDir} 失败:`, err))
+            );
+          }
+        }
+      }
+      await Promise.all(deletePromises);
+    } catch (err) {
+      originalConsoleError('[Logger] 读取归档目录失败:', err);
+    }
+  }
+
+  // 初始化
+  initialize() {
+    ensureDebugLogDirSync();
+    this.currentDate = this._getDateString();
+    this._openNewStream();
+    // 启动时清理旧日志
+    this._cleanOldLogs().catch(err => {
+      originalConsoleError('[Logger] 启动清理失败:', err);
+    });
+  }
+
+  // 获取当前文件路径
+  getFilePath() {
+    return this.currentFilePath;
+  }
+
+  // 获取当前写入流
+  getWriteStream() {
+    return this.writeStream;
+  }
+}
+
+// 模块级 RotatingLogger 实例
+let rotatingLogger = null;
 
 // 保存原始 console 方法
 const originalConsoleLog = console.log;
@@ -26,50 +267,23 @@ function ensureDebugLogDirSync() {
 }
 
 function initializeServerLogger() {
-  ensureDebugLogDirSync();
-
-  // 诊断日志：确认时区配置
+  // 从环境变量读取配置
+  const maxFileSize = parseInt(process.env.LOG_MAX_FILE_SIZE) || 5 * 1024 * 1024; // 默认 5MB
+  const maxDays = parseInt(process.env.LOG_MAX_DAYS) || 7; // 默认 7 天
+  
+  // 诊断日志：确认配置
   originalConsoleLog(`[LoggerSetup] 使用的默认时区: ${DEFAULT_TIMEZONE}`);
-
-  // 使用 Intl.DateTimeFormat 格式化时间戳，确保使用配置的时区
-  const now = new Date();
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZone: DEFAULT_TIMEZONE,
+  originalConsoleLog(`[LoggerSetup] 日志轮转配置: maxFileSize=${maxFileSize}, maxDays=${maxDays}`);
+  
+  // 创建 RotatingLogger 实例
+  rotatingLogger = new RotatingLogger({
+    maxFileSize,
+    maxDays,
+    timezone: DEFAULT_TIMEZONE
   });
-
-  // 格式化输出: MM/DD/YYYY, HH:MM:SS
-  const parts = formatter.formatToParts(now);
-  const year = parts.find(p => p.type === 'year').value;
-  const month = parts.find(p => p.type === 'month').value;
-  const day = parts.find(p => p.type === 'day').value;
-  const hour = parts.find(p => p.type === 'hour').value;
-  const minute = parts.find(p => p.type === 'minute').value;
-  const second = parts.find(p => p.type === 'second').value;
-
-  // 重新构建文件名时间戳 (YYYYMMDD_HHMMSS_ms)
-  const timestamp = `${year}${month}${day}_${hour}${minute}${second}_${now
-    .getMilliseconds()
-    .toString()
-    .padStart(3, '0')}`;
-  currentServerLogPath = path.join(DEBUG_LOG_DIR, `ServerLog-${timestamp}.txt`);
-
-  try {
-    // 使用配置的时区格式化日志启动时间
-    const logStartTime = new Date().toLocaleString('zh-CN', { timeZone: DEFAULT_TIMEZONE });
-    fsSync.writeFileSync(currentServerLogPath, `[${logStartTime}] Server log started.\n`, 'utf-8');
-    serverLogWriteStream = fsSync.createWriteStream(currentServerLogPath, { flags: 'a' });
-    originalConsoleLog(`[ServerSetup] 服务器日志将记录到: ${currentServerLogPath}`);
-  } catch (error) {
-    originalConsoleError(`[ServerSetup] 初始化服务器日志文件失败: ${currentServerLogPath}`, error);
-    serverLogWriteStream = null;
-  }
+  rotatingLogger.initialize();
+  
+  originalConsoleLog(`[ServerSetup] 服务器日志将记录到: ${rotatingLogger.getFilePath()}`);
 }
 
 function formatLogMessage(level, args) {
@@ -96,12 +310,8 @@ function formatLogMessage(level, args) {
 }
 
 function writeToLogFile(formattedMessage) {
-  if (serverLogWriteStream) {
-    serverLogWriteStream.write(formattedMessage, err => {
-      if (err) {
-        originalConsoleError('[Logger] 写入日志文件失败:', err);
-      }
-    });
+  if (rotatingLogger) {
+    rotatingLogger.write(formattedMessage);
   }
 }
 
@@ -132,11 +342,11 @@ function overrideConsole() {
 }
 
 function getServerLogPath() {
-  return currentServerLogPath;
+  return rotatingLogger ? rotatingLogger.getFilePath() : '';
 }
 
 function getLogWriteStream() {
-  return serverLogWriteStream;
+  return rotatingLogger ? rotatingLogger.getWriteStream() : null;
 }
 
 module.exports = {

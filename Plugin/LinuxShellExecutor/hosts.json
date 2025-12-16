@@ -1,0 +1,112 @@
+{
+    "$schema": "./hosts.schema.json",
+    "version": "1.0.0",
+    "description": "LinuxShellExecutor 远程主机配置",
+    
+    "hosts": {
+        "local": {
+            "name": "本地执行",
+            "description": "在 VCP 服务器本地执行（需要 Linux 环境）",
+            "type": "local",
+            "enabled": true,
+            "securityLevel": "standard"
+        },
+        
+        "DE-server": {
+            "name": "德国服务器",
+            "description": "开发环境 Linux 服务器",
+            "type": "ssh",
+            "enabled": true,
+            "host": "11.11.1.1",
+            "port": 22,
+            "username": "root",
+            "authMethod": "key",
+            "privateKeyPath": "./key/key",
+            "passphrase": "",
+            "securityLevel": "standard",
+            "timeout": 30000,
+            "keepAliveInterval": 10000,
+            "tags": ["dev", "linux"]
+        },
+        
+        "HK-server": {
+            "name": "香港服务器",
+            "description": "生产环境主服务器",
+            "type": "ssh",
+            "enabled": true,
+            "host": "10.0.0.1",
+            "port": 22,
+            "username": "root",
+            "authMethod": "key",
+            "privateKeyPath": "./key/hkserver",
+            "passphrase": "",
+            "securityLevel": "high",
+            "timeout": 30000,
+            "keepAliveInterval": 10000,
+            "jumpHost": null,
+            "tags": ["prod", "linux", "critical"]
+        },
+        
+        "bastion": {
+            "name": "跳板机",
+            "description": "用于访问内网服务器的跳板机",
+            "type": "ssh",
+            "enabled": false,
+            "host": "bastion.example.com",
+            "port": 22,
+            "username": "jump",
+            "authMethod": "key",
+            "privateKeyPath": "~/.ssh/bastion_key",
+            "passphrase": "",
+            "securityLevel": "maximum",
+            "timeout": 30000,
+            "keepAliveInterval": 10000,
+            "tags": ["bastion", "gateway"]
+        },
+        
+        "internal-server": {
+            "name": "内网服务器",
+            "description": "通过跳板机访问的内网服务器",
+            "type": "ssh",
+            "enabled": false,
+            "host": "192.168.100.50",
+            "port": 22,
+            "username": "admin",
+            "authMethod": "key",
+            "privateKeyPath": "~/.ssh/internal_key",
+            "passphrase": "",
+            "securityLevel": "maximum",
+            "timeout": 30000,
+            "keepAliveInterval": 10000,
+            "jumpHost": "bastion",
+            "tags": ["internal", "linux"]
+        },
+        
+        "password-auth-example": {
+            "name": "密码认证示例",
+            "description": "使用密码认证的服务器（不推荐）",
+            "type": "ssh",
+            "enabled": false,
+            "host": "example.com",
+            "port": 22,
+            "username": "user",
+            "authMethod": "password",
+            "password": "",
+            "securityLevel": "high",
+            "timeout": 30000,
+            "keepAliveInterval": 10000,
+            "tags": ["example"]
+        }
+    },
+    
+    "defaultHost": "local",
+    
+    "globalSettings": {
+        "maxConcurrentConnections": 5,
+        "connectionPoolSize": 10,
+        "defaultTimeout": 30000,
+        "retryAttempts": 3,
+        "retryDelay": 1000,
+        "logConnections": true
+    }
+}

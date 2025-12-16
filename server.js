@@ -80,21 +80,28 @@ const modelRedirectHandler = new ModelRedirectHandler();
 
 // ensureDebugLogDir is now ensureDebugLogDirSync and called by initializeServerLogger
 // writeDebugLog remains for specific debug purposes, it uses fs.promises.
+// 优化：Debug 日志按天归档到 archive/YYYY-MM-DD/Debug/ 目录
 async function writeDebugLog(filenamePrefix, data) {
     if (DEBUG_MODE) {
         const DEBUG_LOG_DIR = path.join(__dirname, 'DebugLog');
-        try {
-            await fs.mkdir(DEBUG_LOG_DIR, { recursive: true });
-        } catch (error) {
-            console.error(`创建 DebugLog 目录失败 (async): ${DEBUG_LOG_DIR}`, error);
-        }
         const now = dayjs().tz(DEFAULT_TIMEZONE);
-        const timestamp = now.format('YYYYMMDD_HHmmss_SSS');
+        const dateStr = now.format('YYYY-MM-DD');
+        const timestamp = now.format('HHmmss_SSS');
+        
+        // 归档目录：DebugLog/archive/YYYY-MM-DD/Debug/
+        const archiveDir = path.join(DEBUG_LOG_DIR, 'archive', dateStr, 'Debug');
+        
+        try {
+            await fs.mkdir(archiveDir, { recursive: true });
+        } catch (error) {
+            console.error(`创建 Debug 归档目录失败: ${archiveDir}`, error);
+        }
+        
         const filename = `${filenamePrefix}-${timestamp}.txt`;
-        const filePath = path.join(DEBUG_LOG_DIR, filename);
+        const filePath = path.join(archiveDir, filename);
         try {
             await fs.writeFile(filePath, JSON.stringify(data, null, 2));
-            console.log(`[DebugLog] 已记录日志: ${filename}`);
+            console.log(`[DebugLog] 已记录日志: archive/${dateStr}/Debug/${filename}`);
         } catch (error) {
             console.error(`写入调试日志失败: ${filePath}`, error);
         }

@@ -1,0 +1,29 @@
+{
+    "manifestVersion": "1.0.0",
+    "name": "LinuxShellExecutor",
+    "version": "0.2.0",
+    "displayName": "Linux Shell 安全执行器",
+    "description": "六层安全防护的 Linux Shell 命令执行器。支持多主机 SSH 远程执行、密钥/密码认证、跳板机、黑名单过滤、白名单验证、AST分析、沙箱隔离和审计日志。",
+    "author": "VCP Team",
+    "pluginType": "synchronous",
+    "requiresAdmin": true,
+    "entryPoint": {
+        "type": "nodejs",
+        "command": "node LinuxShellExecutor.js"
+    },
+    "communication": {
+        "protocol": "stdio",
+        "timeout": 60000
+    },
+    "dependencies": {
+        "npm": ["ssh2", "dotenv"]
+    },
+    "capabilities": {
+        "invocationCommands": [
+            {
+                "commandIdentifier": "LinuxShellExecutor",
+                "description": "在安全沙箱中执行 Linux Shell 命令，支持本地和远程 SSH 执行。\n\n参数:\n- command (字符串, 必需): 要执行的 Shell 命令。\n- hostId (字符串, 可选): 目标主机ID，默认 'local'。可在 hosts.json 中配置多台主机。\n- timeout (数字, 可选): 超时时间（毫秒），默认30000。\n- securityLevel (字符串, 可选): 安全等级 'basic'|'standard'|'high'|'maximum'，默认 'standard'。\n\n基本调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\ncommand:「始」ls -la /tmp「末」\n<<<[END_TOOL_REQUEST]>>>\n\n指定远程主机:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\ncommand:「始」df -h「末」,\nhostId:「始」dev-server「末」\n<<<[END_TOOL_REQUEST]>>>\n\n列出所有主机:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\naction:「始」listHosts「末」\n<<<[END_TOOL_REQUEST]>>>\n\n测试主机连接:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\naction:「始」testConnection「末」,\nhostId:「始」dev-server「末」\n<<<[END_TOOL_REQUEST]>>>"
+            }
+        ]
+    }
+}
