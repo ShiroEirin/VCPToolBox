@@ -62,7 +62,8 @@ function fixTagFormat(tagLine) {
     let normalizedContent = tagContent
         .replace(/[\uff1a]/g, '')
         .replace(/[\uff0c]/g, ', ')
-        .replace(/[\u3001]/g, ', ');
+        .replace(/[\u3001]/g, ', ')
+        .replace(/[。.]+$/g, ''); // 🔧 修复：移除末尾的中文句号和英文句号
     normalizedContent = normalizedContent
         .replace(/,\s*/g, ', ')
         .replace(/,\s{2,}/g, ', ')

@@ -717,6 +717,142 @@ class RAGDiaryPlugin {
             .trim();
     }
 
+    /**
+     * 更精确的 Base64 检测函数
+     * @param {string} str - 要检测的字符串
+     * @returns {boolean} 是否可能是 Base64 数据
+     */
+    _isLikelyBase64(str) {
+        if (!str || str.length < 100) return false;
+        
+        // Base64 特征检测
+        const sample = str.substring(0, 200);
+        
+        // 1. 检查是否只包含 Base64 字符
+        if (!/^[A-Za-z0-9+/=]+$/.test(sample)) return false;
+        
+        // 2. 检查长度是否合理（Base64 通常是 4 的倍数）
+        if (str.length % 4 !== 0 && str.length % 4 !== 2 && str.length % 4 !== 3) return false;
+        
+        // 3. 检查字符多样性（真正的文本不太可能有这么高的字符密度）
+        const uniqueChars = new Set(sample).size;
+        if (uniqueChars > 50) return true; // Base64 通常有 60+ 种不同字符
+        
+        // 4. 长度超过 500 且符合格式，大概率是 Base64
+        return str.length > 500;
+    }
+
+    /**
+     * 将 JSON 对象转换为 Markdown 文本，减少向量噪音
+     * @param {any} obj - 要转换的对象
+     * @param {number} depth - 当前递归深度
+     * @returns {string}
+     */
+    _jsonToMarkdown(obj, depth = 0) {
+        if (obj === null || obj === undefined) return '';
+        if (typeof obj !== 'object') return String(obj);
+
+        let md = '';
+        const indent = '  '.repeat(depth);
+
+        if (Array.isArray(obj)) {
+            for (const item of obj) {
+                // 特殊处理 VCP 的 content part 格式: [{"type":"text", "text":"..."}]
+                if (item && typeof item === 'object' && item.type === 'text' && item.text) {
+                    // ✅ 新增：检查 text 内容是否包含嵌套 JSON
+                    let textContent = item.text;
+                    
+                    // 尝试提取并解析嵌套的 JSON - 改进的正则表达式
+                    const jsonMatch = textContent.match(/:\s*\n(\{[\s\S]*?\}|\[[\s\S]*?\])\s*$/);
+                    if (jsonMatch) {
+                        try {
+                            const nestedJson = JSON.parse(jsonMatch[1]);
+                            // 将前缀文字 + 递归解析的 JSON 内容合并
+                            const prefix = textContent.substring(0, jsonMatch.index + 1).trim();
+                            const nestedMd = this._jsonToMarkdown(nestedJson, depth + 1);
+                            md += `${prefix}\n${nestedMd}\n`;
+                            continue;
+                        } catch (e) {
+                            // 解析失败，使用原始文本
+                            console.debug('[RAGDiaryPlugin] Failed to parse nested JSON in text content:', e.message);
+                        }
+                    }
+                    
+                    // ✅ 新增：检查是否有内联 JSON（不在行尾的情况）
+                    const inlineJsonMatch = textContent.match(/(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\])/);
+                    if (inlineJsonMatch && inlineJsonMatch[0].length > 50) {
+                        try {
+                            const inlineJson = JSON.parse(inlineJsonMatch[0]);
+                            const beforeJson = textContent.substring(0, inlineJsonMatch.index).trim();
+                            const afterJson = textContent.substring(inlineJsonMatch.index + inlineJsonMatch[0].length).trim();
+                            const inlineMd = this._jsonToMarkdown(inlineJson, depth + 1);
+                            
+                            md += `${beforeJson}\n${inlineMd}`;
+                            if (afterJson) md += `\n${afterJson}`;
+                            md += '\n';
+                            continue;
+                        } catch (e) {
+                            // 解析失败，使用原始文本
+                            console.debug('[RAGDiaryPlugin] Failed to parse inline JSON in text content:', e.message);
+                        }
+                    }
+                    
+                    md += `${textContent}\n`;
+                } else if (typeof item !== 'object') {
+                    md += `${indent}- ${item}\n`;
+                } else {
+                    md += `${this._jsonToMarkdown(item, depth)}\n`;
+                }
+            }
+        } else {
+            for (const [key, value] of Object.entries(obj)) {
+                if (value === null || value === undefined) continue;
+                
+                if (typeof value === 'object') {
+                    const subContent = this._jsonToMarkdown(value, depth + 1);
+                    if (subContent.trim()) {
+                        md += `${indent}# ${key}:\n${subContent}`;
+                    }
+                } else {
+                    // ✅ 改进：检查字符串值是否包含嵌套 JSON
+                    const valStr = String(value);
+                    
+                    // 先检查是否是 Base64 数据
+                    if (valStr.length > 200 && (valStr.includes('base64') || this._isLikelyBase64(valStr))) {
+                        md += `${indent}* **${key}**: [Data Omitted]\n`;
+                        continue;
+                    }
+                    
+                    // 检查是否包含 JSON 结构
+                    if (valStr.length > 100 && (valStr.includes('{') || valStr.includes('['))) {
+                        const nestedJsonMatch = valStr.match(/^(.*?)(\{[\s\S]*\}|\[[\s\S]*\])(.*)$/);
+                        if (nestedJsonMatch) {
+                            try {
+                                const nestedJson = JSON.parse(nestedJsonMatch[2]);
+                                const prefix = nestedJsonMatch[1].trim();
+                                const suffix = nestedJsonMatch[3].trim();
+                                const nestedMd = this._jsonToMarkdown(nestedJson, depth + 1);
+                                
+                                md += `${indent}* **${key}**: `;
+                                if (prefix) md += `${prefix} `;
+                                md += `\n${nestedMd}`;
+                                if (suffix) md += `${indent}  ${suffix}\n`;
+                                continue;
+                            } catch (e) {
+                                // 解析失败，使用原始文本
+                                console.debug(`[RAGDiaryPlugin] Failed to parse nested JSON in field "${key}":`, e.message);
+                            }
+                        }
+                    }
+                    
+                    // 默认处理
+                    md += `${indent}* **${key}**: ${valStr}\n`;
+                }
+            }
+        }
+        return md;
+    }
+
     // processMessages 是 messagePreprocessor 的标准接口
     async processMessages(messages, pluginConfig) {
         try {
@@ -1239,19 +1375,33 @@ class RAGDiaryPlugin {
         const sanitizedUserContent = this._stripEmoji(this._stripHtml(originalUserQuery || ''));
         const sanitizedAiContent = this._stripEmoji(this._stripHtml(lastAiMessage || ''));
         
-        // [修复] 处理工具结果：确保是字符串，并移除巨大的 Base64 图片数据，防止 TextChunker 崩溃
-        let rawToolText = toolResultsText || '';
-        if (typeof rawToolText !== 'string') {
-            try {
-                rawToolText = JSON.stringify(rawToolText);
-            } catch (e) {
-                rawToolText = String(rawToolText);
-            }
+        // [优化] 处理工具结果：先清理 Base64，再将 JSON 转换为 Markdown 以减少向量噪音
+        let toolContentForVector = '';
+        try {
+            let rawText = typeof toolResultsText === 'string' ? toolResultsText : JSON.stringify(toolResultsText);
+            
+            // 1. 预清理：移除各种 Base64 模式
+            const preCleanedText = rawText
+                // Data URI 格式
+                .replace(/"data:[^;]+;base64,[^"]+"/g, '"[Image Base64 Omitted]"')
+                // 纯 Base64 长字符串（超过300字符）
+                .replace(/"([A-Za-z0-9+/]{300,}={0,2})"/g, '"[Long Base64 Omitted]"');
+            
+            // 2. 解析 JSON
+            const parsedTool = JSON.parse(preCleanedText);
+            
+            // 3. 转换为 Markdown (内部还会进行二次长度/特征过滤)
+            toolContentForVector = this._jsonToMarkdown(parsedTool);
+        } catch (e) {
+            console.warn('[RAGDiaryPlugin] Tool result JSON parse failed, using fallback cleanup');
+            toolContentForVector = String(toolResultsText || '')
+                // 移除 Data URI
+                .replace(/data:[^;]+;base64,[A-Za-z0-9+/=]+/g, '[Base64 Omitted]')
+                // 移除可能的长 Base64 块
+                .replace(/[A-Za-z0-9+/]{300,}={0,2}/g, '[Long Data Omitted]');
         }
-        // 移除 data:image/xxx;base64,...... 格式的超长字符串
-        const cleanToolText = rawToolText.replace(/"data:image\/[^;]+;base64,[^"]+"/g, '"[Image Base64 Data Omitted]"');
-        
-        const sanitizedToolContent = this._stripEmoji(this._stripHtml(cleanToolText));
+
+        const sanitizedToolContent = this._stripEmoji(this._stripHtml(toolContentForVector));
 
         // 2. 并行获取所有向量
         const [userVector, aiVector, toolVector] = await Promise.all([
