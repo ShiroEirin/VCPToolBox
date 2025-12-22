@@ -4,6 +4,16 @@ const fs = require('fs').promises;
 const CACHE_FILE_PATH = path.join(__dirname, 'dailyhot_cache.md');
 const INTERNAL_TIMEOUT_MS = 30000;
 
+// 创建模拟的 Hono Context 对象
+function createMockContext(queryParams = {}) {
+    return {
+        req: {
+            query: (key) => queryParams[key] || undefined,
+            param: (key) => queryParams[key] || undefined,
+        },
+    };
+}
+
 async function fetchSource(source) {
     let routeHandler;
     try {
@@ -19,8 +29,9 @@ async function fetchSource(source) {
     }
 
     try {
-        // 传递一个空对象而不是 null，以避免在下游模块中出现 'reading req of null' 的错误
-        const resultData = await routeHandler.handleRoute({}, true);
+        // 创建模拟的 Hono Context 对象，避免 'Cannot read properties of undefined' 错误
+        const mockContext = createMockContext();
+        const resultData = await routeHandler.handleRoute(mockContext, true);
         if (!resultData || !Array.isArray(resultData.data)) {
              return { source, error: `返回的数据格式不正确` };
         }
