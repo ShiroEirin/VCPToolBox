@@ -20,7 +20,7 @@ const VAR_HTTPS_URL = process.env.VarHttpsUrl; // Read VarHttps Url from env
 const DMX_API_CONFIG = {
     BASE_URL: 'https://www.dmxapi.cn', // New API Host
     IMAGE_GENERATION_ENDPOINT: '/v1/images/generations', // New API Endpoint
-    MODEL_ID: "doubao-seedream-4-0-250828", // New unified model
+    MODEL_ID: "doubao-seedream-4-5-251128", // New unified model
     DEFAULT_PARAMS: {
         n: 1, // Number of images to generate, typically fixed at 1 for this API
     }
@@ -34,19 +34,32 @@ function isValidDoubaoGenArgs(args) {
     if (typeof args.prompt !== 'string' || !args.prompt.trim()) return false;
     if (args.seed !== undefined && (typeof args.seed !== 'number' || !Number.isInteger(args.seed) || args.seed < 0)) return false;
 
+    const isResolutionValid = (res, command) => {
+        if (typeof res !== 'string') return false;
+        const upperRes = res.toUpperCase();
+        // Support 2K, 4K
+        if (upperRes === '2K' || upperRes === '4K') return true;
+        // Support adaptive for edit/compose
+        if (upperRes === 'ADAPTIVE' && (command === 'DoubaoEditImage' || command === 'DoubaoComposeImage')) return true;
+        
+        // Support WxH format
+        const parts = res.split('x');
+        if (parts.length === 2) {
+            const width = parseInt(parts[0], 10);
+            const height = parseInt(parts[1], 10);
+            // Relaxed range for new model (up to 4K pixels)
+            return !isNaN(width) && !isNaN(height) && width >= 512 && width <= 4096 && height >= 512 && height <= 4096;
+        }
+        return false;
+    };
+
     // Command-specific validation
     if (args.command === 'DoubaoGenerateImage') {
-        if (typeof args.resolution !== 'string') return false;
-        const parts = args.resolution.split('x');
-        if (parts.length !== 2) return false;
-        const width = parseInt(parts[0], 10);
-        const height = parseInt(parts[1], 10);
-        if (isNaN(width) || isNaN(height)) return false;
-        if (width < 512 || width > 2048 || height < 512 || height > 2048) return false;
+        if (!isResolutionValid(args.resolution, args.command)) return false;
 
     } else if (args.command === 'DoubaoEditImage') {
         if (typeof args.image !== 'string' || !args.image.trim()) return false;
-        if (typeof args.resolution !== 'string') return false; // Can be "adaptive" or "WxH"
+        if (!isResolutionValid(args.resolution, args.command)) return false;
         if (args.guidance_scale !== undefined) {
             const scale = parseFloat(args.guidance_scale);
             if (isNaN(scale) || scale < 0 || scale > 10) return false;
@@ -59,7 +72,7 @@ function isValidDoubaoGenArgs(args) {
         const imageKeys = Object.keys(args).filter(k => k.startsWith('image_'));
         if (imageKeys.length === 0) return false;
 
-        if (typeof args.resolution !== 'string') return false; // Can be "adaptive" or "WxH"
+        if (!isResolutionValid(args.resolution, args.command)) return false;
         if (args.guidance_scale !== undefined) {
             const scale = parseFloat(args.guidance_scale);
             if (isNaN(scale) || scale < 0 || scale > 10) return false;
@@ -222,11 +235,22 @@ async function generateImageAndSave(args) {
     }
 
     // --- Payload Construction ---
+    // --- Payload Construction ---
+    let size = args.resolution;
+    if (typeof size === 'string') {
+        const upperSize = size.toUpperCase();
+        if (upperSize === '2K' || upperSize === '4K') {
+            size = upperSize;
+        } else if (upperSize === 'ADAPTIVE') {
+            size = 'adaptive';
+        }
+    }
+
     const payload = {
         model: DMX_API_CONFIG.MODEL_ID,
         prompt: args.prompt,
         n: DMX_API_CONFIG.DEFAULT_PARAMS.n,
-        size: args.resolution,
+        size: size,
         watermark: false
     };
 
@@ -235,16 +259,10 @@ async function generateImageAndSave(args) {
         if (args.guidance_scale !== undefined) {
             payload.guidance_scale = args.guidance_scale;
         }
-        if (args.resolution.toLowerCase() === 'adaptive') {
-            payload.size = 'adaptive';
-        }
     } else if (command === 'DoubaoComposeImage') {
         payload.images = imagesData; // For multiple image composition
         if (args.guidance_scale !== undefined) {
             payload.guidance_scale = args.guidance_scale;
-        }
-        if (args.resolution.toLowerCase() === 'adaptive') {
-            payload.size = 'adaptive';
         }
     }
     

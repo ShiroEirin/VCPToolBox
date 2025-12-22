@@ -1519,3 +1519,107 @@ html[data-theme='light'] .delete-theme-btn {
 .remove-cluster-btn:hover {
     background: var(--danger-hover-bg);
 }
+
+/* K-Sequence Editor Styles */
+.k-sequence-editor {
+    background-color: var(--tertiary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.k-sequence-editor h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 1.1em;
+    color: var(--highlight-text);
+    font-weight: 600;
+}
+
+.k-sequence-editor .description {
+    font-size: 0.9em;
+    color: var(--secondary-text);
+    margin-bottom: 15px;
+}
+
+.k-sequence-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.k-value-input-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background-color: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    transition: border-color 0.2s ease;
+}
+
+.k-value-input-group:focus-within {
+    border-color: var(--highlight-text);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--highlight-text) 20%, transparent);
+}
+
+.k-value-label {
+    font-weight: 500;
+    color: var(--primary-text);
+    font-size: 0.9em;
+    flex: 1;
+    min-width: 0; /* 允许文字换行 */
+    word-break: break-word;
+}
+
+.k-value-input {
+    width: 50px;
+    padding: 4px 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--secondary-bg);
+    color: var(--primary-text);
+    font-size: 0.9em;
+    text-align: center;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.k-value-input:focus {
+    outline: none;
+    border-color: var(--highlight-text);
+}
+
+.k-value-hint {
+    font-size: 0.8em;
+    color: var(--secondary-text);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.no-clusters-message {
+    text-align: center;
+    color: var(--secondary-text);
+    font-style: italic;
+    padding: 20px;
+    margin: 0;
+}
+
+/* Responsive adjustments for K-sequence editor */
+@media (max-width: 768px) {
+    .k-value-input-group {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    
+    .k-value-label {
+        flex-basis: 100%;
+        margin-bottom: 4px;
+    }
+    
+    .k-value-input {
+        width: 45px;
+    }
+}

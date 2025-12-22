@@ -7,8 +7,9 @@
  * - 连接池和会话复用
  * - 跳板机（Jump Host）支持
  * - 自动重连和心跳保活
- * 
- * @version 1.0.0
+ * - 连接数量限制和重试机制
+ *
+ * @version 1.1.0
  */
 
 const { Client } = require('ssh2');
@@ -30,6 +31,18 @@ class SSHManager {
         
         // 调试日志收集器（用于返回给调用者）
         this.debugLogs = [];
+        
+        // 连接限制配置
+        this.maxConcurrentConnections = this.globalSettings.maxConcurrentConnections || 5;
+        this.connectionPoolSize = this.globalSettings.connectionPoolSize || 10;
+        this.activeConnections = 0;
+        
+        // 重试配置
+        this.retryAttempts = this.globalSettings.retryAttempts || 3;
+        this.retryDelay = this.globalSettings.retryDelay || 1000;
+        
+        // 连接等待队列
+        this.connectionQueue = [];
     }
     
     /**
@@ -117,7 +130,73 @@ class SSHManager {
     }
     
     /**
-     * 创建 SSH 连接
+     * 检查是否可以创建新连接
+     */
+    canCreateConnection() {
+        return this.activeConnections < this.maxConcurrentConnections;
+    }
+    
+    /**
+     * 等待连接槽位可用
+     */
+    async waitForConnectionSlot() {
+        if (this.canCreateConnection()) {
+            return;
+        }
+        
+        this._log(`连接数已达上限 (${this.activeConnections}/${this.maxConcurrentConnections})，等待槽位...`);
+        
+        return new Promise((resolve) => {
+            this.connectionQueue.push(resolve);
+        });
+    }
+    
+    /**
+     * 释放连接槽位
+     */
+    releaseConnectionSlot() {
+        this.activeConnections = Math.max(0, this.activeConnections - 1);
+        
+        // 唤醒等待队列中的下一个
+        if (this.connectionQueue.length > 0) {
+            const next = this.connectionQueue.shift();
+            next();
+        }
+    }
+    
+    /**
+     * 带重试的连接方法
+     */
+    async connectWithRetry(hostId) {
+        let lastError;
+        
+        for (let attempt = 1; attempt <= this.retryAttempts; attempt++) {
+            try {
+                this._log(`连接尝试 ${attempt}/${this.retryAttempts}: ${hostId}`);
+                return await this._connectInternal(hostId);
+            } catch (error) {
+                lastError = error;
+                this._log(`连接失败 (尝试 ${attempt}/${this.retryAttempts}): ${error.message}`);
+                
+                if (attempt < this.retryAttempts) {
+                    this._log(`${this.retryDelay}ms 后重试...`);
+                    await this._delay(this.retryDelay);
+                }
+            }
+        }
+        
+        throw lastError;
+    }
+    
+    /**
+     * 延迟函数
+     */
+    _delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    /**
+     * 创建 SSH 连接（公共接口，带重试和连接限制）
      */
     async connect(hostId) {
         const config = this.getHostConfig(hostId);
@@ -130,8 +209,31 @@ class SSHManager {
         // 检查连接池中是否已有可用连接
         const existingConn = this.connectionPool.get(hostId);
         if (existingConn && existingConn.isConnected) {
+            this._log(`复用现有连接: ${hostId}`);
             return existingConn;
         }
+        
+        // 等待连接槽位
+        await this.waitForConnectionSlot();
+        
+        try {
+            // 使用带重试的连接
+            return await this.connectWithRetry(hostId);
+        } catch (error) {
+            // 连接失败，释放槽位
+            this.releaseConnectionSlot();
+            throw error;
+        }
+    }
+    
+    /**
+     * 内部连接实现
+     */
+    async _connectInternal(hostId) {
+        const config = this.getHostConfig(hostId);
+        
+        // 增加活跃连接计数
+        this.activeConnections++;
         
         // 创建新连接
         const conn = new Client();
@@ -193,11 +295,17 @@ class SSHManager {
                     config
                 };
                 
+                // 检查连接池大小限制
+                if (this.connectionPool.size >= this.connectionPoolSize) {
+                    // 移除最旧的未使用连接
+                    this._evictOldestConnection();
+                }
+                
                 // 存入连接池
                 this.connectionPool.set(hostId, connection);
                 this.connectionStatus.set(hostId, 'connected');
                 
-                this._log(`已连接到 ${hostId} (${config.host})`);
+                this._log(`已连接到 ${hostId} (${config.host})，当前连接数: ${this.activeConnections}/${this.maxConcurrentConnections}`);
                 resolve(connection);
             });
             
@@ -206,6 +314,7 @@ class SSHManager {
                 this._log(`SSH 错误 (${hostId}): ${err.message}`);
                 this._log(`错误详情: ${JSON.stringify(err, Object.getOwnPropertyNames(err))}`);
                 this.connectionStatus.set(hostId, 'error');
+                this.releaseConnectionSlot();
                 reject(new Error(`SSH 连接错误 (${hostId}): ${err.message}`));
             });
             
@@ -215,7 +324,8 @@ class SSHManager {
                     connection.isConnected = false;
                 }
                 this.connectionStatus.set(hostId, 'disconnected');
-                this._log(`连接已关闭: ${hostId}`);
+                this.releaseConnectionSlot();
+                this._log(`连接已关闭: ${hostId}，当前连接数: ${this.activeConnections}/${this.maxConcurrentConnections}`);
             });
             
             conn.on('end', () => {
@@ -399,6 +509,26 @@ class SSHManager {
     }
     
     /**
+     * 移除最旧的未使用连接
+     */
+    _evictOldestConnection() {
+        let oldestHostId = null;
+        let oldestTime = Date.now();
+        
+        for (const [hostId, connection] of this.connectionPool) {
+            if (connection.connectedAt && connection.connectedAt < oldestTime) {
+                oldestTime = connection.connectedAt;
+                oldestHostId = hostId;
+            }
+        }
+        
+        if (oldestHostId) {
+            this._log(`连接池已满，移除最旧连接: ${oldestHostId}`);
+            this.disconnect(oldestHostId);
+        }
+    }
+    
+    /**
      * 断开指定主机连接
      */
     async disconnect(hostId) {
@@ -422,6 +552,8 @@ class SSHManager {
             }
         }
         this.connectionPool.clear();
+        this.activeConnections = 0;
+        this.connectionQueue = [];
         this._log('已断开所有连接');
     }
     
@@ -440,6 +572,21 @@ class SSHManager {
             };
         }
         return status;
+    }
+    
+    /**
+     * 获取连接池统计信息
+     */
+    getPoolStats() {
+        return {
+            activeConnections: this.activeConnections,
+            maxConcurrentConnections: this.maxConcurrentConnections,
+            poolSize: this.connectionPool.size,
+            maxPoolSize: this.connectionPoolSize,
+            queueLength: this.connectionQueue.length,
+            retryAttempts: this.retryAttempts,
+            retryDelay: this.retryDelay
+        };
     }
 }
 

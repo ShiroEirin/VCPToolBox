@@ -1,6 +1,7 @@
 // server.js
 const express = require('express');
 const dotenv = require('dotenv');
+dotenv.config({ path: 'config.env' });
 const schedule = require('node-schedule');
 const lunarCalendar = require('chinese-lunar-calendar');
 const dayjs = require('dayjs');
@@ -64,8 +65,6 @@ setInterval(() => {
         }
     }
 }, 60 * 1000); // 每分钟检查一次
-
-dotenv.config({ path: 'config.env' });
 
 const ADMIN_USERNAME = process.env.AdminUsername;
 const ADMIN_PASSWORD = process.env.AdminPassword;

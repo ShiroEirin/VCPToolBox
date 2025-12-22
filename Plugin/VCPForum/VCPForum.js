@@ -232,11 +232,17 @@ async function convertImagesToBase64ForAI(content) {
  * @returns {Promise<object>} - The result of the operation.
  */
 async function createPost(args) {
-    const { maid, board, title, content: rawContent } = args;
+    let { maid, board, title, content: rawContent } = args;
     if (!maid || !board || !title || !rawContent) {
         throw new Error("创建帖子需要 'maid', 'board', 'title', 和 'content' 参数。");
     }
     let content = rawContent.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+    // Clean title from AI hallucinations (extra brackets)
+    // If title starts with [[ and ends with ], remove one level of brackets from both ends
+    if (title && title.startsWith('[[') && title.endsWith(']')) {
+        title = title.slice(1, -1);
+    }
     
     // Process local images (file:// URLs)
     content = await processLocalImages(content, args);

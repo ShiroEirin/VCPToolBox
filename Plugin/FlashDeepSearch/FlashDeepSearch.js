@@ -96,17 +96,34 @@ async function generateKeywords(topic, broadness) {
     const responseText = await callLanguageModel(DeepSearchModel, [{ role: 'user', content: userMessage }], systemPrompt, DEEP_SEARCH_MAX_TOKENS);
     log(`DeepSearchModel 原始响应: ${responseText}`);
     
-    // 兼容两种关键词格式: [keyword:] 或 [KeyWord1:] keyword
-    let keywords;
-    const newRegex = /\[([^\]:]+):\]/g; // 格式: [keyword:]
-    const newMatches = [...responseText.matchAll(newRegex)];
+    // 增强型关键词提取逻辑，兼容多种 LLM 输出格式
+    const keywordSet = new Set();
+    
+    // 模式 1: [KeyWord1: keyword] (本次报错的情况) 或 [KeyWord1: ] keyword
+    const pattern1 = /\[KeyWord\d+:\s*([^\]]+)\]/g;
+    [...responseText.matchAll(pattern1)].forEach(m => {
+        const kw = m[1].trim();
+        if (kw) keywordSet.add(kw);
+    });
 
-    if (newMatches.length > 0) {
-        keywords = newMatches.map(match => match[1].trim());
-    } else {
-        const oldRegex = /\[KeyWord\d*?:\s*\]([^\[\]]+)(?=\s*\[KeyWord\d*?:\]|$)/g; // 格式: [KeyWord1:] keyword
-        keywords = [...responseText.matchAll(oldRegex)].map(match => match[1].trim());
+    // 模式 2: [keyword:] (Prompt 要求的标准格式)
+    const pattern2 = /\[([^\]:]+):\]/g;
+    [...responseText.matchAll(pattern2)].forEach(m => {
+        const kw = m[1].trim();
+        // 排除掉 KeyWordX 这种标签本身
+        if (kw && !/^KeyWord\d+$/i.test(kw)) keywordSet.add(kw);
+    });
+
+    // 模式 3: [KeyWord1:] keyword (旧版格式，关键词在标签外)
+    if (keywordSet.size === 0) {
+        const pattern3 = /\[KeyWord\d*?:\s*\]\s*([^\[\]\n]+)(?=\s*\[KeyWord|\s*$)/g;
+        [...responseText.matchAll(pattern3)].forEach(m => {
+            const kw = m[1].trim();
+            if (kw) keywordSet.add(kw);
+        });
     }
+
+    const keywords = Array.from(keywordSet);
 
     if (keywords.length === 0) {
         throw new Error("未能从DeepSearchModel的响应中提取任何关键词。");

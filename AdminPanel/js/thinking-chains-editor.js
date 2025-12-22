@@ -79,11 +79,26 @@ function renderThinkingChainsEditor(container) {
     container.appendChild(editorWrapper);
 }
 
-function createThemeElement(themeName, chain) {
+function createThemeElement(themeName, chainConfig) {
     const details = document.createElement('details');
     details.className = 'theme-details';
     details.open = true;
     details.dataset.themeName = themeName;
+
+    // 支持新旧格式
+    let clusters, kSequence;
+    if (Array.isArray(chainConfig)) {
+        // 旧格式：直接是簇数组
+        clusters = chainConfig;
+        kSequence = new Array(clusters.length).fill(1); // 默认都是1
+    } else if (chainConfig && chainConfig.clusters) {
+        // 新格式：包含clusters和kSequence的对象
+        clusters = chainConfig.clusters || [];
+        kSequence = chainConfig.kSequence || new Array(clusters.length).fill(1);
+    } else {
+        clusters = [];
+        kSequence = [];
+    }
 
     details.innerHTML = `
         <summary class="theme-summary">
@@ -91,21 +106,34 @@ function createThemeElement(themeName, chain) {
             <button class="delete-theme-btn">删除该主题</button>
         </summary>
         <div class="theme-content">
+            <div class="k-sequence-editor">
+                <h4>K值序列配置</h4>
+                <p class="description">每个思维簇对应的检索数量（K值）</p>
+                <div class="k-sequence-inputs" data-theme-name="${themeName}"></div>
+            </div>
             <ul class="draggable-list theme-chain-list" data-theme-name="${themeName}"></ul>
         </div>
     `;
 
     const chainList = details.querySelector('.theme-chain-list');
-    if (chain.length > 0) {
-        chain.forEach(clusterName => {
-            const listItem = createChainItemElement(clusterName);
+    const kSequenceInputs = details.querySelector('.k-sequence-inputs');
+    
+    if (clusters.length > 0) {
+        clusters.forEach((clusterName, index) => {
+            const listItem = createChainItemElement(clusterName, index);
             chainList.appendChild(listItem);
+            
+            // 创建对应的K值输入框
+            const kInput = createKValueInput(clusterName, kSequence[index] || 1, index);
+            kSequenceInputs.appendChild(kInput);
         });
     } else {
         const placeholder = document.createElement('li');
         placeholder.className = 'drop-placeholder';
         placeholder.textContent = '将思维簇拖拽到此处';
         chainList.appendChild(placeholder);
+        
+        kSequenceInputs.innerHTML = '<p class="no-clusters-message">添加思维簇后将显示K值配置</p>';
     }
 
     details.querySelector('.delete-theme-btn').onclick = (e) => {
@@ -119,18 +147,25 @@ function createThemeElement(themeName, chain) {
     return details;
 }
 
-function createChainItemElement(clusterName) {
+function createChainItemElement(clusterName, index = null) {
     const li = document.createElement('li');
     li.className = 'chain-item';
     li.draggable = true;
     li.dataset.clusterName = clusterName;
+    if (index !== null) {
+        li.dataset.index = index;
+    }
 
     li.innerHTML = `<span class="cluster-name">${clusterName}</span>`;
     
     const removeBtn = document.createElement('button');
     removeBtn.textContent = '×';
     removeBtn.className = 'remove-cluster-btn';
-    removeBtn.onclick = () => li.remove();
+    removeBtn.onclick = () => {
+        li.remove();
+        // 移除对应的K值输入框
+        updateKSequenceInputs(li.closest('.theme-details'));
+    };
     li.appendChild(removeBtn);
     
     li.addEventListener('dragstart', (e) => {
@@ -138,9 +173,61 @@ function createChainItemElement(clusterName) {
         e.dataTransfer.effectAllowed = 'move';
         setTimeout(() => li.classList.add('dragging'), 0);
     });
-    li.addEventListener('dragend', () => li.classList.remove('dragging'));
+    li.addEventListener('dragend', () => {
+        li.classList.remove('dragging');
+        // 拖拽结束后更新K值输入框
+        updateKSequenceInputs(li.closest('.theme-details'));
+    });
 
     return li;
+}
+
+/**
+ * 创建K值输入框
+ */
+function createKValueInput(clusterName, kValue, index) {
+    const div = document.createElement('div');
+    div.className = 'k-value-input-group';
+    div.dataset.clusterName = clusterName;
+    div.dataset.index = index;
+    
+    div.innerHTML = `
+        <label class="k-value-label">${clusterName}:</label>
+        <input type="number" class="k-value-input" min="1" max="20" value="${kValue}" data-cluster="${clusterName}">
+        <span class="k-value-hint">检索数量</span>
+    `;
+    
+    return div;
+}
+
+/**
+ * 更新K值序列输入框
+ */
+function updateKSequenceInputs(themeDetails) {
+    if (!themeDetails) return;
+    
+    const kSequenceInputs = themeDetails.querySelector('.k-sequence-inputs');
+    const chainItems = themeDetails.querySelectorAll('.chain-item');
+    
+    if (!kSequenceInputs) return;
+    
+    // 清空现有输入框
+    kSequenceInputs.innerHTML = '';
+    
+    if (chainItems.length === 0) {
+        kSequenceInputs.innerHTML = '<p class="no-clusters-message">添加思维簇后将显示K值配置</p>';
+        return;
+    }
+    
+    // 为每个簇创建K值输入框
+    chainItems.forEach((item, index) => {
+        const clusterName = item.dataset.clusterName;
+        const existingInput = kSequenceInputs.querySelector(`[data-cluster="${clusterName}"]`);
+        const kValue = existingInput ? existingInput.value : 1;
+        
+        const kInput = createKValueInput(clusterName, kValue, index);
+        kSequenceInputs.appendChild(kInput);
+    });
 }
 
 function createAvailableClustersElement() {
@@ -194,6 +281,9 @@ function setupDragAndDrop(listElement) {
             if (clusterName && !alreadyExists) {
                 const newItem = createChainItemElement(clusterName);
                 listElement.replaceChild(newItem, dragging);
+                
+                // 更新K值输入框
+                updateKSequenceInputs(listElement.closest('.theme-details'));
             } else {
                 dragging.remove();
             }
@@ -231,7 +321,20 @@ async function saveThinkingChains() {
     container.querySelectorAll('.theme-details').forEach(el => {
         const themeName = el.dataset.themeName;
         const clusters = [...el.querySelectorAll('.chain-item')].map(item => item.dataset.clusterName);
-        newChains[themeName] = clusters;
+        
+        // 收集K值序列
+        const kSequence = [];
+        const kInputs = el.querySelectorAll('.k-value-input');
+        kInputs.forEach(input => {
+            const kValue = parseInt(input.value) || 1;
+            kSequence.push(Math.max(1, Math.min(20, kValue))); // 限制在1-20之间
+        });
+        
+        // 使用新格式保存
+        newChains[themeName] = {
+            clusters: clusters,
+            kSequence: kSequence.length > 0 ? kSequence : new Array(clusters.length).fill(1)
+        };
     });
 
     const dataToSave = { ...thinkingChainsData, chains: newChains };
@@ -268,7 +371,8 @@ function addNewThinkingChainTheme() {
     
     container.querySelector('p')?.remove(); // Remove placeholder text if it exists
 
-    const newThemeElement = createThemeElement(normalizedThemeName, []);
+    // 使用新格式创建空主题
+    const newThemeElement = createThemeElement(normalizedThemeName, { clusters: [], kSequence: [] });
     container.appendChild(newThemeElement);
     newThemeElement.scrollIntoView({ behavior: 'smooth' });
 }

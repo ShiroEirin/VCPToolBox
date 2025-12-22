@@ -66,7 +66,7 @@
         },
         "tail": {
             "description": "查看文件尾部",
-            "allowedArgs": ["-n", "-f", "-c"],
+            "allowedArgs": ["-n", "-f", "-c", "-1", "-2", "-3", "-4", "-5", "-10", "-20", "-50", "-100"],
             "pathRestrictions": {
                 "allowed": ["/home", "/tmp", "/var/log"],
                 "denied": ["/etc/shadow", "/etc/passwd", "/root"]
@@ -181,13 +181,152 @@
             "allowedArgs": ["-n", "-e"],
             "noPathRequired": true,
             "restrictedPatterns": ["w\\s+/", "e\\s+", "r\\s+/"]
+        },
+        "netstat": {
+            "description": "网络连接状态（故障排查必备）",
+            "allowedArgs": ["-t", "-u", "-l", "-n", "-p", "-a", "-tlnp", "-tunlp", "-an"],
+            "noPathRequired": true
+        },
+        "ss": {
+            "description": "Socket 统计（netstat 现代替代）",
+            "allowedArgs": ["-t", "-u", "-l", "-n", "-p", "-a", "-tlnp", "-tunlp", "-s"],
+            "noPathRequired": true
+        },
+        "lsof": {
+            "description": "列出打开的文件/端口",
+            "allowedArgs": ["-i", "-p", "-n", "-P"],
+            "noPathRequired": true
+        },
+        "systemctl": {
+            "description": "服务状态查询（仅状态查询，禁止控制）",
+            "allowedArgs": ["status", "is-active", "is-enabled", "list-units", "list-unit-files", "--type=service", "--state=running", "--state=failed", "--no-pager"],
+            "noPathRequired": true,
+            "note": "仅允许查询状态，禁止 start/stop/restart/enable/disable"
+        },
+        "journalctl": {
+            "description": "系统日志查询",
+            "allowedArgs": ["-u", "-n", "-f", "--since", "--until", "-p", "-b", "--no-pager", "-e", "-x"],
+            "noPathRequired": true,
+            "maxLines": 500
+        },
+        "dmesg": {
+            "description": "内核日志",
+            "allowedArgs": ["-T", "-H", "--level=err", "--level=warn", "-n"],
+            "noPathRequired": true
+        },
+        "vmstat": {
+            "description": "虚拟内存统计",
+            "allowedArgs": ["-s", "-d", "-w"],
+            "noPathRequired": true,
+            "maxIterations": 5
+        },
+        "iostat": {
+            "description": "IO 统计",
+            "allowedArgs": ["-x", "-d", "-c", "-h"],
+            "noPathRequired": true,
+            "maxIterations": 5
+        },
+        "sar": {
+            "description": "系统活动报告",
+            "allowedArgs": ["-u", "-r", "-b", "-d", "-n"],
+            "noPathRequired": true
+        },
+        "ping": {
+            "description": "网络连通性测试",
+            "allowedArgs": ["-c", "-W", "-i"],
+            "noPathRequired": true,
+            "maxCount": 10
+        },
+        "traceroute": {
+            "description": "路由追踪",
+            "allowedArgs": ["-n", "-m", "-w"],
+            "noPathRequired": true,
+            "maxHops": 30
+        },
+        "dig": {
+            "description": "DNS 查询",
+            "allowedArgs": ["+short", "+trace", "-t", "@"],
+            "noPathRequired": true
+        },
+        "nslookup": {
+            "description": "DNS 查询（简化版）",
+            "allowedArgs": [],
+            "noPathRequired": true
+        },
+        "curl": {
+            "description": "HTTP 请求测试（仅 GET/HEAD）",
+            "allowedArgs": ["-I", "-s", "-o", "-w", "-m", "-H", "--connect-timeout", "-L", "-k"],
+            "noPathRequired": true,
+            "note": "禁止 POST/PUT/DELETE，禁止上传数据"
+        },
+        "wget": {
+            "description": "HTTP 下载测试（仅检测）",
+            "allowedArgs": ["--spider", "-q", "-O", "--timeout", "-T"],
+            "noPathRequired": true,
+            "note": "仅允许 --spider 模式检测"
+        },
+        "docker": {
+            "description": "Docker 状态查询（仅查询）",
+            "allowedArgs": ["ps", "logs", "inspect", "stats", "images", "-a", "--no-trunc", "-n", "--tail", "-f"],
+            "noPathRequired": true,
+            "note": "禁止 run/exec/rm/stop/start 等控制命令"
+        },
+        "mysql": {
+            "description": "MySQL 状态查询",
+            "allowedArgs": ["-e", "-u", "-p", "-h", "--skip-column-names"],
+            "noPathRequired": true,
+            "allowedQueries": ["SHOW STATUS", "SHOW PROCESSLIST", "SHOW VARIABLES", "SELECT VERSION()"]
+        },
+        "redis-cli": {
+            "description": "Redis 状态查询",
+            "allowedArgs": ["-h", "-p", "-a", "INFO", "PING", "DBSIZE", "CLIENT LIST"],
+            "noPathRequired": true
+        },
+        "nginx": {
+            "description": "Nginx 配置测试",
+            "allowedArgs": ["-t", "-T", "-v", "-V"],
+            "noPathRequired": true
+        },
+        "last": {
+            "description": "登录历史",
+            "allowedArgs": ["-n", "-a", "-i"],
+            "noPathRequired": true,
+            "maxLines": 50
+        },
+        "w": {
+            "description": "当前登录用户",
+            "allowedArgs": [],
+            "noPathRequired": true
+        },
+        "who": {
+            "description": "登录用户信息",
+            "allowedArgs": ["-a", "-b", "-H"],
+            "noPathRequired": true
+        },
+        "lscpu": {
+            "description": "CPU 信息",
+            "allowedArgs": [],
+            "noPathRequired": true
+        },
+        "lsmem": {
+            "description": "内存信息",
+            "allowedArgs": [],
+            "noPathRequired": true
+        },
+        "lsblk": {
+            "description": "块设备信息",
+            "allowedArgs": ["-f", "-o"],
+            "noPathRequired": true
         }
     },
     "globalRestrictions": {
         "maxCommandLength": 1000,
-        "maxPipelineDepth": 3,
-        "allowedPipeCommands": ["grep", "head", "tail", "wc", "sort", "uniq", "cut", "awk", "sed"],
+        "maxPipelineDepth": 5,
+        "allowedPipeCommands": [
+            "grep", "head", "tail", "wc", "sort", "uniq", "cut", "awk", "sed",
+            "xargs", "tr", "tee", "column", "less", "more"
+        ],
         "forbiddenCharacters": [";", "&&", "||", "`", "$(", "${", ">", ">>", "<", "<<", "&"],
-        "forbiddenInPipe": ["rm", "mv", "cp", "chmod", "chown", "dd", "mkfs"]
+        "forbiddenInPipe": ["rm", "mv", "cp", "chmod", "chown", "dd", "mkfs", "curl", "wget", "mysql", "redis-cli"]
     }
 }

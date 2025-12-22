@@ -1,7 +1,7 @@
 {
     "$schema": "./hosts.schema.json",
     "version": "1.0.0",
-    "description": "LinuxShellExecutor 远程主机配置",
+    "description": "SSHManager 共享模块 - 远程主机配置",
     
     "hosts": {
         "local": {
@@ -11,17 +11,34 @@
             "enabled": true,
             "securityLevel": "standard"
         },
+        "DB1": {
+            "name": "本地服务器",
+            "description": "开发环境 Linux 服务器",
+            "type": "ssh",
+            "enabled": true,
+            "host": "192.0.2.238",
+            "port": 22,
+            "username": "your_username",
+            "authMethod": "password",
+            "password": "your_password",
+            "privateKeyPath": "../../Plugin/LinuxShellExecutor/key/key",
+            "passphrase": "",
+            "securityLevel": "standard",
+            "timeout": 30000,
+            "keepAliveInterval": 10000,
+            "tags": ["dev", "linux"]
+        },
         
         "DE-server": {
             "name": "德国服务器",
             "description": "开发环境 Linux 服务器",
             "type": "ssh",
             "enabled": true,
-            "host": "11.11.1.1",
+            "host": "10.0.0.3",
             "port": 22,
             "username": "root",
             "authMethod": "key",
-            "privateKeyPath": "./key/key",
+            "privateKeyPath": "../../Plugin/LinuxShellExecutor/key/key",
             "passphrase": "",
             "securityLevel": "standard",
             "timeout": 30000,
@@ -34,11 +51,11 @@
             "description": "生产环境主服务器",
             "type": "ssh",
             "enabled": true,
-            "host": "10.0.0.1",
+            "host": "10.0.0.240",
             "port": 22,
             "username": "root",
             "authMethod": "key",
-            "privateKeyPath": "./key/hkserver",
+            "privateKeyPath": "../../Plugin/LinuxShellExecutor/key/hkserver",
             "passphrase": "",
             "securityLevel": "high",
             "timeout": 30000,
@@ -47,8 +64,40 @@
             "tags": ["prod", "linux", "critical"]
         },
         
+        "wei-test": {
+            "name": "测试机",
+            "description": "本地测试服务器",
+            "type": "ssh",
+            "enabled": true,
+            "host": "192.0.2.238",
+            "port": 22,
+            "username": "test_user",
+            "authMethod": "password",
+            "password": "your_password",
+            "securityLevel": "standard",
+            "timeout": 30000,
+            "keepAliveInterval": 10000,
+            "tags": ["test", "local"]
+        },
+        
+        "test-server": {
+            "name": "测试服务器",
+            "description": "用于单元测试的低权限账号",
+            "type": "ssh",
+            "enabled": true,
+            "host": "192.0.2.2",
+            "port": 22,
+            "username": "test_user",
+            "authMethod": "password",
+            "password": "your_password",
+            "securityLevel": "standard",
+            "timeout": 30000,
+            "keepAliveInterval": 10000,
+            "tags": ["test", "linux"]
+        },
+        
         "bastion": {
-            "name": "跳板机",
+            "name": "HK-DE跳板机",
             "description": "用于访问内网服务器的跳板机",
             "type": "ssh",
             "enabled": false,

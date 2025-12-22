@@ -1038,31 +1038,26 @@ class RAGDiaryPlugin {
             
             // 静默处理元思考占位符
 
-            // 解析参数：链名称、修饰符和K值序列
-            // 格式: [[VCP元思考:<链名称>::<修饰符>:<k1-k2-k3-k4-k5>]]
-            // 示例: [[VCP元思考:default::Group:2-1-1-1-1]]
-            //      [[VCP元思考::Group:1-1-1-1-1]]  (使用默认链)
-            //      [[VCP元思考:2-1-1-1-1]]  (使用默认链，无修饰符)
+            // 解析参数：链名称和修饰符
+            // 格式: [[VCP元思考:<链名称>::<修饰符>]]
+            // 示例: [[VCP元思考:creative_writing::Group]]
+            //      [[VCP元思考::Group]]  (使用默认链)
+            //      [[VCP元思考::Auto::Group]]  (自动模式)
             
             let chainName = 'default';
             let useGroup = false;
-            let kSequence = [1, 1, 1, 1, 1];
             let isAutoMode = false;
             let autoThreshold = 0.65; // 默认自动切换阈值
 
             // 分析修饰符字符串
             if (modifiersAndParams) {
-                const parts = modifiersAndParams.split('::').map(p => p.trim()).filter(Boolean);
-                const allSubParts = [];
-                
-                // 扁平化处理，如果某个 part 包含 ':', 尝试按 ':' 分割，以分离修饰符和K序列如果它们被粘合在一起
-                for (const part of parts) {
-                    const potentialSubParts = part.split(':').map(p => p.trim()).filter(Boolean);
-                    allSubParts.push(...potentialSubParts);
-                }
+                // 移除开头的所有冒号，然后按 :: 分割
+                const parts = modifiersAndParams.replace(/^:+/, '').split('::').map(p => p.trim()).filter(Boolean);
 
-                for (const part of allSubParts) {
-                    if (part.toLowerCase().startsWith('auto')) {
+                for (const part of parts) {
+                    const lowerPart = part.toLowerCase();
+
+                    if (lowerPart.startsWith('auto')) {
                         isAutoMode = true;
                         const thresholdMatch = part.match(/:(\d+\.?\d*)/);
                         if (thresholdMatch) {
@@ -1071,17 +1066,11 @@ class RAGDiaryPlugin {
                                 autoThreshold = parsedThreshold;
                             }
                         }
-                        // 在自动模式下，链名称强制为 default，后续逻辑会决定是否切换
+                        // 在自动模式下，链名称将由auto逻辑决定
                         chainName = 'default';
-                    } else if (part.toLowerCase() === 'group') {
+                    } else if (lowerPart === 'group') {
                         useGroup = true;
-                    } else if (part.includes('-')) {
-                        const kValues = part.split('-').map(k => {
-                            const parsed = parseInt(k.trim(), 10);
-                            return isNaN(parsed) || parsed < 1 ? 1 : parsed;
-                        });
-                        if (kValues.length > 0) kSequence = kValues;
-                    } else {
+                    } else if (part) {
                         // 如果不是 Auto 模式，才接受指定的链名称
                         if (!isAutoMode) {
                             chainName = part;
@@ -1098,7 +1087,7 @@ class RAGDiaryPlugin {
                     queryVector,
                     userContent,
                     combinedQueryForDisplay,
-                    kSequence,
+                    null, // kSequence现在从JSON配置中获取，不再从占位符传递
                     useGroup,
                     isAutoMode,
                     autoThreshold
@@ -1613,7 +1602,7 @@ class RAGDiaryPlugin {
      * @param {Array} queryVector - 初始查询向量
      * @param {string} userContent - 用户输入内容
      * @param {string} combinedQueryForDisplay - 用于VCP广播的组合查询字符串
-     * @param {Array} kSequence - K值序列，每个元素对应一个簇的返回数量
+     * @param {Array|null} kSequence - 已废弃，K值序列现在从JSON配置中获取
      * @param {boolean} useGroup - 是否使用语义组增强
      * @param {boolean} isAutoMode - 是否为自动模式
      * @param {number} autoThreshold - 自动模式的切换阈值
@@ -1621,11 +1610,66 @@ class RAGDiaryPlugin {
      */
     async _processMetaThinkingChain(chainName, queryVector, userContent, combinedQueryForDisplay, kSequence, useGroup, isAutoMode = false, autoThreshold = 0.65) {
         
-        // 1️⃣ 生成缓存键（元思考链）
+        // 如果是自动模式，需要先决定使用哪个 chain
+        let finalChainName = chainName;
+        if (isAutoMode) {
+            let bestChain = 'default';
+            let maxSimilarity = -1;
+
+            for (const [themeName, themeVector] of Object.entries(this.metaChainThemeVectors)) {
+                const similarity = this.cosineSimilarity(queryVector, themeVector);
+                if (similarity > maxSimilarity) {
+                    maxSimilarity = similarity;
+                    bestChain = themeName;
+                }
+            }
+
+            console.log(`[RAGDiaryPlugin][MetaThinking][Auto] 最匹配的主题是 "${bestChain}"，相似度: ${maxSimilarity.toFixed(4)}`);
+
+            if (maxSimilarity >= autoThreshold) {
+                finalChainName = bestChain;
+                console.log(`[RAGDiaryPlugin][MetaThinking][Auto] 相似度超过阈值 ${autoThreshold}，切换到主题: ${finalChainName}`);
+            } else {
+                finalChainName = 'default';
+                console.log(`[RAGDiaryPlugin][MetaThinking][Auto] 相似度未达到阈值，使用默认主题: ${finalChainName}`);
+            }
+        }
+        
+        console.log(`[RAGDiaryPlugin][MetaThinking] 开始处理元思考链: ${finalChainName}`);
+        
+        // 获取思维链配置
+        const chainConfig = this.metaThinkingChains.chains[finalChainName];
+        if (!chainConfig || !chainConfig.clusters || !chainConfig.kSequence) {
+            console.error(`[RAGDiaryPlugin][MetaThinking] 未找到完整的思维链配置: ${finalChainName}`);
+            return `[错误: 未找到"${finalChainName}"思维链配置]`;
+        }
+
+        const chain = chainConfig.clusters;
+        const finalKSequence = [...chainConfig.kSequence]; // 复制数组避免修改原配置
+        
+        if (!Array.isArray(chain) || chain.length === 0) {
+            console.error(`[RAGDiaryPlugin][MetaThinking] 思维链簇定义为空: ${finalChainName}`);
+            return `[错误: "${finalChainName}"思维链簇定义为空]`;
+        }
+
+        if (!Array.isArray(finalKSequence) || finalKSequence.length === 0) {
+            console.error(`[RAGDiaryPlugin][MetaThinking] K序列定义为空: ${finalChainName}`);
+            return `[错误: "${finalChainName}"K序列定义为空]`;
+        }
+
+        // 验证K值序列长度
+        if (finalKSequence.length !== chain.length) {
+            console.warn(`[RAGDiaryPlugin][MetaThinking] K值序列长度(${finalKSequence.length})与簇数量(${chain.length})不匹配`);
+            return `[错误: "${finalChainName}"的K序列长度与簇数量不匹配]`;
+        }
+
+        console.log(`[RAGDiaryPlugin][MetaThinking] 使用K序列: [${finalKSequence.join(', ')}]`);
+
+        // 1️⃣ 生成缓存键（使用最终确定的链名称和K序列）
         const cacheKey = this._generateCacheKey({
             userContent,
-            chainName,
-            kSequence,
+            chainName: finalChainName,
+            kSequence: finalKSequence,
             useGroup,
             isAutoMode
         });
@@ -1644,48 +1688,6 @@ class RAGDiaryPlugin {
 
         // 3️⃣ 缓存未命中，执行原有逻辑
         console.log(`[RAGDiaryPlugin][MetaThinking] 缓存未命中，执行元思考链...`);
-        
-        // 如果是自动模式，需要先决定使用哪个 chain
-        if (isAutoMode) {
-            let bestChain = 'default';
-            let maxSimilarity = -1;
-
-            for (const [themeName, themeVector] of Object.entries(this.metaChainThemeVectors)) {
-                const similarity = this.cosineSimilarity(queryVector, themeVector);
-                if (similarity > maxSimilarity) {
-                    maxSimilarity = similarity;
-                    bestChain = themeName;
-                }
-            }
-
-            console.log(`[RAGDiaryPlugin][MetaThinking][Auto] 最匹配的主题是 "${bestChain}"，相似度: ${maxSimilarity.toFixed(4)}`);
-
-            if (maxSimilarity >= autoThreshold) {
-                chainName = bestChain;
-                console.log(`[RAGDiaryPlugin][MetaThinking][Auto] 相似度超过阈值 ${autoThreshold}，切换到主题: ${chainName}`);
-            } else {
-                chainName = 'default';
-                console.log(`[RAGDiaryPlugin][MetaThinking][Auto] 相似度未达到阈值，使用默认主题: ${chainName}`);
-            }
-        }
-        
-        console.log(`[RAGDiaryPlugin][MetaThinking] 开始处理元思考链: ${chainName}`);
-        
-        // 获取思维链定义
-        const chain = this.metaThinkingChains.chains[chainName];
-        if (!chain || !Array.isArray(chain) || chain.length === 0) {
-            console.error(`[RAGDiaryPlugin][MetaThinking] 未找到思维链定义: ${chainName}`);
-            return `[错误: 未找到"${chainName}"思维链定义]`;
-        }
-
-        // 验证K值序列长度
-        if (kSequence.length !== chain.length) {
-            console.warn(`[RAGDiaryPlugin][MetaThinking] K值序列长度(${kSequence.length})与簇数量(${chain.length})不匹配，将使用默认值1填充`);
-            // 用1填充缺失的k值
-            while (kSequence.length < chain.length) {
-                kSequence.push(1);
-            }
-        }
 
         // 初始化
         let currentQueryVector = queryVector;
@@ -1708,8 +1710,8 @@ class RAGDiaryPlugin {
         // 递归遍历每个思维簇
         for (let i = 0; i < chain.length; i++) {
             const clusterName = chain[i];
-            // 两种模式都应该尊重链本身定义的k序列
-            const k = kSequence[i];
+            // 使用配置文件中定义的k序列
+            const k = finalKSequence[i];
             
             // 静默查询阶段 ${i + 1}/${chain.length}
 
@@ -1781,12 +1783,13 @@ class RAGDiaryPlugin {
             try {
                 vcpInfoData = {
                     type: 'META_THINKING_CHAIN',
-                    chainName,
+                    chainName: finalChainName,
                     query: combinedQueryForDisplay,
                     useGroup,
                     activatedGroups: activatedGroups ? Array.from(activatedGroups.keys()) : [],
                     stages: chainDetailedInfo,
-                    totalStages: chain.length
+                    totalStages: chain.length,
+                    kSequence: finalKSequence
                 };
                 this.pushVcpInfo(vcpInfoData);
                 // VCP Info 已广播（静默）
@@ -1796,7 +1799,7 @@ class RAGDiaryPlugin {
         }
 
         // 4️⃣ 保存到缓存
-        const formattedResult = this._formatMetaThinkingResults(chainResults, chainName, activatedGroups, isAutoMode);
+        const formattedResult = this._formatMetaThinkingResults(chainResults, finalChainName, activatedGroups, isAutoMode);
         this._setCachedResult(cacheKey, {
             content: formattedResult,
             vcpInfo: vcpInfoData

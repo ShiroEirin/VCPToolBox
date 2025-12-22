@@ -1,9 +1,9 @@
 {
     "manifestVersion": "1.0.0",
     "name": "LinuxShellExecutor",
-    "version": "0.2.0",
+    "version": "0.4.0",
     "displayName": "Linux Shell 安全执行器",
-    "description": "六层安全防护的 Linux Shell 命令执行器。支持多主机 SSH 远程执行、密钥/密码认证、跳板机、黑名单过滤、白名单验证、AST分析、沙箱隔离和审计日志。",
+    "description": "六层安全防护的 Linux Shell 命令执行器。支持四级安全分级（read/safe/write/danger）、预设诊断命令、输出格式化、多主机 SSH 远程执行、密钥/密码认证、跳板机、AST分析、沙箱隔离、资源限制(rlimit)和审计日志。",
     "author": "VCP Team",
     "pluginType": "synchronous",
     "requiresAdmin": true,
@@ -22,8 +22,7 @@
         "invocationCommands": [
             {
                 "commandIdentifier": "LinuxShellExecutor",
-                "description": "在安全沙箱中执行 Linux Shell 命令，支持本地和远程 SSH 执行。\n\n参数:\n- command (字符串, 必需): 要执行的 Shell 命令。\n- hostId (字符串, 可选): 目标主机ID，默认 'local'。可在 hosts.json 中配置多台主机。\n- timeout (数字, 可选): 超时时间（毫秒），默认30000。\n- securityLevel (字符串, 可选): 安全等级 'basic'|'standard'|'high'|'maximum'，默认 'standard'。\n\n基本调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\ncommand:「始」ls -la /tmp「末」\n<<<[END_TOOL_REQUEST]>>>\n\n指定远程主机:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\ncommand:「始」df -h「末」,\nhostId:「始」dev-server「末」\n<<<[END_TOOL_REQUEST]>>>\n\n列出所有主机:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\naction:「始」listHosts「末」\n<<<[END_TOOL_REQUEST]>>>\n\n测试主机连接:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\naction:「始」testConnection「末」,\nhostId:「始」dev-server「末」\n<<<[END_TOOL_REQUEST]>>>"
-            }
+                "description": "在安全沙箱中执行 Linux Shell 命令，支持本地和远程 SSH 执行。\n\n🆕 v0.4.0 新功能:\n- 四级安全分级（read/safe/write/danger）\n- 预设诊断命令（preset:quickDiag 等）\n- 输出格式化（自动截断、表格美化）\n\n⚠️ 重要：write/danger 级别命令需要管理员验证码。\n\n参数:\n- command (字符串, 必需): 要执行的 Shell 命令，或 preset:预设名?参数 格式。\n- hostId (字符串, 可选): 目标主机ID，默认 'local'。\n- timeout (数字, 可选): 超时时间（毫秒），默认30000。\n- outputFormat (字符串, 可选): 输出格式 'raw'|'formatted'|'json'，默认 'formatted'。\n- requireAdmin (字符串, 条件必需): 管理员验证码，write/danger 级别命令必需。\n- doubleConfirm (布尔, 条件必需): danger 级别命令需要设为 true。\n\n基本调用（read级别，无需验证）:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\ncommand:「始」ls -la /tmp「末」\n<<<[END_TOOL_REQUEST]>>>\n\n预设命令调用:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\ncommand:「始」preset:quickDiag「末」\n<<<[END_TOOL_REQUEST]>>>\n\n带参数的预设命令:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\ncommand:「始」preset:checkService?serviceName=nginx「末」\n<<<[END_TOOL_REQUEST]>>>\n\nwrite级别命令（需验证）:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\ncommand:「始」systemctl restart nginx「末」,\nrequireAdmin:「始」用户提供的验证码「末」\n<<<[END_TOOL_REQUEST]>>>\n\n列出预设命令:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\naction:「始」listPresets「末」\n<<<[END_TOOL_REQUEST]>>>\n\n列出所有主机:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」LinuxShellExecutor「末」,\naction:「始」listHosts「末」\n<<<[END_TOOL_REQUEST]>>>"}
         ]
     }
 }

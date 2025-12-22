@@ -2,7 +2,22 @@
 
 六层安全防护的 Linux Shell 命令执行器，专为 VCP Agent 设计。
 
-## 🆕 v0.2.0 新功能
+## 🆕 v0.4.0 新功能
+
+- ✅ **四级安全分级** - read（只读自动放行）/ safe（低风险自动放行）/ write（需验证）/ danger（二次确认）
+- ✅ **智能管道验证** - 基于安全级别的管道链验证，只允许 read→read、read→safe、safe→read 的管道组合
+- ✅ **预设诊断命令** - 12 个预设命令集（quickDiag、checkService、netDiag、checkDisk、checkDocker 等）
+- ✅ **输出格式化** - 自动截断（100行）、表格美化、支持 raw/formatted/json 三种输出格式
+- ✅ **参数化预设** - 支持 `preset:checkService?serviceName=nginx` 格式的参数化调用
+
+## 📋 v0.3.x 功能
+
+- ✅ **三级权限控制** - 白名单（免验证）/ 灰名单（需验证）/ 黑名单（禁止）
+- ✅ **资源限制 (rlimit)** - 支持 CPU、内存、文件大小、进程数等资源限制
+- ✅ **管道命令验证** - 支持管道命令的安全验证，限制管道深度和允许的命令
+- ✅ **SSH 连接池优化** - 连接数量限制、自动重试、连接池大小管理
+
+## 📋 v0.2.0 功能
 
 - ✅ **多主机 SSH 远程执行** - 支持配置多台 Linux 服务器
 - ✅ **密钥/密码认证** - 支持 SSH 私钥和密码两种认证方式
@@ -13,7 +28,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    LinuxShellExecutor v0.2.0                │
+│                    LinuxShellExecutor v0.4.0                │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │                   主机管理器                         │   │
@@ -24,8 +39,16 @@
 │  └─────────────────────────────────────────────────────┘   │
 │                          ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐   │
+│  │              三级权限控制                            │   │
+│  │  ┌─────────┐    ┌─────────┐             │   │
+│  │  │ 黑名单  │→│ 白名单  │→│ 灰名单  │             │   │
+│  │  │ 禁止    │  │ 免验证  │  │ 需验证  │             │   │
+│  │  └─────────┘  └─────────┘  └─────────┘             │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                          ↓                                  │
+│  ┌─────────────────────────────────────────────────────┐   │
 │  │              六层安全防护                            │   │
-│  │  1.黑名单 → 2.白名单 → 3.AST → 4.沙箱 → 5.限制 → 6.审计│   │
+│  │  1.黑名单 → 2.白名单 → 3.灰名单 → 4.AST → 5.沙箱 → 6.审计│   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -241,11 +264,14 @@ action:「始」getStatus「末」
 
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
-| `command` | string | ✓* | 要执行的 Shell 命令 |
-| `action` | string | ✓* | 特殊操作：listHosts/testConnection/getStatus |
+| `command` | string | ✓* | 要执行的 Shell 命令，或 `preset:预设名?参数` 格式 |
+| `action` | string | ✓* | 特殊操作：listHosts/testConnection/getStatus/listPresets |
 | `hostId` | string | | 目标主机ID，默认 'local' |
 | `timeout` | number | | 超时时间（毫秒），默认 30000 |
 | `securityLevel` | string | | 安全等级：basic/standard/high/maximum |
+| `outputFormat` | string | | 输出格式：raw/formatted/json，默认 'formatted' |
+| `requireAdmin` | string | 条件必需 | 管理员验证码，write/danger 级别命令必需 |
+| `doubleConfirm` | boolean | 条件必需 | danger 级别命令需要设为 true |
 
 *注：command 和 action 二选一
 
@@ -306,11 +332,11 @@ action:「始」getStatus「末」
 | 等级 | 启用层 | 适用场景 |
 |------|--------|----------|
 | `basic` | 黑名单 | 内部可信环境 |
-| `standard` | 黑名单 + 白名单 + 沙箱 | 一般生产环境（默认） |
-| `high` | 黑名单 + 白名单 + AST + 沙箱 | 敏感数据环境 |
+| `standard` | 黑名单 + 白名单/灰名单 + 沙箱 | 一般生产环境（默认） |
+| `high` | 黑名单 + 白名单/灰名单 + AST + 沙箱 | 敏感数据环境 |
 | `maximum` | 全部六层 | 公开 API / 多租户 |
 
-## 白名单命令列表
+## 白名单命令列表（无需验证）
 
 | 命令 | 说明 | 允许的参数 |
 |------|------|-----------|
@@ -342,6 +368,119 @@ action:「始」getStatus「末」
 | `cut` | 字段切割 | -d, -f, -c |
 | `awk` | 文本处理 | -F |
 | `sed` | 流编辑器 | -n, -e |
+
+## 灰名单命令列表（需要验证）
+
+### 系统状态监控
+
+| 命令 | 说明 | 风险级别 |
+|------|------|----------|
+| `uptime` | 系统运行时间 | 🟢 低 |
+| `free` | 内存使用情况（扩展参数） | 🟢 低 |
+| `top` | 系统监控（扩展迭代） | 🟢 低 |
+| `htop` | 交互式进程监控 | 🟡 中 |
+| `vmstat` | 虚拟内存统计（扩展） | 🟢 低 |
+| `iostat` | IO 统计（扩展） | 🟢 低 |
+
+### 网络诊断
+
+| 命令 | 说明 | 风险级别 |
+|------|------|----------|
+| `ip` | 网络配置查看 | 🟢 低 |
+| `ss` | Socket 统计（扩展） | 🟢 低 |
+| `ping` | 网络连通性测试（扩展） | 🟢 低 |
+| `traceroute` | 路由追踪 | 🟢 低 |
+| `mtr` | 网络诊断 | 🟢 低 |
+| `curl` | HTTP 请求（完整功能） | 🟡 中 |
+| `wget` | HTTP 下载 | 🟡 中 |
+| `nc/netcat` | 网络调试工具 | 🟡 中 |
+| `tcpdump` | 网络抓包 | 🔴 高 |
+
+### 进程管理
+
+| 命令 | 说明 | 风险级别 |
+|------|------|----------|
+| `pgrep` | 按名称查找进程 | 🟢 低 |
+| `lsof` | 列出打开的文件/端口 | 🟢 低 |
+| `kill` | 终止进程 | 🔴 高 |
+| `killall` | 按名称终止进程 | 🔴 高 |
+| `pkill` | 按模式终止进程 | 🔴 高 |
+
+### 日志查看
+
+| 命令 | 说明 | 风险级别 |
+|------|------|----------|
+| `tail` | 实时日志追踪（-f 模式） | 🟡 中 |
+| `journalctl` | 系统日志查询（扩展） | 🟡 中 |
+| `dmesg` | 内核日志（扩展） | 🟡 中 |
+
+### 服务管理
+
+| 命令 | 说明 | 风险级别 |
+|------|------|----------|
+| `systemctl` | 服务管理（完整控制） | 🔴 高 |
+| `service` | 服务管理（传统命令） | 🔴 高 |
+
+### Docker 容器
+
+| 命令 | 说明 | 风险级别 |
+|------|------|----------|
+| `docker` | Docker 完整管理 | 🔴 高 |
+| `docker-compose` | Docker Compose 管理 | 🔴 高 |
+
+### 数据库管理
+
+| 命令 | 说明 | 风险级别 |
+|------|------|----------|
+| `mysql` | MySQL 管理（扩展） | 🔴 高 |
+| `mysqladmin` | MySQL 管理工具 | 🟡 中 |
+| `redis-cli` | Redis 管理（扩展） | 🔴 高 |
+| `psql` | PostgreSQL 客户端 | 🔴 高 |
+| `mongo` | MongoDB 客户端 | 🔴 高 |
+
+### 系统控制
+
+| 命令 | 说明 | 风险级别 |
+|------|------|----------|
+| `nginx` | Nginx 管理 | 🔴 高 |
+| `apachectl` | Apache 管理 | 🔴 高 |
+| `crontab` | 定时任务查看 | 🟡 中 |
+| `timedatectl` | 时间日期管理 | 🟡 中 |
+| `reboot` | 重启系统 | ⚫ 极高 |
+| `shutdown` | 关机/重启 | ⚫ 极高 |
+
+## 黑名单命令列表（完全禁止）
+
+黑名单配置在 `config.env` 文件中，分为两类：
+
+### 禁止模式（正则匹配）
+
+| 模式 | 说明 | 危险等级 |
+|------|------|----------|
+| `rm -rf /` | 删除根目录 | ⚫ 致命 |
+| `rm -rf /*` | 删除根目录所有内容 | ⚫ 致命 |
+| `mkfs.*` | 格式化文件系统 | ⚫ 致命 |
+| `dd if=` | 磁盘镜像写入 | ⚫ 致命 |
+| `:(){ :\|:& };:` | Fork 炸弹 | ⚫ 致命 |
+| `chmod 777 /` | 修改根目录权限 | 🔴 高危 |
+| `chmod -R 777` | 递归修改权限 | 🔴 高危 |
+| `> /dev/sd*` | 写入磁盘设备 | ⚫ 致命 |
+| `cat /dev/zero > /dev/sd*` | 清空磁盘 | ⚫ 致命 |
+| `wget ... \| sh` | 远程脚本执行 | 🔴 高危 |
+| `curl ... \| sh` | 远程脚本执行 | 🔴 高危 |
+
+### 禁止命令（精确匹配）
+
+| 命令 | 说明 | 危险等级 |
+|------|------|----------|
+| `poweroff` | 关机 | 🔴 高危 |
+| `halt` | 停机 | 🔴 高危 |
+| `init 0` | 关机 | 🔴 高危 |
+| `init 6` | 重启 | 🔴 高危 |
+| `reboot -f` | 强制重启 | 🔴 高危 |
+| `shutdown` | 关机/重启 | 🔴 高危 |
+
+> **注意**: 黑名单命令无论是否提供验证码都会被拒绝执行。
 
 ## 安全检测示例
 
@@ -379,7 +518,10 @@ Plugin/LinuxShellExecutor/
 ├── LinuxShellExecutor.js    # 主执行器
 ├── plugin-manifest.json     # 插件配置
 ├── config.env               # 安全策略配置
-├── whitelist.json           # 白名单配置
+├── securityLevels.json      # 🆕 四级安全分级配置
+├── presets.json# 🆕 预设诊断命令配置
+├── whitelist.json           # 白名单配置（免验证命令）
+├── graylist.json            # 灰名单配置（需验证命令）
 ├── hosts.json               # 主机配置
 ├── README.md                # 使用文档
 ├── ssh/
@@ -388,8 +530,113 @@ Plugin/LinuxShellExecutor/
     └── audit/               # 审计日志目录
 ```
 
+## 四级安全分级详解 (v0.4.0)
+
+| 级别 | 说明 | 管道 | 重定向 | 验证要求 | 示例命令 |
+|------|------|------|--------|----------|----------|
+| `read` | 只读命令 | ✅ | ❌ | 无需验证 | ls, cat, grep, ps, df, free |
+| `safe` | 低风险命令 | ✅ | ❌ | 无需验证 | systemctl status, docker ps |
+| `write` | 写操作命令 | ✅ | ✅ | 需要验证 | echo, tee, systemctl restart |
+| `danger` | 高危命令 | ❌ | ❌ | 二次确认 | rm, kill -9, reboot |
+
+### 管道链规则
+
+只允许以下安全级别组合的管道链：
+- `read → read`（如 `ps aux | grep nginx`）
+- `read → safe`（如 `cat log | head -100`）
+- `safe → read`（如 `docker logs | grep error`）
+
+### 重定向规则
+
+- 只有 `write` 级别命令允许使用重定向
+- 允许的目标路径：`/tmp/*`, `/var/log/*`, `~/*`
+- 禁止的目标路径：`/etc/*`, `/bin/*`, `/sbin/*`, `/usr/*`
+
+## 预设诊断命令 (v0.4.0)
+
+### 可用预设列表
+
+| 预设名 | 说明 | 参数 |
+|--------|------|------|
+| `quickDiag` | 快速系统诊断 | 无 |
+| `checkService` | 检查服务状态 | serviceName (必需) |
+| `netDiag` | 网络诊断 | 无 |
+| `checkDisk` | 磁盘详细检查 | 无 |
+| `checkDocker` | Docker 状态检查 | containerName (可选) |
+| `checkMysql` | MySQL 状态检查 | 无 |
+| `checkRedis` | Redis 状态检查 | 无 |
+| `checkNginx` | Nginx 状态检查 | 无 |
+| `securityAudit` | 安全审计 | 无 |
+| `performanceCheck` | 性能检查 | 无 |
+| `logAnalysis` | 日志分析 | logFile (必需), pattern (可选) |
+| `processTree` | 进程树查看 | 无 |
+
+### 预设命令调用示例
+
+```
+# 快速系统诊断
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」preset:quickDiag「末」
+<<<[END_TOOL_REQUEST]>>>
+
+# 检查 nginx 服务
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」preset:checkService?serviceName=nginx「末」
+<<<[END_TOOL_REQUEST]>>>
+
+# 分析日志文件
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」preset:logAnalysis?logFile=/var/log/syslog&pattern=error「末」
+<<<[END_TOOL_REQUEST]>>>
+
+# 列出所有预设
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+action:「始」listPresets「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+## 输出格式化 (v0.4.0)
+
+### 输出格式选项
+
+| 格式 | 说明 |
+|------|------|
+| `raw` | 原始输出，不做任何处理 |
+| `formatted` | 格式化输出（默认），自动截断、表格美化 |
+| `json` | JSON 格式输出，便于程序解析 |
+
+### 自动截断
+
+- 默认最大输出行数：100 行
+- 超过限制时返回 `truncated: true`
+- 完整输出保存到临时文件，返回 `fullOutputPath`
+
+### 表格美化
+
+自动识别并美化以下命令的表格输出：
+- `ps`、`docker ps`、`df`、`free`、`netstat`、`ss`
+
 ## 版本历史
 
+- **v0.4.0** - 四级安全分级、预设命令、输出格式化
+  - 新增四级安全分级（read/safe/write/danger）
+  - 新增智能管道链验证
+  - 新增 12 个预设诊断命令
+  - 新增输出格式化（自动截断、表格美化）
+  - 新增 securityLevels.json 和 presets.json 配置文件
+- **v0.3.1** - 新增三级权限控制（白名单/灰名单/黑名单）
+  - 白名单命令无需验证即可执行
+  - 灰名单命令需要管理员验证码
+  - 新增 graylist.json 配置文件，包含运维命令
+  - 支持 systemctl、docker、kill、journalctl 等运维命令
+- **v0.3.0** - 新增资源限制(rlimit)、管道命令验证、SSH连接池优化
+  - 实现 RlimitManager 类，支持 CPU/内存/文件/进程数限制
+  - 实现管道命令解析和验证，支持 allowedPipeCommands 和 forbiddenInPipe
+  - SSH 连接池增加连接数量限制、自动重试、等待队列
 - **v0.2.0** - 新增多主机 SSH 远程执行、密钥认证、跳板机支持
 - **v0.1.0** - 初始版本，实现六层安全架构
 
