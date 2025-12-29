@@ -1660,6 +1660,41 @@ module.exports = function(DEBUG_MODE, dailyNoteRootPath, pluginManager, getCurre
             res.status(500).json({ error: 'Failed to export to txt', details: error.message });
         }
     });
+
+    // 新增：验证登录端点
+    adminApiRouter.post('/verify-login', (req, res) => {
+        // 能到达这里说明已通过 adminAuth 验证
+        // 设置认证 Cookie（24小时有效）
+        if (req.headers.authorization) {
+            const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+            const cookieOptions = [
+                `admin_auth=${encodeURIComponent(req.headers.authorization)}`,
+                'Path=/',
+                'HttpOnly',
+                'SameSite=Strict',
+                'Max-Age=86400' // 24小时
+            ];
+            
+            // 如果是 HTTPS，添加 Secure 标志
+            if (isSecure) {
+                cookieOptions.push('Secure');
+            }
+            
+            res.setHeader('Set-Cookie', cookieOptions.join('; '));
+        }
+        
+        res.status(200).json({
+            status: 'success',
+            message: 'Authentication successful'
+        });
+    });
+
+    // 可选：添加登出端点
+    adminApiRouter.post('/logout', (req, res) => {
+        // 清除认证 Cookie
+        res.setHeader('Set-Cookie', 'admin_auth=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+        res.status(200).json({ status: 'success', message: 'Logged out' });
+    });
     
     return adminApiRouter;
 };

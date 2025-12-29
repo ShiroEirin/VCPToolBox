@@ -251,6 +251,24 @@ const adminAuth = (req, res, next) => {
     const isAdminPath = req.path.startsWith('/admin_api') || req.path.startsWith('/AdminPanel');
 
     if (isAdminPath) {
+        // ========== 新增：允许登录页面和相关资源无需认证 ==========
+        const publicPaths = [
+            '/AdminPanel/login.html',
+            '/AdminPanel/VCPLogo2.png',
+            '/AdminPanel/favicon.ico',
+            '/AdminPanel/style.css',
+            '/AdminPanel/woff.css',
+            '/AdminPanel/font.woff2'
+        ];
+        
+        // 验证登录的端点也需要特殊处理（允许无凭据时返回401而不是重定向）
+        const isVerifyEndpoint = req.path === '/admin_api/verify-login';
+        
+        if (publicPaths.includes(req.path)) {
+            return next(); // 直接放行登录页面相关资源
+        }
+        // ========== 新增结束 ==========
+
         let clientIp = req.ip;
         if (clientIp && clientIp.substr(0, 7) === "::ffff:") {
             clientIp = clientIp.substr(7);
@@ -283,8 +301,36 @@ const adminAuth = (req, res, next) => {
             });
         }
 
-        // 3. 凭据已配置，继续进行 Basic Auth
-        const credentials = basicAuth(req);
+        // 3. 尝试获取凭据（优先 Header，其次 Cookie）
+        let credentials = basicAuth(req);
+        
+        // 如果 Header 中没有凭据，尝试从 Cookie 中读取
+        if (!credentials && req.headers.cookie) {
+            const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
+                const [key, value] = cookie.trim().split('=');
+                acc[key] = value;
+                return acc;
+            }, {});
+            
+            if (cookies.admin_auth) {
+                try {
+                    // Cookie 存储的是 "Basic xxxx" 格式
+                    const authValue = decodeURIComponent(cookies.admin_auth);
+                    if (authValue.startsWith('Basic ')) {
+                        const base64Credentials = authValue.substring(6);
+                        const decodedCredentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+                        const [name, pass] = decodedCredentials.split(':');
+                        if (name && pass) {
+                            credentials = { name, pass };
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[AdminAuth] Failed to parse auth cookie:', e.message);
+                }
+            }
+        }
+
+        // 4. 验证凭据
         if (!credentials || credentials.name !== ADMIN_USERNAME || credentials.pass !== ADMIN_PASSWORD) {
             // 认证失败，处理登录尝试计数
             if (clientIp) {
@@ -308,12 +354,23 @@ const adminAuth = (req, res, next) => {
                 }
             }
             
-            res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"');
-            if (req.path.startsWith('/admin_api') || (req.headers.accept && req.headers.accept.includes('application/json'))) {
+            // ========== 修改：根据请求类型决定响应方式 ==========
+            // API 请求或验证端点：返回 401 JSON
+            if (isVerifyEndpoint || req.path.startsWith('/admin_api') ||
+                (req.headers.accept && req.headers.accept.includes('application/json'))) {
+                // 不设置 WWW-Authenticate 头，避免触发浏览器弹窗
                 return res.status(401).json({ error: 'Unauthorized' });
-            } else {
+            }
+            // AdminPanel 页面请求：重定向到登录页面
+            else if (req.path.startsWith('/AdminPanel')) {
+                return res.redirect('/AdminPanel/login.html');
+            }
+            // 其他情况
+            else {
+                res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"');
                 return res.status(401).send('<h1>401 Unauthorized</h1><p>Authentication required to access the Admin Panel.</p>');
             }
+            // ========== 修改结束 ==========
         }
         
         // 4. 认证成功

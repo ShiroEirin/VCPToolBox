@@ -375,8 +375,11 @@ class MonitorManager {
         
         const sshManager = await this._getSSHManager();
         
+        // 修复: 如果 levels 是 JSON 字符串，先解析为数组
+        const levelsArray = typeof levels === 'string' ? JSON.parse(levels) : levels;
+        
         // 构建 grep 模式
-        const pattern = levels.join('|');
+        const pattern = levelsArray.join('|');
         // 使用 grep + tail 获取最近的错误
         const command = `grep -E '\\b(${pattern})\\b' ${this._escapeShellArg(logPath)} | tail -n ${count}`;
         

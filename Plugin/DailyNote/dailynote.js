@@ -15,6 +15,9 @@ const dailyNoteRootPath = projectBasePath ? path.join(projectBasePath, 'dailynot
 // Config for 'create' command
 const CONFIGURED_EXTENSION = (process.env.DAILY_NOTE_EXTENSION || "txt").toLowerCase() === "md" ? "md" : "txt";
 
+// 忽略的文件夹列表
+const IGNORED_FOLDERS = ['MusicDiary'];
+
 
 // --- Debug Logging (to stderr) ---
 function debugLog(message, ...args) {
@@ -23,17 +26,52 @@ function debugLog(message, ...args) {
     }
 }
 
-// --- Helper Function for Sanitization ---
+// --- Helper Function for Sanitization (增强版) ---
 function sanitizePathComponent(name) {
     if (!name || typeof name !== 'string') {
         return 'Untitled';
     }
-    const sanitized = name.replace(/[\\/:*?"<>|]/g, '')
-                         .replace(/[\x00-\x1f\x7f]/g, '')
-                         .trim()
-                         .replace(/^[.]+|[.]+$/g, '')
-                         .trim();
+
+    let sanitized = name
+        // 1. 移除路径分隔符和 Windows 非法字符
+        .replace(/[\\/:*?"<>|]/g, '')
+        // 2. 移除控制字符 (0x00-0x1F, 0x7F)
+        .replace(/[\x00-\x1f\x7f]/g, '')
+        // 3. 移除 Unicode 方向控制字符 (可用于视觉欺骗)
+        .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+        // 4. 移除零宽字符
+        .replace(/[\u200b-\u200d\ufeff]/g, '')
+        // 5. 将所有空白字符替换为下划线，防止 NTFS 索引问题
+        .replace(/\s+/g, '_')
+        // 6. 移除开头和结尾的点和下划线
+        .replace(/^[._]+|[._]+$/g, '')
+        // 7. 合并多个连续的下划线（美观 + 防止变体攻击）
+        .replace(/_+/g, '_');
+
+    // 8. Windows 保留名检查 (不区分大小写)
+    const windowsReserved = /^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$/i;
+    if (windowsReserved.test(sanitized)) {
+        sanitized = '_' + sanitized;
+        debugLog(`Renamed Windows reserved name to: ${sanitized}`);
+    }
+
+    // 9. 长度限制 (预留空间给文件名)
+    const MAX_FOLDER_NAME_LENGTH = 100;
+    if (sanitized.length > MAX_FOLDER_NAME_LENGTH) {
+        sanitized = sanitized.substring(0, MAX_FOLDER_NAME_LENGTH).replace(/[._]+$/g, '');
+        debugLog(`Truncated folder name to ${MAX_FOLDER_NAME_LENGTH} chars`);
+    }
+
     return sanitized || 'Untitled';
+}
+
+// --- 新增：路径安全验证函数 ---
+function isPathWithinBase(targetPath, basePath) {
+    const resolvedTarget = path.resolve(targetPath);
+    const resolvedBase = path.resolve(basePath);
+    // 确保目标路径以基础路径开头（加 sep 防止 /base123 匹配 /base）
+    return resolvedTarget === resolvedBase ||
+           resolvedTarget.startsWith(resolvedBase + path.sep);
 }
 
 // --- Tag Processing Functions (for 'create' command) ---
@@ -134,6 +172,11 @@ async function handleCreateCommand(args) {
             debugLog(`Sanitized folder name from "${folderName}" to "${sanitizedFolderName}"`);
         }
 
+        // 检查是否尝试写入被忽略的文件夹
+        if (IGNORED_FOLDERS.includes(sanitizedFolderName)) {
+            return { status: "error", error: `Cannot create diary in ignored folder: ${sanitizedFolderName}` };
+        }
+
         const datePart = dateString.replace(/[.\\\/\s-]/g, '-').replace(/-+/g, '-');
         const now = new Date();
         const hours = now.getHours().toString().padStart(2, '0');
@@ -142,6 +185,16 @@ async function handleCreateCommand(args) {
         const timeStringForFile = `${hours}_${minutes}_${seconds}`;
 
         const dirPath = path.join(dailyNoteRootPath, sanitizedFolderName);
+
+        // 🆕 安全检查：确保路径在 dailyNoteRootPath 内
+        if (!isPathWithinBase(dirPath, dailyNoteRootPath)) {
+            console.error(`[DailyNote] Path traversal attempt detected: ${dirPath}`);
+            return {
+                status: "error",
+                error: "Security error: Invalid folder path detected."
+            };
+        }
+
         const baseFileNameWithoutExt = `${datePart}-${timeStringForFile}`;
         const fileExtension = `.${CONFIGURED_EXTENSION}`;
         const finalFileName = `${baseFileNameWithoutExt}${fileExtension}`;
@@ -180,50 +233,87 @@ async function handleUpdateCommand(args) {
     try {
         let modificationDone = false;
         let modifiedFilePath = null;
-        const directoriesToScan = [];
+        
+        // 构建搜索顺序：优先文件夹 + 其他所有文件夹
+        const priorityDirs = [];  // 优先搜索的文件夹
+        const otherDirs = [];     // 其他文件夹
+
+        // 获取所有子文件夹，过滤掉被忽略的文件夹
+        const allDirEntries = await fs.readdir(dailyNoteRootPath, { withFileTypes: true });
+        const allDirs = allDirEntries.filter(d => d.isDirectory() && !IGNORED_FOLDERS.includes(d.name));
+        debugLog(`Filtered out ignored folders: ${IGNORED_FOLDERS.join(', ')}. Remaining directories: ${allDirs.map(d => d.name).join(', ')}`);
 
         if (maid) {
             const maidRegex = /^\[(.+?)\]/;
             const match = maid.match(maidRegex);
 
             if (match) {
-                const subfolder = match[1];
-                const scanPath = path.join(dailyNoteRootPath, subfolder);
-                debugLog(`Maid specifies a folder: '${subfolder}'. Scanning directory: ${scanPath}`);
-                try {
-                    const stats = await fs.stat(scanPath);
-                    if (stats.isDirectory()) {
-                        directoriesToScan.push({ name: subfolder, path: scanPath });
+                // 格式: [小克的知识]小克 -> 优先在 "小克的知识" 文件夹找
+                const priorityFolder = sanitizePathComponent(match[1]);
+                debugLog(`Maid specifies priority folder (sanitized): '${priorityFolder}'`);
+                
+                for (const dirEntry of allDirs) {
+                    const dirPath = path.join(dailyNoteRootPath, dirEntry.name);
+                    
+                    // 安全检查：确保路径在 dailyNoteRootPath 内
+                    if (!isPathWithinBase(dirPath, dailyNoteRootPath)) {
+                        debugLog(`Skipping unsafe directory during update: ${dirPath}`);
+                        continue;
+                    }
+
+                    if (sanitizePathComponent(dirEntry.name) === priorityFolder) {
+                        priorityDirs.push({ name: dirEntry.name, path: dirPath });
                     } else {
-                        return { status: "error", error: `Specified diary path is not a directory: ${scanPath}` };
+                        otherDirs.push({ name: dirEntry.name, path: dirPath });
                     }
-                } catch (e) {
-                    if (e.code === 'ENOENT') {
-                        return { status: "error", error: `Diary subfolder not found: ${scanPath}` };
-                    }
-                    throw e;
+                }
+                
+                if (priorityDirs.length === 0) {
+                    debugLog(`Priority folder '${priorityFolder}' not found, will search all folders.`);
                 }
             } else {
-                debugLog(`Maid specified: '${maid}'. Targeting directories starting with this name in root.`);
-                const allDirs = await fs.readdir(dailyNoteRootPath, { withFileTypes: true });
+                // 格式: 小克 -> 优先在以 "小克" 开头的文件夹找
+                const sanitizedMaid = sanitizePathComponent(maid);
+                debugLog(`Maid specified: '${maid}' (sanitized: '${sanitizedMaid}'). Prioritizing directories starting with this name.`);
+                
                 for (const dirEntry of allDirs) {
-                    if (dirEntry.isDirectory() && dirEntry.name.startsWith(maid)) {
-                        directoriesToScan.push({ name: dirEntry.name, path: path.join(dailyNoteRootPath, dirEntry.name) });
+                    const dirPath = path.join(dailyNoteRootPath, dirEntry.name);
+
+                    // 安全检查：确保路径在 dailyNoteRootPath 内
+                    if (!isPathWithinBase(dirPath, dailyNoteRootPath)) {
+                        debugLog(`Skipping unsafe directory during update: ${dirPath}`);
+                        continue;
+                    }
+
+                    if (sanitizePathComponent(dirEntry.name).startsWith(sanitizedMaid)) {
+                        priorityDirs.push({ name: dirEntry.name, path: dirPath });
+                    } else {
+                        otherDirs.push({ name: dirEntry.name, path: dirPath });
                     }
                 }
             }
-
-            if (directoriesToScan.length === 0) {
-                return { status: "error", error: `No diary folders found for maid '${maid}'.` };
-            }
         } else {
+            // 没有指定 maid，搜索所有文件夹
             debugLog("No maid specified. Scanning all directories.");
-            const characterDirs = await fs.readdir(dailyNoteRootPath, { withFileTypes: true });
-            for (const dirEntry of characterDirs) {
-                if (dirEntry.isDirectory()) {
-                    directoriesToScan.push({ name: dirEntry.name, path: path.join(dailyNoteRootPath, dirEntry.name) });
+            for (const dirEntry of allDirs) {
+                const dirPath = path.join(dailyNoteRootPath, dirEntry.name);
+
+                // 安全检查：确保路径在 dailyNoteRootPath 内
+                if (!isPathWithinBase(dirPath, dailyNoteRootPath)) {
+                    debugLog(`Skipping unsafe directory during update: ${dirPath}`);
+                    continue;
                 }
+
+                otherDirs.push({ name: dirEntry.name, path: dirPath });
             }
+        }
+
+        // 合并搜索顺序：优先文件夹在前
+        const directoriesToScan = [...priorityDirs, ...otherDirs];
+        debugLog(`Search order: ${directoriesToScan.map(d => d.name).join(' -> ')}`);
+
+        if (directoriesToScan.length === 0) {
+            return { status: "error", error: `No diary folders found in ${dailyNoteRootPath}` };
         }
 
         for (const dir of directoriesToScan) {

@@ -187,12 +187,18 @@ async function main(request) {
     log('插件启动，接收到请求。');
     const { SearchContent, SearchBroadness } = request;
 
-    if (!SearchContent || !SearchBroadness) {
-        return sendResponse({ status: "error", error: "请求缺少必需的参数: SearchContent 和 SearchBroadness。" });
+    if (!SearchContent) {
+        return sendResponse({ status: "error", error: "请求缺少必需的参数: SearchContent。" });
     }
-    const broadness = parseInt(SearchBroadness, 10);
-    if (isNaN(broadness) || broadness < 5 || broadness > 20) {
-        return sendResponse({ status: "error", error: "参数 SearchBroadness 必须是5到20之间的整数。" });
+
+    // 优化 SearchBroadness 参数：如果未提供或无效，默认为 5
+    let broadness = parseInt(SearchBroadness, 10);
+    if (isNaN(broadness)) {
+        log(`未提供有效的 SearchBroadness，使用默认值 5`);
+        broadness = 5;
+    } else if (broadness < 5 || broadness > 20) {
+        log(`SearchBroadness (${broadness}) 超出范围 (5-20)，已修正。`);
+        broadness = Math.max(5, Math.min(20, broadness));
     }
 
     log(`研究主题: "${SearchContent}", 搜索广度: ${broadness}`);
