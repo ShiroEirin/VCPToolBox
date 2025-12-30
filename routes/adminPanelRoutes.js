@@ -130,7 +130,22 @@ module.exports = function(DEBUG_MODE, dailyNoteRootPath, pluginManager, getCurre
            }
        }
    });
-    // --- End System Monitor Routes ---
+
+   // 新增：获取天气预报数据
+   adminApiRouter.get('/weather', async (req, res) => {
+       const weatherCachePath = path.join(__dirname, '..', 'Plugin', 'WeatherReporter', 'weather_cache.json');
+       try {
+           const content = await fs.readFile(weatherCachePath, 'utf-8');
+           res.json(JSON.parse(content));
+       } catch (error) {
+           if (error.code === 'ENOENT') {
+               res.status(404).json({ success: false, error: '天气缓存文件未找到。' });
+           } else {
+               res.status(500).json({ success: false, error: '读取天气缓存失败。', details: error.message });
+           }
+       }
+   });
+   // --- End System Monitor Routes ---
  
     // --- Server Log API ---
     adminApiRouter.get('/server-log', async (req, res) => {

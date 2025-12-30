@@ -828,6 +828,12 @@ VCP 的强大之处在于其不断丰富的插件生态，以下是一些已实�
 
 ### 环境感知与信息获取
 
+- **VSearch (synchronous)**:
+  - **作用**: VCP 深度自研的联网搜索引擎，是 Tavily 和 Google 的绝对上位替代。
+  - **核心能力**:
+      - **微模型聚合**: 使用多个微型 LLM 调用 VCP 联网搜索模组进行聚合搜索，确保信息的全面性与准确性。
+      - **元思考赋能**: 配合 VCP 元思考实现强大的逻辑穿透和信息归纳能力，能够轻松找到潜在的事件关联和检索词扩展。
+      - **轻量极速**: 相比 `flashdeapsearch` 更加轻量化，检索速度稳定在 1-10 秒内，兼顾深度与效率。
 - **WeatherReporter (static)**: 提供实时天气信息，含预警、小时详情、多日预报。注入天气预警信息。
 - **TavilySearch (synchronous)**: 集成 Tavily API，赋予 AI 网络搜索能力。
 - **V日报 (static)**: 通过 `{{VCPDailyHot}}` 占位符提供全球热点新闻。它会从全球100个热门门户网站各抓取20条热点，提供总计约2000条全球热点摘要及原文URL。建议构建专门的“记者”或“新闻官”Agent来管理此信息流，并通过 `AgentAssistant` 插件封装，以便其他Agent可以向其查询最新动态。
@@ -885,7 +891,7 @@ VCP 的强大之处在于其不断丰富的插件生态，以下是一些已实�
 ### 插件加载方式
 
 ## 加载插件的方式
-*   **直接在系统提示词定义如下字段即可，系统工具列表：{{VCPFluxGen}} {{VCPSciCalculator}}……**
+*   **直接在系统提示词定义如下字段即可，系统工具列表：{{VSearch}} {{VCPFluxGen}} {{VCPSciCalculator}}……**
 
 ## 前端示例
 ![示例图片1](示例1.jpg)
@@ -1220,7 +1226,7 @@ AgentNova=Nova.txt
 TarSysPrompt="{{VarTimeNow}}当前地址是{{VarCity}},当前天气是{{VCPWeatherInfo}}。"
 TarEmojiPrompt='本服务器支持表情包功能，通用表情包图床路径为{{VarHttpUrl}}:5890/pw={{Image_Key}}/images/通用表情包，注意[/通用表情包]路径指代，表情包列表为{{通用表情包}}，你可以灵活的在你的输出中插入表情包，调用方式为<img src="{{VarHttpUrl}}:5890/pw={{Image_Key}}/images/通用表情包/阿库娅-一脸智障.jpg" width="150">,使用Width参数来控制表情包尺寸（50-200）。'
 # VCP类，可以使用{{VCPAllTools}}定义，亦可以自定义。
-VarToolList="文生图工具{{VCPFluxGen}} 计算器工具{{VCPSciCalculator}},联网搜索工具{{VCPTavilySearch}},网页获取工具{{VCPUrlFetch}}；看b站视频工具{{VCPBilibiliFetch}}；使用Suno唱歌工具{{VCPSunoGen}},联络别的AI工具{{VCPAgentAssistant}},给用户的手机/电脑发消息工具{{AgentMessage}}。"
+VarToolList="文生图工具{{VCPFluxGen}} 计算器工具{{VCPSciCalculator}},联网搜索工具{{VCPVSearch}},联网搜索工具{{VCPTavilySearch}},网页获取工具{{VCPUrlFetch}}；看b站视频工具{{VCPBilibiliFetch}}；使用Suno唱歌工具{{VCPSunoGen}},联络别的AI工具{{VCPAgentAssistant}},给用户的手机/电脑发消息工具{{AgentMessage}}。"
 ```
 
 ### 然后，在实际传递给 AI 模型的系统提示词中组合这些 `Tar*` 模块,以下是一个标准的系统提示词示例用于测试。

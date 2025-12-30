@@ -8,6 +8,9 @@ let monitorIntervalId = null;
 let activityDataPoints = new Array(60).fill(0);
 let lastLogCheckTime = null;
 
+let logoClickCount = 0;
+let logoClickTimer = null;
+
 /**
  * 初始化仪表盘，设置定时器并加载初始数据。
  */
@@ -17,6 +20,7 @@ export function initializeDashboard() {
         clearInterval(monitorIntervalId);
     }
     updateDashboardData();
+    updateWeatherData();
     
     updateActivityChart().then(() => {
         drawActivityChart();
@@ -24,10 +28,59 @@ export function initializeDashboard() {
 
     monitorIntervalId = setInterval(() => {
         updateDashboardData();
+        updateWeatherData();
         updateActivityChart().then(() => {
              drawActivityChart();
         });
     }, 5000);
+
+    // 彩蛋逻辑：点击5次logo进入沉浸模式
+    const logo = document.getElementById('vcp-logo-main');
+    if (logo && !logo.dataset.easterEggInitialized) {
+        logo.addEventListener('click', () => {
+            logoClickCount++;
+            clearTimeout(logoClickTimer);
+            if (logoClickCount >= 5) {
+                enterImmersiveMode();
+                logoClickCount = 0;
+            } else {
+                logoClickTimer = setTimeout(() => {
+                    logoClickCount = 0;
+                }, 2000);
+            }
+        });
+        logo.dataset.easterEggInitialized = 'true';
+    }
+
+    const exitBtn = document.getElementById('exit-immersive-button');
+    if (exitBtn && !exitBtn.dataset.easterEggInitialized) {
+        exitBtn.addEventListener('click', exitImmersiveMode);
+        exitBtn.dataset.easterEggInitialized = 'true';
+    }
+}
+
+/**
+ * 进入太阳系沉浸观景模式
+ */
+function enterImmersiveMode() {
+    const bg = document.querySelector('.solar-system-bg');
+    if (bg) {
+        bg.classList.add('immersive-mode');
+        document.body.style.overflow = 'hidden';
+        console.log('Entering immersive solar system mode...');
+    }
+}
+
+/**
+ * 退出沉浸模式
+ */
+function exitImmersiveMode() {
+    const bg = document.querySelector('.solar-system-bg');
+    if (bg) {
+        bg.classList.remove('immersive-mode');
+        document.body.style.overflow = '';
+        console.log('Exiting immersive mode.');
+    }
 }
 
 /**
@@ -118,6 +171,87 @@ async function updateDashboardData() {
         console.error('Failed to update dashboard data:', error);
         if (pm2ProcessList) pm2ProcessList.innerHTML = `<p class="error-message">加载 PM2 数据失败: ${error.message}</p>`;
         if (nodeInfoList) nodeInfoList.innerHTML = `<p class="error-message">加载系统数据失败: ${error.message}</p>`;
+    }
+}
+
+/**
+ * 更新天气预报数据。
+ */
+async function updateWeatherData() {
+    const weatherIcon = document.getElementById('weather-icon');
+    const weatherTemp = document.getElementById('weather-temp');
+    const weatherText = document.getElementById('weather-text');
+    const weatherHumidity = document.getElementById('weather-humidity');
+    const weatherWind = document.getElementById('weather-wind');
+    const weatherPressure = document.getElementById('weather-pressure');
+    const weatherForecast = document.getElementById('weather-forecast');
+
+    if (!weatherIcon) return;
+
+    try {
+        const data = await apiFetch(`${API_BASE_URL}/weather`, {}, false);
+        
+        // 映射天气图标 (使用 Material Symbols)
+        const iconMap = {
+            '100': 'sunny',
+            '101': 'cloudy',
+            '102': 'cloudy',
+            '103': 'partly_cloudy_day',
+            '104': 'cloud',
+            '150': 'clear_night',
+            '151': 'cloudy_night',
+            '152': 'cloudy_night',
+            '153': 'partly_cloudy_night',
+            '154': 'cloud',
+            '305': 'rainy',
+            '306': 'rainy',
+            '307': 'rainy_heavy',
+            'default': 'wb_sunny'
+        };
+
+        if (data && data.hourly && data.hourly.length > 0) {
+            // 寻找最接近当前时间的整点预报
+            const now = new Date();
+            let current = data.hourly[0];
+            let minDiff = Infinity;
+
+            for (const hourData of data.hourly) {
+                const forecastTime = new Date(hourData.fxTime);
+                const diff = Math.abs(now - forecastTime);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    current = hourData;
+                }
+            }
+
+            weatherIcon.textContent = iconMap[current.icon] || iconMap['default'];
+            weatherTemp.textContent = current.temp;
+            weatherText.textContent = current.text;
+            weatherHumidity.textContent = `${current.humidity}%`;
+            weatherWind.textContent = `${current.windDir} ${current.windScale}级`;
+            weatherPressure.textContent = `${current.pressure} hPa`;
+        }
+
+        if (data && data.daily && data.daily.length > 0 && weatherForecast) {
+            weatherForecast.innerHTML = '';
+            // 显示未来 4 天的预报 (跳过今天)
+            data.daily.slice(1, 5).forEach(day => {
+                const date = new Date(day.fxDate);
+                const dayName = date.toLocaleDateString('zh-CN', { weekday: 'short' });
+                
+                const forecastItem = document.createElement('div');
+                forecastItem.className = 'forecast-item';
+                forecastItem.innerHTML = `
+                    <span class="forecast-date">${dayName}</span>
+                    <span class="material-symbols-outlined forecast-icon">${iconMap[day.iconDay] || iconMap['default']}</span>
+                    <span class="forecast-temp">${day.tempMin}°/${day.tempMax}°</span>
+                `;
+                weatherForecast.appendChild(forecastItem);
+            });
+        }
+    } catch (error) {
+        console.error('Failed to update weather data:', error);
+        if (weatherText) weatherText.textContent = '加载失败';
     }
 }
 

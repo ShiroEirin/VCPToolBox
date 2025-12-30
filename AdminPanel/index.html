@@ -301,12 +301,41 @@
    </style>
  </head>
  <body>
+   <div class="solar-system-bg" aria-hidden="true">
+       <div class="stars"></div>
+       <div class="stars2"></div>
+       <div class="stars3"></div>
+       <div class="sun"></div>
+       <div class="orbit orbit-mercury"><div class="planet planet-mercury"></div></div>
+       <div class="orbit orbit-venus"><div class="planet planet-venus"></div></div>
+       <div class="orbit orbit-earth"><div class="planet planet-earth"></div></div>
+       <div class="orbit orbit-mars"><div class="planet planet-mars"></div></div>
+       <div class="orbit orbit-jupiter"><div class="planet planet-jupiter"></div></div>
+       <div class="orbit orbit-saturn"><div class="planet planet-saturn"></div></div>
+       <div class="orbit orbit-uranus"><div class="planet planet-uranus"></div></div>
+       <div class="orbit orbit-neptune"><div class="planet planet-neptune"></div></div>
+       <div class="shooting-stars">
+           <div class="shooting-star"></div>
+           <div class="shooting-star"></div>
+           <div class="shooting-star"></div>
+       </div>
+       <button id="exit-immersive-button" class="exit-immersive-button">退出沉浸模式</button>
+   </div>
     <header class="top-bar">
         <div class="top-bar-content">
-            <span class="server-title">VCPToolBox</span>
+            <div class="brand">
+                <span class="material-symbols-outlined brand-icon">terminal</span>
+                <span class="server-title">VCPToolBox</span>
+            </div>
             <div class="header-actions">
-                <button id="restart-server-button" class="restart-button">重启服务器</button>
-                <button id="theme-toggle-button" class="theme-button">切换主题</button>
+                <button id="restart-server-button" class="restart-button">
+                    <span class="material-symbols-outlined">restart_alt</span>
+                    重启服务器
+                </button>
+                <button id="theme-toggle-button" class="theme-button">
+                    <span class="material-symbols-outlined">contrast</span>
+                    切换主题
+                </button>
             </div>
         </div>
     </header>
@@ -346,7 +375,7 @@
                 <h2>仪表盘</h2>
                 <div class="vcp-animation-container">
                     <div class="vcp-logo-container">
-                        <img src="VCPLogo2.png" alt="VCP Logo" class="vcp-logo">
+                        <img src="VCPLogo2.png" alt="VCP Logo" class="vcp-logo" id="vcp-logo-main">
                     </div>
                     <canvas id="vcp-animation-canvas"></canvas>
                 </div>
@@ -391,6 +420,39 @@
                         <h3>Node.js 进程信息</h3>
                         <div class="status-card-content" id="node-info-list">
                            <p>加载中...</p>
+                        </div>
+                    </div>
+                    <div class="status-card weather-card">
+                        <h3>天气预报</h3>
+                        <div class="weather-container">
+                            <div class="weather-current">
+                                <div class="current-main">
+                                    <span id="weather-icon" class="material-symbols-outlined weather-icon-large">--</span>
+                                    <div class="current-temp-box">
+                                        <div class="temp-row">
+                                            <span id="weather-temp">--</span><span class="unit">°C</span>
+                                        </div>
+                                        <div id="weather-text">加载中...</div>
+                                    </div>
+                                </div>
+                                <div class="current-details">
+                                    <div class="detail-item">
+                                        <span class="material-symbols-outlined">humidity_percentage</span>
+                                        <span id="weather-humidity">--%</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="material-symbols-outlined">air</span>
+                                        <span id="weather-wind">--</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="material-symbols-outlined">compress</span>
+                                        <span id="weather-pressure">-- hPa</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="weather-forecast" id="weather-forecast">
+                                <!-- 预报内容将动态加载 -->
+                            </div>
                         </div>
                     </div>
                 </div>

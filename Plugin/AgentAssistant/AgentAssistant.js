@@ -249,7 +249,7 @@ async function processToolCall(args) {
             if (response.data && response.data.status === "success") {
                 const formattedDate = `${targetDate.getFullYear()}年${targetDate.getMonth() + 1}月${targetDate.getDate()}日 ${targetDate.getHours().toString().padStart(2, '0')}:${targetDate.getMinutes().toString().padStart(2, '0')}`;
                 const friendlyReceipt = `您预定于 ${formattedDate} 发给 ${agent_name} 的未来通讯已经被系统记录，届时会自动发送。`;
-                return { status: "success", result: friendlyReceipt };
+                return { status: "success", result: [{ type: "text", text: friendlyReceipt }] };
             } else {
                 const errorMessage = `调度任务失败: ${response.data?.error || '服务器返回未知错误'}`;
                 if (DEBUG_MODE) console.error(`[AgentAssistant Service] ${errorMessage}`, response.data);
@@ -339,7 +339,7 @@ async function processToolCall(args) {
             console.error('[AgentAssistant Service] Error broadcasting VCP Info:', e.message);
         }
         
-        return { status: "success", result: assistantResponseContent };
+        return { status: "success", result: [{ type: "text", text: assistantResponseContent }] };
 
     } catch (error) {
         let errorMessage = `调用 Agent '${agent_name}' 时发生错误。`;
