@@ -21,12 +21,19 @@ const {
 const MAX_CONCURRENT_SEARCHES = parseInt(MaxSearchList, 10) || 5;
 const DEEP_SEARCH_MAX_TOKENS = parseInt(DeepSearchModelMaxToken, 10) || 60000;
 const GOOGLE_SEARCH_MAX_TOKENS = parseInt(GoogleSearchModelMaxToken, 10) || 50000;
-const FILE_SAVE_PATH = path.resolve(__dirname, '../../file/document');
+const FILE_SAVE_PATH = path.resolve(__dirname, '../../file/document/flashdeepsearch');
 
 // --- 2. 辅助函数 ---
 
-const logFilePath = path.join(__dirname, `log_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
-const logStream = require('fs').createWriteStream(logFilePath, { flags: 'a' });
+const LOG_DIR = path.join(__dirname, 'log');
+// 同步创建日志目录（如果不存在）
+const fsSync = require('fs');
+if (!fsSync.existsSync(LOG_DIR)) {
+    fsSync.mkdirSync(LOG_DIR, { recursive: true });
+}
+
+const logFilePath = path.join(LOG_DIR, `log_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
+const logStream = fsSync.createWriteStream(logFilePath, { flags: 'a' });
 
 const log = (message) => {
     const logMessage = `[FlashDeepSearch] ${new Date().toISOString()}: ${message}`;
@@ -45,9 +52,14 @@ const sendResponse = (data) => {
 };
 
 const callLanguageModel = async (model, messages, systemPrompt = null, maxTokens) => {
+    const now = new Date();
+    const timeStr = now.toLocaleString('zh-CN', { hour12: false });
+    const dayOfWeek = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()];
+    const timeContext = `\n\n【当前时间信息】\n当前日期和时间：${timeStr} 星期${dayOfWeek}\n请在研究和回答中参考此时间的时效性。`;
+
     const payload = {
         model,
-        messages: systemPrompt ? [{ role: 'system', content: systemPrompt }, ...messages] : messages,
+        messages: systemPrompt ? [{ role: 'system', content: systemPrompt + timeContext }, ...messages] : messages,
         stream: false,
         max_tokens: maxTokens
     };

@@ -312,34 +312,44 @@
         }
     }
 
+    // 将 closeModal 暴露到全局，方便父窗口调用
+    window.closeModal = function() {
+        const modal = document.getElementById('mediaModal');
+        if (!modal) return;
+        
+        modal.style.display = "none";
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+        
+        // 停止并清理媒体内容
+        const modalContent = document.getElementById('modalContent');
+        if (modalContent) {
+            const media = modalContent.querySelector('video, audio');
+            if (media) {
+                media.pause();
+                media.src = '';
+            }
+            modalContent.innerHTML = '';
+        }
+    };
+
     // 3. 允许图片点击放大预览 - Modal handling JavaScript
     window.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('mediaModal');
         const modalCloseButton = document.getElementById('modalCloseButton');
 
-        function closeModal() {
-            modal.style.display = "none";
-            document.body.style.overflow = 'auto';
-            // Stop any playing media
-            const mediaContent = modal.querySelector('video, audio');
-            if (mediaContent) {
-                mediaContent.pause();
-                mediaContent.src = ''; // Detach source
-            }
-        }
-
         if (modal && modalCloseButton) {
-            modalCloseButton.onclick = closeModal;
+            modalCloseButton.onclick = window.closeModal;
 
             modal.onclick = function(event) {
                 if (event.target === modal) {
-                    closeModal();
+                    window.closeModal();
                 }
             }
 
             document.addEventListener('keydown', function(event) {
                 if (event.key === "Escape" && modal.style.display === "block") {
-                    closeModal();
+                    window.closeModal();
                 }
             });
         } else {

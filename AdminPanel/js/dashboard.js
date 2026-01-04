@@ -1,5 +1,6 @@
 // AdminPanel/js/dashboard.js
 import { apiFetch } from './utils.js';
+import { initializeCalendarWidget } from './schedule-manager.js';
 
 const MONITOR_API_BASE_URL = '/admin_api/system-monitor';
 const API_BASE_URL = '/admin_api';
@@ -21,6 +22,7 @@ export function initializeDashboard() {
     }
     updateDashboardData();
     updateWeatherData();
+    initializeCalendarWidget();
     
     updateActivityChart().then(() => {
         drawActivityChart();
@@ -29,6 +31,7 @@ export function initializeDashboard() {
     monitorIntervalId = setInterval(() => {
         updateDashboardData();
         updateWeatherData();
+        initializeCalendarWidget();
         updateActivityChart().then(() => {
              drawActivityChart();
         });
@@ -66,6 +69,7 @@ function enterImmersiveMode() {
     const bg = document.querySelector('.solar-system-bg');
     if (bg) {
         bg.classList.add('immersive-mode');
+        document.documentElement.classList.add('ui-hidden-immersive');
         document.body.style.overflow = 'hidden';
         console.log('Entering immersive solar system mode...');
     }
@@ -78,6 +82,7 @@ function exitImmersiveMode() {
     const bg = document.querySelector('.solar-system-bg');
     if (bg) {
         bg.classList.remove('immersive-mode');
+        document.documentElement.classList.remove('ui-hidden-immersive');
         document.body.style.overflow = '';
         console.log('Exiting immersive mode.');
     }
@@ -131,8 +136,10 @@ async function updateDashboardData() {
         if (memProgress && memUsageText && memInfoText) {
             const memUsed = resources.system.memory.used;
             const memTotal = resources.system.memory.total;
+            const vcpMemUsed = resources.system.nodeProcess.memory.rss;
             const memUsage = memTotal > 0 ? ((memUsed / memTotal) * 100).toFixed(1) : 0;
-            updateProgressCircle(memProgress, memUsageText, memUsage);
+            const vcpMemUsage = memTotal > 0 ? ((vcpMemUsed / memTotal) * 100).toFixed(1) : 0;
+            updateProgressCircle(memProgress, memUsageText, memUsage, vcpMemUsage);
             memInfoText.innerHTML = `已用: ${(memUsed / 1024 / 1024 / 1024).toFixed(2)} GB <br> 总共: ${(memTotal / 1024 / 1024 / 1024).toFixed(2)} GB`;
         }
         
@@ -199,13 +206,32 @@ async function updateWeatherData() {
             '103': 'partly_cloudy_day',
             '104': 'cloud',
             '150': 'clear_night',
-            '151': 'cloudy_night',
-            '152': 'cloudy_night',
-            '153': 'partly_cloudy_night',
+            '151': 'nights_stay',
+            '152': 'nights_stay',
+            '153': 'nights_stay',
             '154': 'cloud',
+            '300': 'rainy',
+            '301': 'rainy',
+            '302': 'rainy_heavy',
+            '303': 'rainy_heavy',
+            '304': 'rainy_heavy',
             '305': 'rainy',
             '306': 'rainy',
             '307': 'rainy_heavy',
+            '308': 'rainy_heavy',
+            '309': 'rainy',
+            '310': 'rainy_heavy',
+            '311': 'rainy_heavy',
+            '312': 'rainy_heavy',
+            '313': 'rainy_heavy',
+            '314': 'rainy',
+            '315': 'rainy_heavy',
+            '316': 'rainy_heavy',
+            '317': 'rainy_heavy',
+            '318': 'rainy_heavy',
+            '350': 'rainy',
+            '351': 'rainy_heavy',
+            '399': 'rainy',
             'default': 'wb_sunny'
         };
 
@@ -261,7 +287,7 @@ async function updateWeatherData() {
  * @param {HTMLElement} textElement - 显示百分比的文本元素
  * @param {number} percentage - 百分比
  */
-function updateProgressCircle(circleElement, textElement, percentage) {
+function updateProgressCircle(circleElement, textElement, percentage, secondaryPercentage = null) {
     const radius = 54;
     const circumference = 2 * Math.PI * radius;
     const offset = circumference - (percentage / 100) * circumference;
@@ -270,6 +296,15 @@ function updateProgressCircle(circleElement, textElement, percentage) {
     if (progressBar) {
         progressBar.style.strokeDashoffset = offset;
     }
+
+    if (secondaryPercentage !== null) {
+        const secondaryProgressBar = circleElement.querySelector('.progress-bar-secondary');
+        if (secondaryProgressBar) {
+            const secondaryOffset = circumference - (secondaryPercentage / 100) * circumference;
+            secondaryProgressBar.style.strokeDashoffset = secondaryOffset;
+        }
+    }
+
     if (textElement) {
         textElement.textContent = `${percentage}%`;
     }

@@ -30,6 +30,23 @@ export function showMessage(message, type = 'info', duration = 3500) {
 }
 
 /**
+ * 检查当前认证状态（通过后端验证）
+ * @returns {Promise<boolean>} - 是否已认证
+ */
+export async function checkAuthStatus() {
+    try {
+        const response = await fetch('/admin_api/check-auth', {
+            method: 'GET',
+            credentials: 'same-origin'
+        });
+        return response.ok;
+    } catch (error) {
+        console.error('Auth check failed:', error);
+        return false;
+    }
+}
+
+/**
  * 封装的 fetch 请求函数。
  * @param {string} url - 请求的 URL
  * @param {object} [options={}] - fetch 的配置选项
@@ -43,9 +60,19 @@ export async function apiFetch(url, options = {}, showLoader = true) {
             'Content-Type': 'application/json',
         };
         options.headers = { ...defaultHeaders, ...options.headers };
+        options.credentials = options.credentials || 'same-origin';
 
         const response = await fetch(url, options);
         if (!response.ok) {
+            if (response.status === 401) {
+                // 认证失效，跳转登录页（防止重复跳转）
+                if (!window.location.pathname.includes('login.html')) {
+                    console.warn('401 Unauthorized, redirecting to login...');
+                    window.location.href = '/AdminPanel/login.html';
+                }
+                return new Promise(() => {}); // 中断后续逻辑
+            }
+            
             let errorData = { error: `HTTP error ${response.status}`, details: response.statusText };
             try {
                 const jsonError = await response.json();

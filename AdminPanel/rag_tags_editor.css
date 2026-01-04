@@ -193,3 +193,34 @@ html[data-theme='light'] #addKnowledgeBaseButton {
 p {
     color: var(--secondary-text);
 }
+
+@media (max-width: 600px) {
+   body {
+       padding: 10px;
+   }
+   .container {
+       padding: 15px;
+   }
+   .controls {
+       flex-direction: column;
+       align-items: stretch;
+   }
+   .controls button {
+       width: 100%;
+   }
+   .kb-header {
+       flex-direction: column;
+       align-items: flex-start;
+       gap: 10px;
+   }
+   .delete-kb-btn {
+       width: 100%;
+   }
+   .threshold-controls {
+       flex-wrap: wrap;
+   }
+   .threshold-controls input[type="range"] {
+       flex-basis: 100%;
+       order: 3;
+   }
+}

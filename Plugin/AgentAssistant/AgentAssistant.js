@@ -179,6 +179,40 @@ function periodicCleanup() {
 
 // --- Helper Functions ---
 
+/**
+ * 移除文本中的 VCP 思维链内容
+ * @param {string} text - 需要处理的文本
+ * @returns {string} 清理后的文本
+ */
+function removeVCPThinkingChain(text) {
+    if (typeof text !== 'string') return text;
+    
+    let result = text;
+    const startMarker = '[--- VCP元思考链:';
+    const endMarker = '[--- 元思考链结束 ---]';
+    
+    // 循环移除所有思维链（可能存在多个）
+    while (true) {
+        const startIndex = result.indexOf(startMarker);
+        if (startIndex === -1) break;
+        
+        const endIndex = result.indexOf(endMarker, startIndex);
+        if (endIndex === -1) {
+            // 找不到结束标记时，移除从开始标记到末尾的内容
+            result = result.substring(0, startIndex).trimEnd();
+            break;
+        }
+        
+        // 移除从开始标记到结束标记（包括结束标记）的内容
+        result = result.substring(0, startIndex) + result.substring(endIndex + endMarker.length);
+    }
+    
+    // 清理多余的连续空白行
+    result = result.replace(/\n{3,}/g, '\n\n').trim();
+    
+    return result;
+}
+
 async function replacePlaceholdersInUserPrompt(text, agentConfig) {
     if (text == null) return '';
     let processedText = String(text);
@@ -249,7 +283,7 @@ async function processToolCall(args) {
             if (response.data && response.data.status === "success") {
                 const formattedDate = `${targetDate.getFullYear()}年${targetDate.getMonth() + 1}月${targetDate.getDate()}日 ${targetDate.getHours().toString().padStart(2, '0')}:${targetDate.getMinutes().toString().padStart(2, '0')}`;
                 const friendlyReceipt = `您预定于 ${formattedDate} 发给 ${agent_name} 的未来通讯已经被系统记录，届时会自动发送。`;
-                return { status: "success", result: [{ type: "text", text: friendlyReceipt }] };
+                return { status: "success", result: { content: [{ type: "text", text: friendlyReceipt }] } };
             } else {
                 const errorMessage = `调度任务失败: ${response.data?.error || '服务器返回未知错误'}`;
                 if (DEBUG_MODE) console.error(`[AgentAssistant Service] ${errorMessage}`, response.data);
@@ -310,19 +344,23 @@ async function processToolCall(args) {
             return { status: "error", error: `Agent '${agent_name}' 从VCP服务器获取的响应无效或缺失内容。` };
         }
 
+        // 移除 VCP 思维链内容
+        const cleanedAssistantResponse = removeVCPThinkingChain(assistantResponseContent);
+
         if (useContext) {
-            updateAgentSessionHistory(agent_name, { role: 'user', content: processedUserPrompt }, { role: 'assistant', content: assistantResponseContent }, userSessionId);
+            // 存储到历史记录时使用清理后的内容
+            updateAgentSessionHistory(agent_name, { role: 'user', content: processedUserPrompt }, { role: 'assistant', content: cleanedAssistantResponse }, userSessionId);
         } else if (DEBUG_MODE) {
             console.error(`[AgentAssistant Service] Temporary contact requested for ${agent_name}. Skipping context update.`);
         }
         
-        // VCP Info Broadcast
+        // VCP Info Broadcast - 使用清理后的内容
         const broadcastData = {
             type: 'AGENT_PRIVATE_CHAT_PREVIEW',
             agentName: agent_name,
             sessionId: userSessionId,
             query: processedUserPrompt,
-            response: assistantResponseContent,
+            response: cleanedAssistantResponse,
             timestamp: new Date().toISOString()
         };
         try {
@@ -339,7 +377,7 @@ async function processToolCall(args) {
             console.error('[AgentAssistant Service] Error broadcasting VCP Info:', e.message);
         }
         
-        return { status: "success", result: [{ type: "text", text: assistantResponseContent }] };
+        return { status: "success", result: { content: [{ type: "text", text: cleanedAssistantResponse }] } };
 
     } catch (error) {
         let errorMessage = `调用 Agent '${agent_name}' 时发生错误。`;

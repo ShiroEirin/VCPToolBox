@@ -2,6 +2,7 @@
 import axios from "axios";
 import dotenv from "dotenv";
 import path from 'path';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { promises as fsp } from 'fs';
 
@@ -109,7 +110,7 @@ async function handleGenerateMusicSunoApiCall(args) {
         prompt: args.prompt, // Will be undefined if not provided, API should handle
         tags: args.tags,     // Will be undefined if not provided
         title: args.title,   // Will be undefined if not provided
-        mv: args.mv || "chirp-v4",
+        mv: args.mv || "chirp-v4-5",
         make_instrumental: args.make_instrumental || false,
     };
 
@@ -183,9 +184,13 @@ async function handleGenerateMusicSunoApiCall(args) {
                 if (taskDetails.data && taskDetails.data.length > 0 && taskDetails.data[0].audio_url) {
                     const audioData = taskDetails.data[0];
 
-                    // Start the download in the background ("fire and forget").
-                    // The downloadAudio function will handle its own errors and logging.
-                    downloadAudio(audioData.audio_url, audioData.title, taskId);
+                    // Delegate the download to a separate process so it can continue after this process exits.
+                    const downloaderPath = path.join(__dirname, 'Downloader.mjs');
+                    const child = spawn('node', [downloaderPath, audioData.audio_url, audioData.title || '', taskId], {
+                        detached: true,
+                        stdio: 'ignore'
+                    });
+                    child.unref();
 
                     // Immediately build and return the message for the user, without waiting for the download.
                     let messageForUser = `Song generated! You can listen to it here: ${audioData.audio_url || 'N/A'}`;

@@ -1,5 +1,5 @@
 // AdminPanel/script.js
-import { apiFetch, showMessage } from './js/utils.js';
+import { apiFetch, showMessage, checkAuthStatus } from './js/utils.js';
 import { parseEnvToList, buildEnvString, createFormGroup, createCommentOrEmptyElement } from './js/config.js';
 import { loadPluginList, loadPluginConfig } from './js/plugins.js';
 import { initializeDashboard, stopDashboardUpdates } from './js/dashboard.js';
@@ -12,8 +12,17 @@ import { initializePreprocessorOrderManager } from './js/preprocessor-manager.js
 import { initializeSemanticGroupsEditor } from './js/semantic-groups-editor.js';
 import { initializeThinkingChainsEditor } from './js/thinking-chains-editor.js';
 import { initializeVCPForum } from './js/forum.js';
+import { initializeScheduleManager } from './js/schedule-manager.js';
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // 1. 通过后端验证登录状态（替代前端 Cookie 检查，解决 HttpOnly 无法读取问题）
+    const isAuthenticated = await checkAuthStatus();
+    if (!isAuthenticated) {
+        console.warn('Not authenticated, redirecting to login...');
+        window.location.href = '/AdminPanel/login.html';
+        return;
+    }
+
     const pluginNavList = document.getElementById('plugin-nav')?.querySelector('ul');
     const baseConfigForm = document.getElementById('base-config-form');
     const restartServerButton = document.getElementById('restart-server-button');
@@ -21,6 +30,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const API_BASE_URL = '/admin_api';
     let originalBaseConfigEntries = [];
+
+    /**
+     * 清理所有 iframe 内部的状态，防止滚动条锁定等问题。
+     */
+    function cleanupIframeStates() {
+        const iframes = document.querySelectorAll('iframe');
+        iframes.forEach(iframe => {
+            try {
+                const iframeWindow = iframe.contentWindow;
+                const iframeDoc = iframe.contentDocument || iframeWindow?.document;
+                if (iframeDoc) {
+                    // 尝试调用 iframe 内部可能存在的 closeModal 函数
+                    if (iframeWindow && typeof iframeWindow.closeModal === 'function') {
+                        iframeWindow.closeModal();
+                    } else {
+                        // 备选方案：手动清理常见的 Modal 标识
+                        const modal = iframeDoc.getElementById('mediaModal') || iframeDoc.querySelector('.modal');
+                        if (modal) {
+                            modal.style.display = 'none';
+                        }
+                        iframeDoc.body.style.overflow = '';
+                        iframeDoc.documentElement.style.overflow = '';
+                    }
+                }
+            } catch (e) {
+                // 跨域安全限制时会报错，忽略即可
+            }
+        });
+        // 强制恢复主页面滚动状态
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+    }
 
     /**
      * 主导航函数，根据 target 激活对应的功能模块。
@@ -34,16 +75,37 @@ document.addEventListener('DOMContentLoaded', () => {
         stopDashboardUpdates();
         stopServerLogUpdates();
 
+        // 切换导航链接状态
         document.querySelectorAll('.sidebar nav li a').forEach(link => link.classList.remove('active'));
-        document.querySelectorAll('.config-section').forEach(section => section.classList.remove('active-section'));
-
         const activeLink = document.querySelector(`a[data-target="${dataTarget}"]`);
         if (activeLink) activeLink.classList.add('active');
 
+        // 处理所有 section 的显示隐藏及 iframe 懒加载/卸载
+        document.querySelectorAll('.config-section').forEach(section => {
+            const isTarget = section.id === sectionIdToActivate;
+            const iframe = section.querySelector('iframe');
+            
+            if (isTarget) {
+                section.classList.add('active-section');
+                // 懒加载：进入时加载 iframe
+                if (iframe && iframe.dataset.src && (!iframe.src || iframe.src === 'about:blank' || !iframe.src.includes(iframe.dataset.src))) {
+                    iframe.src = iframe.dataset.src;
+                    // 确保宽度撑满
+                    iframe.style.width = '100%';
+                }
+            } else {
+                // 离开时卸载 iframe，彻底销毁其 DOM 和状态（如 overflow:hidden）
+                if (section.classList.contains('active-section')) {
+                    if (iframe && iframe.src && iframe.src !== 'about:blank') {
+                        iframe.src = 'about:blank';
+                    }
+                }
+                section.classList.remove('active-section');
+            }
+        });
+
         const targetSection = document.getElementById(sectionIdToActivate);
         if (targetSection) {
-            targetSection.classList.add('active-section');
-            
             // 根据 sectionId 初始化对应的模块
             if (pluginName) {
                 loadPluginConfig(pluginName).catch(err => console.error(`Failed to load config for ${pluginName}`, err));
@@ -79,16 +141,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     case 'vcp-forum-section':
                         initializeVCPForum();
                         break;
-                    case 'vcptavern-editor-section':
-                       const iframe = targetSection.querySelector('iframe');
-                       if (iframe) iframe.src = iframe.src; // Force reload
-                       break;
+                    case 'schedule-manager-section':
+                        initializeScheduleManager();
+                        break;
                 }
             }
         } else {
            console.warn(`[navigateTo] Target section with ID '${sectionIdToActivate}' not found.`);
-       }
-   }
+        }
+
+        // 强制重置主内容区域滚动条
+        const contentArea = document.getElementById('config-details-container');
+        if (contentArea) {
+            contentArea.scrollTo(0, 0);
+        }
+        // 额外保险：恢复 body 滚动
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+    }
 
     /**
      * 加载全局配置。

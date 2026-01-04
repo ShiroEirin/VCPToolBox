@@ -126,6 +126,12 @@ html[data-theme='light'] {
     --neptune-color: #3c4043;
 }
 
+html, body {
+    overflow-x: hidden;
+    width: 100%;
+    position: relative;
+}
+
 body {
     font-family: 'Inter', 'Segoe UI', 'Roboto', system-ui, sans-serif;
     margin: 0;
@@ -145,8 +151,8 @@ body {
     position: fixed;
     top: 0;
     left: 0;
-    width: 100%;
-    height: 100%;
+    width: 100vw;
+    height: 100vh;
     z-index: -1;
     overflow: hidden;
     pointer-events: none;
@@ -159,6 +165,24 @@ body {
     pointer-events: auto;
     background: radial-gradient(ellipse at bottom, #1B2735 0%, #090A0F 100%);
     transition: z-index 0s, background 2s ease;
+}
+
+/* UI Hiding Classes */
+.ui-hidden-immersive .top-bar {
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.ui-hidden-immersive .sidebar {
+    transform: translateX(-100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.ui-hidden-immersive .content {
+    opacity: 0;
+    pointer-events: none;
 }
 
 .exit-immersive-button {
@@ -417,7 +441,7 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.8s ease, width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-header {
@@ -523,11 +547,18 @@ body {
     flex-grow: 1;
     padding: 30px 40px;
     box-sizing: border-box;
-    overflow-y: auto;
+    overflow-y: auto !important;
+    height: 100%;
+    transition: opacity 0.8s ease;
 }
 
 .config-section {
-    display: none;
+    display: none !important;
+    position: absolute !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
     animation: fadeIn 0.5s ease-out;
 }
 
@@ -537,7 +568,19 @@ body {
 }
 
 .config-section.active-section {
-    display: block;
+    display: block !important;
+    position: relative !important;
+    visibility: visible !important;
+    height: auto !important;
+    overflow: visible !important;
+    pointer-events: auto !important;
+}
+
+/* 特别处理含 iframe 的 section，确保离开时完全不占空间 */
+.config-section:not(.active-section) iframe {
+    display: none !important;
+    height: 0 !important;
+    width: 0 !important;
 }
 
 .config-section h2 {
@@ -696,8 +739,20 @@ body {
     transition: stroke-dashoffset 0.5s ease-out;
 }
 
+.progress-circle .progress-bar-secondary {
+    fill: none;
+    stroke: var(--highlight-text);
+    stroke-width: 6; /* 稍微变细，嵌套在主进度条内 */
+    stroke-linecap: round;
+    stroke-dasharray: 339.292;
+    stroke-dashoffset: 339.292;
+    transition: stroke-dashoffset 0.5s ease-out;
+    opacity: 1; /* 提高不透明度 */
+}
+
 .cpu-card .progress-bar { stroke: var(--cpu-color); }
 .memory-card .progress-bar { stroke: var(--memory-color); }
+.memory-card .progress-bar-secondary { stroke: #f9ab00; } /* 使用高反差的黄色 (PM2 启动色) 区分 VCP 占用 */
 
 .progress-text {
     position: absolute;
@@ -884,6 +939,7 @@ body {
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
+    transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.8s ease;
 }
 .top-bar-content {
     display: flex;
@@ -1495,6 +1551,102 @@ button[type="submit"]:hover {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--highlight-text) 20%, transparent);
 }
 
+
+/* --- Log Viewer Styles --- */
+.log-viewer-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    height: calc(100% - 60px);
+}
+
+.log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+    padding: 15px 20px;
+    background-color: var(--secondary-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+}
+
+#server-log-content {
+    flex-grow: 1;
+    font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    background-color: #0f172a; /* 强制深色背景以符合日志习惯 */
+    color: #e2e8f0;
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    overflow-y: auto;
+    overflow-x: auto;
+    white-space: pre;
+    margin: 0;
+    will-change: scroll-position;
+    contain: content;
+}
+
+html[data-theme='light'] #server-log-content {
+    background-color: #1e293b;
+}
+
+#server-log-content mark.highlight,
+#server-log-content .highlight {
+    background-color: #eab308;
+    color: #000;
+    padding: 1px 3px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+.status-message {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.status-message.info { background-color: var(--button-bg); color: white; }
+.status-message.success { background-color: var(--memory-color); color: white; }
+.status-message.error { background-color: var(--danger-color); color: white; }
+
+#server-log-filter {
+    padding: 8px 15px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--input-bg);
+    color: var(--primary-text);
+    width: 250px;
+    transition: all 0.2s ease;
+}
+
+#server-log-filter:focus {
+    outline: none;
+    border-color: var(--highlight-text);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--highlight-text) 20%, transparent);
+}
+
+#server-log-line-count {
+    font-size: 0.9em;
+    color: var(--secondary-text);
+    font-weight: 500;
+}
+
+#server-log-path-display {
+    font-size: 0.9em;
+    color: var(--secondary-text);
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 /* Server Activity Chart Styles */
 .activity-chart-container {
@@ -2239,5 +2391,637 @@ html[data-theme='light'] .delete-theme-btn {
     
     .k-value-input {
         width: 45px;
+    }
+}
+
+/* --- Schedule Manager Styles --- */
+.schedule-manager-container {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 30px;
+    height: calc(100% - 80px);
+}
+
+@media (max-width: 1200px) {
+    .schedule-manager-container {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+}
+
+.schedule-left-panel, .schedule-right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.card {
+    background-color: var(--secondary-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    padding: 25px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.calendar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.calendar-header h3 {
+    margin: 0;
+    font-size: 1.2em;
+    color: var(--primary-text);
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 5px;
+    text-align: center;
+}
+
+.calendar-day-head {
+    font-weight: 700;
+    font-size: 0.8em;
+    color: var(--secondary-text);
+    padding: 10px 0;
+    text-transform: uppercase;
+}
+
+.calendar-day {
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.95em;
+    position: relative;
+}
+
+.calendar-day:hover {
+    background-color: var(--accent-bg);
+}
+
+.calendar-day.today {
+    background-color: var(--primary-color-translucent);
+    color: var(--highlight-text);
+    font-weight: 700;
+}
+
+.calendar-day.selected {
+    background-color: var(--button-bg);
+    color: white;
+}
+
+.calendar-day.other-month {
+    opacity: 0.3;
+}
+
+.calendar-day .dot {
+    width: 6px;
+    height: 6px;
+    background-color: var(--highlight-text);
+    border-radius: 50%;
+    position: absolute;
+    bottom: 5px;
+}
+
+.calendar-day.selected .dot {
+    background-color: white;
+}
+
+.add-schedule-form h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 1.1em;
+}
+
+.schedule-list-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 500px;
+}
+
+.list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 15px;
+}
+
+.list-header h3 {
+    margin: 0;
+}
+
+.list-filters {
+    display: flex;
+    gap: 10px;
+}
+
+.filter-btn {
+    padding: 5px 12px;
+    font-size: 0.85em;
+    border-radius: 15px;
+    background-color: var(--tertiary-bg);
+    color: var(--secondary-text);
+}
+
+.filter-btn.active {
+    background-color: var(--highlight-text);
+    color: white;
+}
+
+.schedule-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.schedule-item {
+    background-color: var(--tertiary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    transition: all 0.2s ease;
+}
+
+.schedule-item:hover {
+    border-color: var(--highlight-text);
+    transform: scale(1.01);
+}
+
+.schedule-info {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.schedule-time {
+    font-size: 0.85em;
+    color: var(--highlight-text);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.schedule-content {
+    font-size: 1em;
+    color: var(--primary-text);
+    word-break: break-all;
+}
+
+.delete-schedule-btn {
+    color: var(--secondary-text);
+    transition: color 0.2s;
+}
+
+.delete-schedule-btn:hover {
+    color: var(--danger-color);
+}
+
+.empty-msg {
+    text-align: center;
+    color: var(--secondary-text);
+    padding: 40px 0;
+    font-style: italic;
+}
+
+/* --- Calendar Widget (Dashboard) --- */
+.calendar-widget {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.widget-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.widget-day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8em;
+    border-radius: 4px;
+    position: relative;
+}
+
+.widget-day.has-event::after {
+    content: '';
+    position: absolute;
+    bottom: 2px;
+    width: 4px;
+    height: 4px;
+    background-color: var(--highlight-text);
+    border-radius: 50%;
+}
+
+.widget-day.today {
+    background-color: var(--primary-color-translucent);
+    color: var(--highlight-text);
+    font-weight: bold;
+}
+
+.upcoming-events-mini {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.mini-event-item {
+    font-size: 0.85em;
+    padding: 6px 10px;
+    background-color: var(--tertiary-bg);
+    border-radius: 6px;
+    border-left: 3px solid var(--highlight-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- 移动端响应式适配 --- */
+.mobile-menu-toggle {
+   display: none;
+   background: none;
+   border: none;
+   color: var(--primary-text);
+   cursor: pointer;
+   padding: 8px;
+   margin-right: 10px;
+}
+
+.sidebar-overlay {
+   position: fixed;
+   top: 0;
+   left: 0;
+   width: 100%;
+   height: 100%;
+   background: rgba(0, 0, 0, 0.5);
+   backdrop-filter: blur(4px);
+   z-index: 1001;
+   display: none;
+   opacity: 0;
+   transition: opacity 0.3s ease;
+}
+
+.sidebar-overlay.active {
+   display: block;
+   opacity: 1;
+}
+
+@media (max-width: 768px) {
+    body {
+        padding-top: 56px;
+        overflow-x: hidden;
+    }
+
+   .top-bar {
+       height: 56px;
+       padding: 0 15px;
+   }
+
+   .mobile-menu-toggle {
+       display: flex;
+       align-items: center;
+       justify-content: center;
+   }
+
+   .brand-icon {
+       font-size: 24px !important;
+       padding: 4px;
+   }
+
+   .server-title {
+       font-size: 1.1em;
+   }
+
+   .header-actions {
+       gap: 8px;
+   }
+
+   .restart-button, .theme-button {
+       padding: 6px 10px;
+       font-size: 0.8em;
+   }
+
+   .restart-button span, .theme-button span {
+       font-size: 18px !important;
+   }
+
+   .container {
+       height: calc(100vh - 56px);
+   }
+
+   .sidebar {
+       position: fixed;
+       left: -280px;
+       top: 56px;
+       height: calc(100vh - 56px);
+       z-index: 1002;
+       width: 280px;
+       transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+       background-color: var(--tertiary-bg);
+   }
+
+   .sidebar.mobile-active {
+       transform: translateX(280px);
+   }
+
+   .content {
+       padding: 20px 15px;
+       width: 100%;
+       overflow-x: hidden;
+       box-sizing: border-box;
+   }
+
+   .config-section h2 {
+       font-size: 1.5em;
+       margin-bottom: 20px;
+   }
+
+   .dashboard-grid {
+       grid-template-columns: 1fr;
+       gap: 15px;
+   }
+
+   .status-card {
+       padding: 20px;
+   }
+
+   .vcp-animation-container {
+       height: 180px;
+   }
+
+   .vcp-logo {
+       max-width: 90%;
+   }
+
+   .weather-current {
+       flex-direction: column;
+       align-items: flex-start;
+       gap: 10px;
+   }
+
+   .current-details {
+       padding-left: 0;
+       border-left: none;
+       border-top: 1px solid var(--border-color);
+       padding-top: 10px;
+       width: 100%;
+       flex-direction: row;
+       flex-wrap: wrap;
+   }
+
+   .weather-forecast {
+       grid-template-columns: repeat(2, 1fr);
+   }
+
+   /* 表单适配 */
+   .form-group {
+       padding: 15px;
+   }
+
+   .form-actions {
+       flex-direction: column;
+   }
+
+   .form-actions button {
+       width: 100%;
+   }
+
+   /* 日记管理器适配 */
+   .daily-notes-manager {
+       flex-direction: column;
+       height: auto;
+   }
+
+   .notes-sidebar {
+       width: 100%;
+       height: auto;
+       max-height: 300px;
+       padding: 15px;
+   }
+
+   #notes-folder-list {
+       display: flex;
+       flex-wrap: wrap;
+       gap: 8px;
+   }
+
+   #notes-folder-list li {
+       flex: 1 1 calc(50% - 8px);
+       min-width: 120px;
+       margin-bottom: 0;
+       text-align: center;
+       justify-content: center;
+       border: 1px solid var(--border-color);
+   }
+
+   /* RAG Tags 阈值控制适配 */
+   .threshold-controls {
+       display: flex;
+       flex-direction: column;
+       align-items: flex-start;
+       gap: 8px;
+   }
+
+   .threshold-controls label {
+       order: -1;
+       margin-left: 0;
+       font-weight: 600;
+   }
+
+   .threshold-controls input[type="checkbox"] {
+       margin-left: 0;
+   }
+
+   .threshold-controls input[type="range"] {
+       width: 100%;
+       margin: 5px 0;
+   }
+
+   .notes-toolbar {
+       flex-direction: column;
+       align-items: stretch;
+   }
+
+   #notes-list-view {
+       grid-template-columns: 1fr;
+   }
+
+   /* Agent 管理器适配 */
+   .agent-manager-container {
+       grid-template-columns: 1fr;
+   }
+
+   .agent-map-controls {
+       flex-direction: column;
+       align-items: stretch;
+   }
+
+   .agent-map-controls button {
+       width: 100%;
+   }
+
+   .agent-map-entry {
+       grid-template-columns: 1fr;
+   }
+
+   /* 论坛适配 */
+   .forum-controls {
+       flex-direction: column;
+       align-items: stretch;
+   }
+
+   #forum-search-input {
+       max-width: none;
+   }
+
+   .forum-posts-list th:nth-child(3),
+   .forum-posts-list td:nth-child(3),
+   .forum-posts-list th:nth-child(4),
+   .forum-posts-list td:nth-child(4) {
+       display: none; /* 隐藏回复数和最后回复时间 */
+   }
+
+   /* 日程管理适配 */
+   .schedule-manager-container {
+       grid-template-columns: 1fr;
+   }
+
+   /* 日志查看器适配 */
+   .log-header {
+       flex-direction: column;
+       align-items: stretch;
+   }
+
+   #server-log-filter {
+       width: 100%;
+   }
+
+   /* 隐藏可能导致溢出的太阳系背景元素（可选，如果仍然溢出） */
+   .solar-system-bg {
+       display: none;
+   }
+
+   /* 修复文本换行和溢出 */
+   * {
+       box-sizing: border-box;
+   }
+
+   p, span, h1, h2, h3, h4, h5, h6, li, td, div, label {
+       overflow-wrap: break-word;
+       word-wrap: break-word;
+       word-break: break-word;
+       max-width: 100%;
+   }
+
+   /* 强制表格在移动端可滚动 */
+   .forum-posts-list {
+       display: block;
+       width: 100%;
+       overflow-x: auto;
+       -webkit-overflow-scrolling: touch;
+   }
+
+   /* 修复代码块溢出 */
+   pre, code {
+       white-space: pre-wrap !important;
+       word-break: break-all !important;
+   }
+
+   /* 确保所有输入框不超出屏幕 */
+   input, textarea, select {
+       max-width: 100%;
+   }
+    /* Agent 助手配置适配 */
+    .aa-agent-cards-container {
+        grid-template-columns: 1fr;
+    }
+
+    .aa-agent-card {
+        padding: 15px;
+        gap: 12px;
+    }
+
+    .aa-agent-card-header {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .aa-agent-name-input, .aa-agent-subtitle, .aa-agent-delete-btn {
+        grid-column: 1 / -1 !important;
+        grid-row: auto !important;
+    }
+
+    .aa-row {
+        grid-template-columns: 1fr !important;
+    }
+
+    .aa-global-grid {
+        display: contents;
+    }
+
+    .aa-global-item, .aa-global-item-full {
+        padding: 0;
+        margin-bottom: 15px;
+    }
+
+    .aa-agents-header {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 15px;
+    }
+
+    .aa-agents-actions, .aa-existing-helper {
+        display: contents;
+    }
+
+    .aa-agents-header h3 {
+        order: 1;
+        margin: 0;
+    }
+
+    .aa-agents-header label[for="aa-existing-agent-select"] {
+        order: 2;
+        font-weight: 600;
+        margin-top: 5px;
+    }
+
+    .aa-agents-header select#aa-existing-agent-select {
+        order: 3;
+        width: 100%;
+    }
+
+    .aa-agents-header button#aa-add-from-existing-button {
+        order: 4;
+        width: 100%;
+    }
+
+    .aa-agents-header button#aa-add-custom-agent-button {
+        order: 5;
+        width: 100%;
     }
 }
