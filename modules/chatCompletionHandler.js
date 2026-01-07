@@ -185,6 +185,7 @@ class ChatCompletionHandler {
       maxVCPLoopNonStream,
       apiRetries,
       apiRetryDelay,
+      RAGMemoRefresh,
     } = this.config;
 
     const shouldShowVCP = SHOW_VCP_OUTPUT || forceShowVCP;
@@ -1131,9 +1132,11 @@ class ChatCompletionHandler {
           }
 
           // --- VCP RAG 刷新注入点 (流式) ---
-          const lastAiMessage = currentAIContentForLoop;
-          // 注意：传给 RAG 的必须是去除 Base64 的字符串，否则 RAG 也会卡死
-          currentMessagesForLoop = await _refreshRagBlocksIfNeeded(currentMessagesForLoop, { lastAiMessage, toolResultsText: toolResultsTextForRAG }, pluginManager, DEBUG_MODE);
+          if (RAGMemoRefresh) {
+              const lastAiMessage = currentAIContentForLoop;
+              // 注意：传给 RAG 的必须是去除 Base64 的字符串，否则 RAG 也会卡死
+              currentMessagesForLoop = await _refreshRagBlocksIfNeeded(currentMessagesForLoop, { lastAiMessage, toolResultsText: toolResultsTextForRAG }, pluginManager, DEBUG_MODE);
+          }
           // --- 注入点结束 ---
 
           currentMessagesForLoop.push({ role: 'user', content: finalToolPayloadForAI });
@@ -1686,9 +1689,11 @@ class ChatCompletionHandler {
             }
 
             // --- VCP RAG 刷新注入点 (非流式) ---
-            const lastAiMessage = currentAIContentForLoop;
-            // 注意：传给 RAG 的是去除 Base64 的字符串
-            currentMessagesForNonStreamLoop = await _refreshRagBlocksIfNeeded(currentMessagesForNonStreamLoop, { lastAiMessage, toolResultsText: toolResultsTextForRAG }, pluginManager, DEBUG_MODE);
+            if (RAGMemoRefresh) {
+                const lastAiMessage = currentAIContentForLoop;
+                // 注意：传给 RAG 的是去除 Base64 的字符串
+                currentMessagesForNonStreamLoop = await _refreshRagBlocksIfNeeded(currentMessagesForNonStreamLoop, { lastAiMessage, toolResultsText: toolResultsTextForRAG }, pluginManager, DEBUG_MODE);
+            }
             // --- 注入点结束 ---
 
             currentMessagesForNonStreamLoop.push({ role: 'user', content: finalToolPayloadForAI });

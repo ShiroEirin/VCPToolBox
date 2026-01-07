@@ -249,7 +249,7 @@ async function replacePriorityVariables(text, context, role) {
     }
 
     // --- 表情包处理 ---
-    const emojiPlaceholderRegex = /\{\{(.+?表情包)\}\}/g;
+    const emojiPlaceholderRegex = /\{\{([^{}]+?表情包)\}\}/g;
     let emojiMatch;
     while ((emojiMatch = emojiPlaceholderRegex.exec(processedText)) !== null) {
         const placeholder = emojiMatch[0];
@@ -259,7 +259,7 @@ async function replacePriorityVariables(text, context, role) {
     }
 
     // --- 日记本处理 (已修复循环风险) ---
-    const diaryPlaceholderRegex = /\{\{(.+?)日记本\}\}/g;
+    const diaryPlaceholderRegex = /\{\{([^{}]+?)日记本\}\}/g;
     let allDiariesData = {};
     const allDiariesDataString = pluginManager.getPlaceholderValue("{{AllCharacterDiariesData}}");
 
@@ -280,7 +280,7 @@ async function replacePriorityVariables(text, context, role) {
     // Step 2: Iterate through the unique placeholders and replace them.
     for (const placeholder of uniquePlaceholders) {
         // Extract character name from placeholder like "{{小雨日记本}}" -> "小雨"
-        const characterNameMatch = placeholder.match(/\{\{(.+?)日记本\}\}/);
+        const characterNameMatch = placeholder.match(/\{\{([^{}]+?)日记本\}\}/);
         if (characterNameMatch && characterNameMatch[1]) {
             const characterName = characterNameMatch[1];
             let diaryContent = `[${characterName}日记本内容为空或未从插件获取]`;

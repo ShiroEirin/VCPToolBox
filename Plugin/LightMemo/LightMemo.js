@@ -607,6 +607,13 @@ class LightMemoPlugin {
             this.wordToGroupMap = new Map();
         }
     }
+
+    /**
+     * ✅ 关闭插件（预留）
+     */
+    shutdown() {
+        console.log(`[LightMemo] Plugin shutdown.`);
+    }
 }
 
 module.exports = new LightMemoPlugin();

@@ -72,6 +72,7 @@ const ADMIN_PASSWORD = process.env.AdminPassword;
 const DEBUG_MODE = (process.env.DebugMode || "False").toLowerCase() === "true";
 const VCPToolCode = (process.env.VCPToolCode || "false").toLowerCase() === "true"; // 新增：读取VCP工具调用验证码开关
 const SHOW_VCP_OUTPUT = (process.env.ShowVCP || "False").toLowerCase() === "true"; // 读取 ShowVCP 环境变量
+const RAG_MEMO_REFRESH = (process.env.RAGMemoRefresh || "false").toLowerCase() === "true"; // 新增：RAG日记刷新开关
 
 // 新增：模型重定向功能
 const ModelRedirectHandler = require('./modelRedirectHandler.js');
@@ -690,6 +691,7 @@ const chatCompletionHandler = new ChatCompletionHandler({
     DEBUG_MODE,
     SHOW_VCP_OUTPUT,
     VCPToolCode, // 新增：传递VCP工具调用验证码开关
+    RAGMemoRefresh: RAG_MEMO_REFRESH, // 新增：传递RAG日记刷新开关
     maxVCPLoopStream: parseInt(process.env.MaxVCPLoopStream),
     maxVCPLoopNonStream: parseInt(process.env.MaxVCPLoopNonStream),
     apiRetries: parseInt(process.env.ApiRetries) || 3, // 新增：API重试次数
