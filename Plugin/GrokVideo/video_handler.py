@@ -1,0 +1,240 @@
+import sys
+import json
+import os
+import requests
+import base64
+import time
+import uuid
+import re
+import subprocess
+from io import BytesIO
+from PIL import Image
+from dotenv import load_dotenv
+from datetime import datetime
+import traceback
+from urllib.parse import urlparse, urljoin
+from urllib.request import url2pathname
+
+# --- 自定义异常 (用于超栈追踪) ---
+class LocalFileNotFoundError(Exception):
+    def __init__(self, message, file_url):
+        super().__init__(message)
+        self.file_url = file_url
+
+# --- 配置和常量 ---
+LOG_FILE = "GrokVideoHistory.log"
+
+# --- 日志记录 ---
+def log_event(level, message, data=None):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    log_entry = f"[{timestamp}] [{level.upper()}] {message}"
+    if data:
+        try:
+            log_entry += f" | Data: {json.dumps(data, ensure_ascii=False)}"
+        except Exception:
+            log_entry += f" | Data: [Unserializable Data]"
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(log_entry + "\n")
+    except Exception as e:
+        print(f"Error writing to log file: {e}", file=sys.stderr)
+
+# --- 结果输出 ---
+def print_json_output(status, result=None, error=None, ai_message=None):
+    output = {"status": status}
+    if status == "success":
+        if result is not None:
+            output["result"] = result
+        if ai_message:
+            output["messageForAI"] = ai_message
+    elif status == "error":
+        if error is not None:
+            output["error"] = error
+    print(json.dumps(output, ensure_ascii=False))
+    log_event("debug", "Output sent to stdout", output)
+
+# --- 图片处理 ---
+def image_to_base64(img):
+    buffer = BytesIO()
+    img.save(buffer, format="JPEG", quality=90)
+    img_bytes = buffer.getvalue()
+    base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
+    return f"data:image/jpeg;base64,{base64_encoded}"
+
+def process_image_from_base64(base64_str):
+    try:
+        log_event("info", f"Processing image from base64 string (length: {len(base64_str)})")
+        if ',' in base64_str:
+            header, encoded = base64_str.split(',', 1)
+        else:
+            encoded = base64_str
+        
+        img_data = base64.b64decode(encoded)
+        img = Image.open(BytesIO(img_data))
+        img = img.convert("RGB")
+        return image_to_base64(img)
+    except Exception as e:
+        log_event("error", "Failed to process base64 image", {"error": str(e)})
+        raise ValueError(f"处理 base64 图片失败: {e}")
+
+def process_image_from_url(image_url):
+    try:
+        parsed_url = urlparse(image_url)
+        img = None
+        if parsed_url.scheme == 'file':
+            log_event("info", f"Processing local file URL: {image_url}")
+            file_path = url2pathname(parsed_url.path)
+            if os.name == 'nt' and parsed_url.path.startswith('/'):
+                file_path = url2pathname(parsed_url.path[1:])
+
+            try:
+                with open(file_path, 'rb') as f:
+                    img = Image.open(f)
+                    img.load()
+                log_event("info", f"Successfully opened local file: {file_path}")
+            except FileNotFoundError:
+                log_event("error", f"Local file not found: {file_path}. Signaling for remote fetch.")
+                raise LocalFileNotFoundError("本地文件未找到，需要远程获取。", image_url)
+        elif parsed_url.scheme in ['http', 'https']:
+            log_event("info", f"Downloading image from URL: {image_url}")
+            response = requests.get(image_url, stream=True, timeout=30)
+            response.raise_for_status()
+            img = Image.open(response.raw)
+        else:
+            raise ValueError(f"不支持的 URL 协议: {parsed_url.scheme}")
+
+        if img is None:
+            raise ValueError("未能加载图片。")
+            
+        img = img.convert("RGB")
+        base64_image = image_to_base64(img)
+        return base64_image
+    except Exception as e:
+        if isinstance(e, LocalFileNotFoundError):
+            raise
+        log_event("error", f"Failed to process image: {image_url}", {"error": str(e)})
+        raise ValueError(f"图片处理失败: {e}")
+
+# --- 主逻辑 ---
+def main():
+    dotenv_path = os.path.join(os.path.dirname(__file__), 'config.env')
+    load_dotenv(dotenv_path=dotenv_path)
+    
+    api_key = os.getenv("GROK_API_KEY")
+    api_base = os.getenv("GROK_API_BASE", "https://api.x.ai")
+    model = os.getenv("GrokVideoModelName", "grok-imagine-0.9")
+
+    if not api_key:
+        print_json_output("error", error="GROK_API_KEY not found in config.env.")
+        sys.exit(1)
+
+    try:
+        input_str = sys.stdin.read()
+        if not input_str:
+            sys.exit(0)
+        input_data = json.loads(input_str)
+    except Exception as e:
+        print_json_output("error", error=f"Invalid JSON input: {e}")
+        sys.exit(1)
+
+    image_url = input_data.get("image_url")
+    image_base64_input = input_data.get("image_base64")
+    prompt = input_data.get("prompt")
+    task_id = str(uuid.uuid4())[:8]
+
+    try:
+        if not prompt:
+            raise ValueError("Missing prompt")
+        # 1. 处理图片 (可选)
+        image_base64 = None
+        if image_base64_input:
+            image_base64 = process_image_from_base64(image_base64_input)
+        elif image_url and isinstance(image_url, str) and image_url.strip():
+            image_base64 = process_image_from_url(image_url)
+
+        # 2. 调用 Grok API (同步等待)
+        # 自动处理 URL 拼接，确保包含 v1/chat/completions
+        base_url = api_base.rstrip('/')
+        if not base_url.endswith('/v1'):
+            if not base_url.endswith('/v1/chat/completions'):
+                api_url = f"{base_url}/v1/chat/completions"
+            else:
+                api_url = base_url
+        else:
+            api_url = f"{base_url}/chat/completions"
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        content_list = [{"type": "text", "text": prompt}]
+        if image_base64:
+            content_list.append({"type": "image_url", "image_url": {"url": image_base64}})
+
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": content_list
+                }
+            ]
+        }
+
+        log_event("info", f"[{task_id}] Calling Grok API (Synchronous)", {"url": api_url, "model": model})
+        response = requests.post(api_url, json=payload, headers=headers, timeout=300)
+        response.raise_for_status()
+        result = response.json()
+
+        # 3. 解析视频 URL
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        video_url = None
+        # 兼容多种视频/图片格式的正则匹配
+        url_match = re.search(r'(https?://[^\s<>"\']+\.(mp4|webp|png|jpg|jpeg)[^\s<>"\']*)', content, re.IGNORECASE)
+        if url_match:
+            video_url = url_match.group(1)
+        
+        if not video_url:
+            video_url = result.get("video_url") # 备选方案
+
+        if video_url:
+            log_event("success", f"[{task_id}] Video URL obtained: {video_url}")
+            
+            # 4. 委托下载进程 (异步，不阻塞主进程退出)
+            try:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                downloader_path = os.path.join(script_dir, "video_downloader.py")
+                # 使用 Popen 启动，不等待结束
+                subprocess.Popen(
+                    [sys.executable, downloader_path, video_url, task_id],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True # Windows 下防止随父进程一起关闭
+                )
+                log_event("info", f"[{task_id}] Delegated downloader process started.")
+            except Exception as e:
+                log_event("error", f"[{task_id}] Failed to start downloader process: {e}")
+
+            ai_msg = f"Grok 视频生成成功！\n视频 URL: {video_url}\n文件正在后台下载中。"
+            print_json_output("success", result={"video_url": video_url, "requestId": task_id}, ai_message=ai_msg)
+        else:
+            raise ValueError(f"未能从 API 响应中提取视频 URL。内容: {content[:200]}")
+
+    except LocalFileNotFoundError as e:
+        # 超栈追踪：抛出特定格式的 JSON 引导主服务处理
+        error_payload = {
+            "status": "error",
+            "code": "FILE_NOT_FOUND_LOCALLY",
+            "error": str(e),
+            "fileUrl": e.file_url
+        }
+        # 确保这是标准输出的唯一内容
+        print(json.dumps(error_payload, ensure_ascii=False))
+        sys.exit(1) # 使用非零状态码表示需要主服务介入
+    except Exception as e:
+        log_event("error", f"[{task_id}] Processing failed", {"error": str(e), "traceback": traceback.format_exc()})
+        print_json_output("error", error=str(e))
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

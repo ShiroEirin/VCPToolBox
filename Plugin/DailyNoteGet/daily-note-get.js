@@ -3,7 +3,7 @@ const path = require('path');
 
 // 获取 PluginManager 注入的项目基础路径环境变量
 const projectBasePath = process.env.PROJECT_BASE_PATH;
-const dailyNoteRootPath = projectBasePath ? path.join(projectBasePath, 'dailynote') : path.join(__dirname, '..', '..', 'dailynote'); // Fallback if env var not set
+const dailyNoteRootPath = process.env.KNOWLEDGEBASE_ROOT_PATH || (projectBasePath ? path.join(projectBasePath, 'dailynote') : path.join(__dirname, '..', '..', 'dailynote')); // Fallback if env var not set
 
 const DEBUG_MODE = (process.env.DebugMode || "false").toLowerCase() === "true";
 

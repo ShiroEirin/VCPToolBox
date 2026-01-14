@@ -21,7 +21,49 @@ const logger = require('./modules/logger.js');
 logger.initializeServerLogger();
 logger.overrideConsole();
 
-const AGENT_DIR = path.join(__dirname, 'Agent'); // 定义 Agent 目录
+// Agent 目录路径初始化（同步，在模块加载时解析）
+let AGENT_DIR;
+
+function resolveAgentDir() {
+    const configPath = process.env.AGENT_DIR_PATH;
+    
+    if (!configPath || typeof configPath !== 'string' || configPath.trim() === '') {
+        return path.join(__dirname, 'Agent');
+    }
+    
+    const normalizedPath = path.normalize(configPath.trim());
+    const absolutePath = path.isAbsolute(normalizedPath)
+        ? normalizedPath
+        : path.resolve(__dirname, normalizedPath);
+    
+    return absolutePath;
+}
+
+AGENT_DIR = resolveAgentDir();
+
+// 确保目录存在（异步，在服务器启动时调用）
+async function ensureAgentDirectory() {
+    try {
+        await fs.mkdir(AGENT_DIR, { recursive: true });
+        console.log(`[Server] Agent directory: ${AGENT_DIR}`);
+    } catch (error) {
+        if (error.code !== 'EEXIST') {
+            console.error(`[Server] Failed to create Agent directory: ${AGENT_DIR}`);
+            
+            if (error.code === 'EACCES' || error.code === 'EPERM') {
+                console.error('[Server] Error: Permission denied');
+            } else if (error.code === 'ENOENT') {
+                console.error('[Server] Error: Parent directory does not exist');
+            } else if (error.code === 'ENOSPC') {
+                console.error('[Server] Error: No space left on device');
+            } else if (error.code === 'ENAMETOOLONG') {
+                console.error('[Server] Error: Path is too long');
+            }
+            
+            process.exit(1);
+        }
+    }
+}
 const TVS_DIR = path.join(__dirname, 'TVStxt'); // 新增：定义 TVStxt 目录
 const crypto = require('crypto');
 const agentManager = require('./modules/agentManager.js'); // 新增：Agent管理器
@@ -73,6 +115,31 @@ const DEBUG_MODE = (process.env.DebugMode || "False").toLowerCase() === "true";
 const VCPToolCode = (process.env.VCPToolCode || "false").toLowerCase() === "true"; // 新增：读取VCP工具调用验证码开关
 const SHOW_VCP_OUTPUT = (process.env.ShowVCP || "False").toLowerCase() === "true"; // 读取 ShowVCP 环境变量
 const RAG_MEMO_REFRESH = (process.env.RAGMemoRefresh || "false").toLowerCase() === "true"; // 新增：RAG日记刷新开关
+const ENABLE_ROLE_DIVIDER = (process.env.EnableRoleDivider || "false").toLowerCase() === "true"; // 新增：角色分割开关
+const ENABLE_ROLE_DIVIDER_IN_LOOP = (process.env.EnableRoleDividerInLoop || "false").toLowerCase() === "true"; // 新增：循环栈角色分割开关
+const ROLE_DIVIDER_SYSTEM = (process.env.RoleDividerSystem || "true").toLowerCase() === "true"; // 新增：System角色分割开关
+const ROLE_DIVIDER_ASSISTANT = (process.env.RoleDividerAssistant || "true").toLowerCase() === "true"; // 新增：Assistant角色分割开关
+const ROLE_DIVIDER_USER = (process.env.RoleDividerUser || "true").toLowerCase() === "true"; // 新增：User角色分割开关
+const ROLE_DIVIDER_SCAN_SYSTEM = (process.env.RoleDividerScanSystem || "true").toLowerCase() === "true"; // 新增：System角色扫描开关
+const ROLE_DIVIDER_SCAN_ASSISTANT = (process.env.RoleDividerScanAssistant || "true").toLowerCase() === "true"; // 新增：Assistant角色扫描开关
+const ROLE_DIVIDER_SCAN_USER = (process.env.RoleDividerScanUser || "true").toLowerCase() === "true"; // 新增：User角色扫描开关
+const ROLE_DIVIDER_REMOVE_DISABLED_TAGS = (process.env.RoleDividerRemoveDisabledTags || "true").toLowerCase() === "true"; // 新增：禁用标签清除开关
+
+let ROLE_DIVIDER_IGNORE_LIST = [];
+try {
+    ROLE_DIVIDER_IGNORE_LIST = JSON.parse(process.env.RoleDividerIgnoreList || "[]");
+} catch (e) {
+    console.error("Failed to parse RoleDividerIgnoreList:", e);
+}
+
+// 新增：国产A类模型推理功能配置
+let CHINA_MODEL_1 = [];
+try {
+    CHINA_MODEL_1 = (process.env.ChinaModel1 || "").split(',').map(m => m.trim()).filter(m => m !== "");
+} catch (e) {
+    console.error("Failed to parse ChinaModel1:", e);
+}
+const CHINA_MODEL_1_COT = (process.env.ChinaModel1Cot || "false").toLowerCase() === "true";
 
 // 新增：模型重定向功能
 const ModelRedirectHandler = require('./modelRedirectHandler.js');
@@ -692,13 +759,29 @@ const chatCompletionHandler = new ChatCompletionHandler({
     SHOW_VCP_OUTPUT,
     VCPToolCode, // 新增：传递VCP工具调用验证码开关
     RAGMemoRefresh: RAG_MEMO_REFRESH, // 新增：传递RAG日记刷新开关
+    enableRoleDivider: ENABLE_ROLE_DIVIDER, // 新增：传递角色分割开关
+    enableRoleDividerInLoop: ENABLE_ROLE_DIVIDER_IN_LOOP, // 新增：传递循环栈角色分割开关
+    roleDividerIgnoreList: ROLE_DIVIDER_IGNORE_LIST, // 新增：传递角色分割忽略列表
+    roleDividerSwitches: {
+        system: ROLE_DIVIDER_SYSTEM,
+        assistant: ROLE_DIVIDER_ASSISTANT,
+        user: ROLE_DIVIDER_USER
+    },
+    roleDividerScanSwitches: {
+        system: ROLE_DIVIDER_SCAN_SYSTEM,
+        assistant: ROLE_DIVIDER_SCAN_ASSISTANT,
+        user: ROLE_DIVIDER_SCAN_USER
+    },
+    roleDividerRemoveDisabledTags: ROLE_DIVIDER_REMOVE_DISABLED_TAGS,
     maxVCPLoopStream: parseInt(process.env.MaxVCPLoopStream),
     maxVCPLoopNonStream: parseInt(process.env.MaxVCPLoopNonStream),
     apiRetries: parseInt(process.env.ApiRetries) || 3, // 新增：API重试次数
     apiRetryDelay: parseInt(process.env.ApiRetryDelay) || 1000, // 新增：API重试延迟
     cachedEmojiLists,
     detectors,
-    superDetectors
+    superDetectors,
+    chinaModel1: CHINA_MODEL_1,
+    chinaModel1Cot: CHINA_MODEL_1_COT
 });
 
 // Route for standard chat completions. VCP info is shown based on the .env config.
@@ -915,7 +998,7 @@ async function handleDiaryFromAIResponse(responseText) {
 
 // Define dailyNoteRootPath here as it's needed by the adminPanelRoutes module
 // and was previously defined within the moved block.
-const dailyNoteRootPath = path.join(__dirname, 'dailynote');
+const dailyNoteRootPath = process.env.KNOWLEDGEBASE_ROOT_PATH || path.join(__dirname, 'dailynote');
 
 // Import and use the admin panel routes, passing the getter for currentServerLogPath
 const adminPanelRoutes = require('./routes/adminPanelRoutes')(
@@ -923,7 +1006,8 @@ const adminPanelRoutes = require('./routes/adminPanelRoutes')(
     dailyNoteRootPath,
     pluginManager,
     logger.getServerLogPath, // Pass the getter function
-    knowledgeBaseManager // Pass the knowledgeBaseManager instance
+    knowledgeBaseManager, // Pass the knowledgeBaseManager instance
+    AGENT_DIR // Pass the Agent directory path
 );
 
 // 新增：引入 VCP 论坛 API 路由
@@ -1093,6 +1177,10 @@ let server;
 
 server = app.listen(port, async () => { // Assign to server variable
     await loadBlacklist(); // 新增：在服务器启动时加载IP黑名单
+    
+    // 确保 Agent 目录存在
+    await ensureAgentDirectory();
+    
     console.log(`中间层服务器正在监听端口 ${port}`);
     console.log(`API 服务器地址: ${apiUrl}`);
     
@@ -1107,6 +1195,7 @@ server = app.listen(port, async () => { // Assign to server variable
     
     // 新增：初始化Agent管理器
     console.log('正在初始化Agent管理器...');
+    agentManager.setAgentDir(AGENT_DIR);
     await agentManager.initialize(DEBUG_MODE);
     console.log('Agent管理器初始化完成。');
 

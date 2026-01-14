@@ -15,7 +15,7 @@ if (!projectBasePath) {
 // 加载根目录的 config.env 文件
 dotenv.config({ path: path.join(projectBasePath, 'config.env') });
 
-const FORUM_DIR = path.join(projectBasePath, 'dailynote', 'VCP论坛');
+const FORUM_DIR = process.env.KNOWLEDGEBASE_ROOT_PATH ? path.join(process.env.KNOWLEDGEBASE_ROOT_PATH, 'VCP论坛') : path.join(projectBasePath, 'dailynote', 'VCP论坛');
 
 // 从环境变量中获取 PORT 和 Key
 const port = process.env.PORT || '8080';

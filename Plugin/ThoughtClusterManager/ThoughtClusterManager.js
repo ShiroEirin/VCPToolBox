@@ -1,7 +1,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 
-const DAILYNOTE_DIR = path.join(__dirname, '../../dailynote');
+const DAILYNOTE_DIR = process.env.KNOWLEDGEBASE_ROOT_PATH || path.join(__dirname, '../../dailynote');
 
 async function main() {
     try {

@@ -101,7 +101,7 @@ class LightMemoPlugin {
 
     initialize(config, dependencies) {
         this.projectBasePath = config.PROJECT_BASE_PATH || path.join(__dirname, '..', '..');
-        this.dailyNoteRootPath = path.join(this.projectBasePath, 'dailynote');
+        this.dailyNoteRootPath = process.env.KNOWLEDGEBASE_ROOT_PATH || path.join(this.projectBasePath, 'dailynote');
         
         if (dependencies.vectorDBManager) {
             this.vectorDBManager = dependencies.vectorDBManager;
@@ -140,10 +140,10 @@ class LightMemoPlugin {
     }
 
     async handleSearch(args) {
-        const { query, maid, k = 5, rerank = false, search_all_knowledge_bases = false, tag_boost = 0.5 } = args;
+        const { query, maid, folder, k = 5, rerank = false, search_all_knowledge_bases = false, tag_boost = 0.5 } = args;
 
-        if (!query || !maid) {
-            throw new Error("参数 'query' 和 'maid' 是必需的。");
+        if (!query || (!maid && !folder)) {
+            throw new Error("参数 'query' 是必需的，且必须提供 'maid' 或 'folder'。");
         }
 
         // --- 第一阶段：关键词初筛（BM25） ---
@@ -156,7 +156,7 @@ class LightMemoPlugin {
         console.log(`[LightMemo] Expanded tokens: [${allQueryTokens.join(', ')}]`);
 
         // 从所有日记本中收集候选chunks
-        const candidates = await this._gatherCandidateChunks(maid, search_all_knowledge_bases);
+        const candidates = await this._gatherCandidateChunks({ maid, folder, searchAll: search_all_knowledge_bases });
         
         if (candidates.length === 0) {
             return `没有找到署名为 "${maid}" 的相关记忆。`;
@@ -434,7 +434,7 @@ class LightMemoPlugin {
      * 从所有相关日记本中收集chunks（带署名过滤）
      * 适配 KnowledgeBaseManager (SQLite)
      */
-    async _gatherCandidateChunks(maid, searchAll) {
+    async _gatherCandidateChunks({ maid, folder, searchAll }) {
         const db = this.vectorDBManager.db;
         if (!db) {
             console.error('[LightMemo] Database not initialized in KnowledgeBaseManager.');
@@ -442,6 +442,7 @@ class LightMemoPlugin {
         }
 
         const candidates = [];
+        const targetFolders = folder ? folder.split(/[,，]/).map(f => f.trim()).filter(Boolean) : [];
         
         try {
             // 联表查询：chunks + files
@@ -462,12 +463,26 @@ class LightMemoPlugin {
                 if (this.excludedFolders.includes(diaryName)) continue;
                 
                 // 2. 目标日记本过滤 (如果不是搜索全部)
-                if (!searchAll && !diaryName.includes(maid)) continue;
+                if (!searchAll) {
+                    if (targetFolders.length > 0) {
+                        // 如果指定了文件夹，则必须匹配其中一个文件夹名称
+                        if (!targetFolders.some(f => diaryName.includes(f))) continue;
+                    } else if (maid) {
+                        // 如果没有指定文件夹，则按署名过滤日记本
+                        if (!diaryName.includes(maid)) continue;
+                    }
+                }
                 
                 const text = row.content || '';
                 
                 // 3. 署名过滤 (如果不是搜索全部)
-                if (!searchAll && !this._checkSignature(text, maid)) continue;
+                if (!searchAll) {
+                    if (targetFolders.length > 0) {
+                        // 指定文件夹时忽略署名过滤
+                    } else if (maid) {
+                        if (!this._checkSignature(text, maid)) continue;
+                    }
+                }
                 
                 // 4. 分词
                 const tokens = this._tokenize(text);

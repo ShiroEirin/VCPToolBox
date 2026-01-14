@@ -82,19 +82,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     <select class="rule-type">
                         <option value="relative" ${rule.type === 'relative' ? 'selected' : ''}>相对注入</option>
                         <option value="depth" ${rule.type === 'depth' ? 'selected' : ''}>深度注入</option>
+                        <option value="embed" ${rule.type === 'embed' ? 'selected' : ''}>嵌入</option>
                     </select>
                 </div>
-                <div class="form-group relative-options" style="display: ${rule.type === 'relative' ? 'flex' : 'none'};">
+                <div class="form-group relative-options" style="display: ${(rule.type === 'relative' || rule.type === 'embed') ? 'flex' : 'none'};">
                     <label>相对位置</label>
                     <select class="rule-position">
-                        <option value="before" ${rule.position === 'before' ? 'selected' : ''}>之前</option>
+                        <option value="before" ${(rule.position === 'before' || !rule.position) ? 'selected' : ''}>之前</option>
                         <option value="after" ${rule.position === 'after' ? 'selected' : ''}>之后</option>
                     </select>
                 </div>
-                <div class="form-group relative-options" style="display: ${rule.type === 'relative' ? 'flex' : 'none'};">
+                <div class="form-group relative-options" style="display: ${(rule.type === 'relative' || rule.type === 'embed') ? 'flex' : 'none'};">
                     <label>目标</label>
                     <select class="rule-target">
-                        <option value="system" ${rule.target === 'system' ? 'selected' : ''}>系统提示</option>
+                        <option value="system" ${(rule.target === 'system' || !rule.target) ? 'selected' : ''}>系统提示</option>
                         <option value="last_user" ${rule.target === 'last_user' ? 'selected' : ''}>最后的用户消息</option>
                     </select>
                 </div>
@@ -102,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <label>深度</label>
                     <input type="number" class="rule-depth" value="${rule.depth || 1}" min="1">
                 </div>
-                <div class="form-group">
+                <div class="form-group role-options" style="display: ${rule.type !== 'embed' ? 'flex' : 'none'};">
                     <label>注入角色</label>
                     <select class="rule-content-role">
                         <option value="system" ${rule.content.role === 'system' ? 'selected' : ''}>system</option>
@@ -112,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="form-group" style="grid-column: 1 / -1;">
                     <label>注入内容</label>
-                    <textarea class="rule-content-text">${rule.content.content || ''}</textarea>
+                    <textarea class="rule-content-text" style="${rule.ui?.textareaWidth ? `width: ${rule.ui.textareaWidth};` : ''} ${rule.ui?.textareaHeight ? `height: ${rule.ui.textareaHeight};` : ''}">${rule.content.content || ''}</textarea>
                 </div>
             </div>
         `;
@@ -121,12 +122,21 @@ document.addEventListener('DOMContentLoaded', () => {
         card.querySelector('.rule-type').addEventListener('change', (e) => {
             const relativeOptions = card.querySelectorAll('.relative-options');
             const depthOptions = card.querySelectorAll('.depth-options');
-            if (e.target.value === 'relative') {
+            const roleOptions = card.querySelectorAll('.role-options');
+            const type = e.target.value;
+
+            if (type === 'relative') {
                 relativeOptions.forEach(el => el.style.display = 'flex');
                 depthOptions.forEach(el => el.style.display = 'none');
-            } else {
+                roleOptions.forEach(el => el.style.display = 'flex');
+            } else if (type === 'depth') {
                 relativeOptions.forEach(el => el.style.display = 'none');
                 depthOptions.forEach(el => el.style.display = 'flex');
+                roleOptions.forEach(el => el.style.display = 'flex');
+            } else if (type === 'embed') {
+                relativeOptions.forEach(el => el.style.display = 'flex');
+                depthOptions.forEach(el => el.style.display = 'none');
+                roleOptions.forEach(el => el.style.display = 'none');
             }
         });
 
@@ -201,12 +211,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 content: {
                     role: card.querySelector('.rule-content-role').value,
                     content: card.querySelector('.rule-content-text').value
+                },
+                ui: {
+                    textareaWidth: card.querySelector('.rule-content-text').style.width,
+                    textareaHeight: card.querySelector('.rule-content-text').style.height
                 }
             };
-            if (rule.type === 'relative') {
+            if (rule.type === 'relative' || rule.type === 'embed') {
                 rule.position = card.querySelector('.rule-position').value;
                 rule.target = card.querySelector('.rule-target').value;
-            } else {
+            }
+            
+            if (rule.type === 'depth') {
                 rule.depth = parseInt(card.querySelector('.rule-depth').value, 10);
             }
             rules.push(rule);

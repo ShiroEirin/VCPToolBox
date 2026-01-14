@@ -68,9 +68,42 @@ class VCPTavern {
         let newMessages = [...messages];
 
         // 按照注入规则处理
-        // 为了处理深度注入，我们先处理相对注入，再处理深度注入
+        // 为了处理深度注入，我们先处理嵌入注入，再处理相对注入，最后处理深度注入
+        const embedRules = preset.rules.filter(r => r.enabled && r.type === 'embed');
         const relativeRules = preset.rules.filter(r => r.enabled && r.type === 'relative').sort((a, b) => (a.position === 'before' ? -1 : 1));
         const depthRules = preset.rules.filter(r => r.enabled && r.type === 'depth').sort((a, b) => b.depth - a.depth);
+
+        // 嵌入注入 (直接修改现有消息内容)
+        for (const rule of embedRules) {
+            const textToEmbed = typeof rule.content === 'object' ? rule.content.content : rule.content;
+            if (typeof textToEmbed !== 'string') continue;
+
+            if (rule.target === 'system') {
+                const systemMsg = newMessages.find(m => m.role === 'system');
+                if (systemMsg && typeof systemMsg.content === 'string') {
+                    if (rule.position === 'before') {
+                        systemMsg.content = textToEmbed + systemMsg.content;
+                    } else { // after
+                        systemMsg.content = systemMsg.content + textToEmbed;
+                    }
+                }
+            } else if (rule.target === 'last_user') {
+                let lastUserIndex = -1;
+                for (let i = newMessages.length - 1; i >= 0; i--) {
+                    if (newMessages[i].role === 'user') {
+                        lastUserIndex = i;
+                        break;
+                    }
+                }
+                if (lastUserIndex !== -1 && typeof newMessages[lastUserIndex].content === 'string') {
+                    if (rule.position === 'before') {
+                        newMessages[lastUserIndex].content = textToEmbed + newMessages[lastUserIndex].content;
+                    } else { // after
+                        newMessages[lastUserIndex].content = newMessages[lastUserIndex].content + textToEmbed;
+                    }
+                }
+            }
+        }
 
         // 相对注入
         for (const rule of relativeRules) {

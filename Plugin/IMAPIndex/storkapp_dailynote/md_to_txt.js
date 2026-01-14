@@ -5,7 +5,7 @@ const path = require('path');
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
 // --- 配置 ---
 const MD_SOURCE_DIR = path.join(__dirname, 'converted_md');
-const TXT_TARGET_DIR = path.join(__dirname, '..', '..', '..', 'dailynote', '文献');
+const TXT_TARGET_DIR = process.env.KNOWLEDGEBASE_ROOT_PATH ? path.join(process.env.KNOWLEDGEBASE_ROOT_PATH, '文献') : path.join(__dirname, '..', '..', '..', 'dailynote', '文献');
 const HTML_SOURCE_DIR = path.join(__dirname, 'fetched_webpages');
 const PERMANENT_INDEX_FILE = path.join(__dirname, 'stork_paper_ids.txt');
 // --- 配置结束 ---

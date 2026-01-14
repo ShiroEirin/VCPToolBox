@@ -48,7 +48,7 @@ async function getEmbeddings(texts) {
 async function main() {
     console.log('🚀 Starting Tag Vector Library Builder...\n');
 
-    const DIARY_ROOT_PATH = path.join(__dirname, 'dailynote');
+    const DIARY_ROOT_PATH = process.env.KNOWLEDGEBASE_ROOT_PATH || path.join(__dirname, 'dailynote');
     const VECTOR_STORE_PATH = path.join(__dirname, 'VectorStore');
 
     const tagManager = new TagVectorManager({

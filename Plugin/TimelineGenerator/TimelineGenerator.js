@@ -63,7 +63,7 @@ async function initialize(config) {
     }
 
     projectBasePath = config.PROJECT_BASE_PATH;
-    dailyNoteDir = path.join(projectBasePath, 'dailynote');
+    dailyNoteDir = process.env.KNOWLEDGEBASE_ROOT_PATH || path.join(projectBasePath, 'dailynote');
     timelineDir = path.join(projectBasePath, 'timeline');
     dbPath = path.join(timelineDir, 'processed_files_db.json');
 

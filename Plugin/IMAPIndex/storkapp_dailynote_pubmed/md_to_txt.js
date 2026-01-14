@@ -26,7 +26,7 @@ const HTML_SOURCE_DIR = path.join(WORK_DIR, 'fetched_webpages');
 const PERMANENT_INDEX_FILE = path.join(WORK_DIR, 'paper_doi.index.txt');
 
 // 父级 dailynote 根目录（必须已存在且名称为 dailynote）
-const DAILYNOTE_ROOT = path.resolve(WORK_DIR, '..', '..', '..', 'dailynote');
+const DAILYNOTE_ROOT = process.env.KNOWLEDGEBASE_ROOT_PATH || path.resolve(WORK_DIR, '..', '..', '..', 'dailynote');
 // --- 配置结束 ---
 
 /**

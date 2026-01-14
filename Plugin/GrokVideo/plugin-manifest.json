@@ -1,0 +1,36 @@
+{
+  "name": "GrokVideoGen",
+  "displayName": "Grok 视频生成器",
+  "version": "1.1.0",
+  "description": "使用 Grok API 进行视频生成（支持文生视频和图生视频）。",
+  "pluginType": "synchronous",
+  "entryPoint": {
+    "command": "python video_handler.py"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 300000
+  },
+  "configSchema": {
+    "GROK_API_KEY": "string",
+    "GROK_API_BASE": "string",
+    "GrokVideoModelName": "string",
+    "DebugMode": "boolean",
+    "CALLBACK_BASE_URL": "string"
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "command": "submit",
+        "description": "提交一个视频生成任务。\n\n**重要提示：视频生成需要较长时间，请在调用成功后告知用户任务已提交，并提醒他们需要耐心等待。**\n\n**参数说明:**\n1. tool_name:「始」GrokVideoGen「末」\n2. image_url:「始」[图片链接]「末」 (可选，用于图生视频)\n3. prompt:「始」[提示词]「末」 (必需)\n\n**成功时返回 JSON:** { \"status\": \"success\", \"result\": \"...\" }\n**失败时返回 JSON:** { \"status\": \"error\", \"error\": \"错误信息...\" }",
+        "example": "提交文生视频:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」GrokVideoGen「末」,\nprompt:「始」一个赛博朋克风格的城市街道，下着雨，霓虹灯闪烁「末」\n<<<[END_TOOL_REQUEST]>>>"
+      }
+    ]
+  },
+  "webSocketPush": {
+    "enabled": true,
+    "messageType": "video_generation_status",
+    "usePluginResultAsMessage": true,
+    "targetClientType": "VCPLog"
+  }
+}

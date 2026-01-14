@@ -284,9 +284,7 @@ class AIMemoHandler {
      */
     async _getDiaryFiles(dbName) {
         const projectBasePath = process.env.PROJECT_BASE_PATH;
-        const dailyNoteRootPath = projectBasePath
-            ? path.join(projectBasePath, 'dailynote')
-            : path.join(__dirname, '..', '..', 'dailynote');
+        const dailyNoteRootPath = process.env.KNOWLEDGEBASE_ROOT_PATH || (projectBasePath ? path.join(projectBasePath, 'dailynote') : path.join(__dirname, '..', '..', 'dailynote'));
         
         const characterDirPath = path.join(dailyNoteRootPath, dbName);
         const files = [];

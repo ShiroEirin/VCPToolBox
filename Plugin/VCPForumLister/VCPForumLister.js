@@ -1,7 +1,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 
-const FORUM_DIR = path.join(__dirname, '..', '..', 'dailynote', 'VCP论坛');
+const FORUM_DIR = process.env.KNOWLEDGEBASE_ROOT_PATH ? path.join(process.env.KNOWLEDGEBASE_ROOT_PATH, 'VCP论坛') : path.join(__dirname, '..', '..', 'dailynote', 'VCP论坛');
 const POST_COUNT = 20; // 定义返回的帖子数量
 
 /**

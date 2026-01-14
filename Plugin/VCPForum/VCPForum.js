@@ -3,7 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 
-const FORUM_DIR = path.join(__dirname, '..', '..', 'dailynote', 'VCP论坛');
+const FORUM_DIR = process.env.KNOWLEDGEBASE_ROOT_PATH ? path.join(process.env.KNOWLEDGEBASE_ROOT_PATH, 'VCP论坛') : path.join(__dirname, '..', '..', 'dailynote', 'VCP论坛');
 const PROJECT_BASE_PATH = process.env.PROJECT_BASE_PATH;
 const SERVER_PORT = process.env.SERVER_PORT;
 const IMAGESERVER_IMAGE_KEY = process.env.IMAGESERVER_IMAGE_KEY;
