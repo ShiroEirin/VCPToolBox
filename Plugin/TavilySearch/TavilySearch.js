@@ -103,9 +103,25 @@ async function main() {
 
             const response = await tvly.search(query, searchOptions);
 
-            // Tavily Node client returns a JSON-serializable object
-            // Ensure the result is a string for output
-            output = { status: "success", result: JSON.stringify(response, null, 2) };
+            // 将 Tavily 搜索结果转换为 Markdown 格式
+            let markdownResult = '';
+            if (response.answer) {
+                markdownResult += `### 直接回答\n${response.answer}\n\n`;
+            }
+
+            if (response.results && response.results.length > 0) {
+                markdownResult += `### 搜索结果\n`;
+                response.results.forEach((item, index) => {
+                    markdownResult += `${index + 1}. **[${item.title}](${item.url})**\n`;
+                    if (item.content) {
+                        markdownResult += `   ${item.content}\n\n`;
+                    }
+                });
+            } else {
+                markdownResult += `未找到相关搜索结果。\n`;
+            }
+
+            output = { status: "success", result: markdownResult };
 
         } catch (e) {
             let errorMessage;
