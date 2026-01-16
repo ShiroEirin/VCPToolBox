@@ -16,7 +16,10 @@
     "GROK_API_BASE": "string",
     "GrokVideoModelName": "string",
     "DebugMode": "boolean",
-    "CALLBACK_BASE_URL": "string"
+    "PROJECT_BASE_PATH": "string",
+    "SERVER_PORT": "string",
+    "IMAGESERVER_IMAGE_KEY": "string",
+    "VarHttpUrl": "string"
   },
   "capabilities": {
     "invocationCommands": [

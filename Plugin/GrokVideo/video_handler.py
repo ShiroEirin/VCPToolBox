@@ -115,6 +115,33 @@ def process_image_from_url(image_url):
         log_event("error", f"Failed to process image: {image_url}", {"error": str(e)})
         raise ValueError(f"图片处理失败: {e}")
 
+def download_video_sync(url, task_id, save_dir):
+    try:
+        os.makedirs(save_dir, exist_ok=True)
+        ext = "mp4"
+        path_part = url.split('?')[0]
+        if '.' in path_part:
+            potential_ext = path_part.split('.')[-1].lower()
+            if potential_ext in ['mp4', 'webp', 'png', 'jpg', 'jpeg', 'gif']:
+                ext = potential_ext
+
+        filename = f"grok_{task_id}.{ext}"
+        filepath = os.path.join(save_dir, filename)
+
+        log_event("info", f"Downloading video synchronously: {url} -> {filepath}")
+        
+        response = requests.get(url, stream=True, timeout=60)
+        response.raise_for_status()
+        with open(filepath, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        
+        return filename
+    except Exception as e:
+        log_event("error", f"Failed to download video: {e}")
+        return None
+
 # --- 主逻辑 ---
 def main():
     dotenv_path = os.path.join(os.path.dirname(__file__), 'config.env')
@@ -123,6 +150,12 @@ def main():
     api_key = os.getenv("GROK_API_KEY")
     api_base = os.getenv("GROK_API_BASE", "https://api.x.ai")
     model = os.getenv("GrokVideoModelName", "grok-imagine-0.9")
+    
+    # 从环境变量获取 VCP 配置 (由 Plugin.js 注入)
+    project_base_path = os.getenv("PROJECT_BASE_PATH")
+    server_port = os.getenv("SERVER_PORT")
+    imageserver_file_key = os.getenv("IMAGESERVER_FILE_KEY") # 视频应该使用 File_Key
+    var_http_url = os.getenv("VarHttpUrl")
 
     if not api_key:
         print_json_output("error", error="GROK_API_KEY not found in config.env.")
@@ -200,23 +233,33 @@ def main():
         if video_url:
             log_event("success", f"[{task_id}] Video URL obtained: {video_url}")
             
-            # 4. 委托下载进程 (异步，不阻塞主进程退出)
-            try:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                downloader_path = os.path.join(script_dir, "video_downloader.py")
-                # 使用 Popen 启动，不等待结束
-                subprocess.Popen(
-                    [sys.executable, downloader_path, video_url, task_id],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True # Windows 下防止随父进程一起关闭
-                )
-                log_event("info", f"[{task_id}] Delegated downloader process started.")
-            except Exception as e:
-                log_event("error", f"[{task_id}] Failed to start downloader process: {e}")
+            # 4. 同步下载并转化为本地 URL
+            local_filename = None
+            accessible_url = video_url
+            
+            if project_base_path and server_port and imageserver_file_key and var_http_url:
+                video_save_dir = os.path.join(project_base_path, 'file', 'video')
+                local_filename = download_video_sync(video_url, task_id, video_save_dir)
+                
+                if local_filename:
+                    # 构建本地局域网 URL
+                    # 根据 image-server.js 的逻辑：
+                    # app.use('/:pathSegmentWithKey/files', ...) 映射到 projectBasePath/file
+                    # 所以访问 file/video/xxx.mp4 应该是 /pw=KEY/files/video/xxx.mp4
+                    
+                    accessible_url = f"{var_http_url}:{server_port}/pw={imageserver_file_key}/files/video/{local_filename}"
+                    log_event("info", f"[{task_id}] Local accessible URL: {accessible_url}")
 
-            ai_msg = f"Grok 视频生成成功！\n视频 URL: {video_url}\n文件正在后台下载中。"
-            print_json_output("success", result={"video_url": video_url, "requestId": task_id}, ai_message=ai_msg)
+            ai_msg = f"Grok 视频生成成功！\n视频已下载并转化为本地 URL: {accessible_url}"
+            if accessible_url != video_url:
+                ai_msg += f"\n原始 URL: {video_url}"
+                
+            print_json_output("success", result={
+                "video_url": accessible_url,
+                "original_url": video_url,
+                "local_path": f"file/video/{local_filename}" if local_filename else None,
+                "requestId": task_id
+            }, ai_message=ai_msg)
         else:
             raise ValueError(f"未能从 API 响应中提取视频 URL。内容: {content[:200]}")
 
