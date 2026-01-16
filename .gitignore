@@ -209,6 +209,16 @@ VectorStore/diary_name_vectors.json
 VectorStore/manifest.json
 VectorStore/*.json
 
+# Snow AI tool cache
+.snow/
+
+# VectorStore index and database files (generated at runtime)
+VectorStore/*.usearch
+VectorStore/knowledge_base.sqlite*
+
+# Build target directory
+target/
+
 # Plugin binary cache files (运行时二进制缓存，不应提交)
 **/*.bin
 
