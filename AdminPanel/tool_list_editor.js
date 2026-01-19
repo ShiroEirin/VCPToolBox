@@ -671,6 +671,21 @@
         // 使用事件委托处理工具列表中的事件
         elements.toolsList.addEventListener('click', handleToolsListClick);
         elements.toolsList.addEventListener('change', handleToolsListChange);
+        
+        // 折叠面板点击事件
+        document.querySelectorAll('.collapsible-section .section-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const section = header.parentElement;
+                section.classList.toggle('collapsed');
+            });
+        });
+
+        // 移动端默认折叠
+        if (window.innerWidth <= 1024) {
+            document.querySelectorAll('.collapsible-section').forEach(section => {
+                section.classList.add('collapsed');
+            });
+        }
     }
     
     // 处理工具列表的点击事件（事件委托）

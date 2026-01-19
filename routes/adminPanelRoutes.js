@@ -242,6 +242,27 @@ module.exports = function(DEBUG_MODE, dailyNoteRootPath, pluginManager, getCurre
             }
         }
     });
+
+    // 清空日志文件
+    adminApiRouter.post('/server-log/clear', async (req, res) => {
+        const logPath = getCurrentServerLogPath();
+        if (!logPath) {
+            return res.status(503).json({ error: 'Server log path not available.' });
+        }
+        try {
+            // 使用 truncate 清空文件内容
+            await fs.writeFile(logPath, '', 'utf-8');
+            
+            // 更新 inode 记录，防止增量读取出错
+            const stats = await fs.stat(logPath);
+            logFileInodes.set(logPath, stats.ino);
+
+            res.json({ success: true, message: '日志已清空' });
+        } catch (error) {
+            console.error(`[AdminPanelRoutes API] Error clearing server log file ${logPath}:`, error);
+            res.status(500).json({ error: 'Failed to clear server log file', details: error.message });
+        }
+    });
     // --- End Server Log API ---
     // GET main config.env content (filtered)
     adminApiRouter.get('/config/main', async (req, res) => {
@@ -1108,6 +1129,38 @@ module.exports = function(DEBUG_MODE, dailyNoteRootPath, pluginManager, getCurre
         }
     });
     // --- End RAG Tags API ---
+
+    // --- RAG Params API ---
+    adminApiRouter.get('/rag-params', async (req, res) => {
+        const ragParamsPath = path.join(__dirname, '..', 'rag_params.json');
+        try {
+            const content = await fs.readFile(ragParamsPath, 'utf-8');
+            res.json(JSON.parse(content));
+        } catch (error) {
+            console.error('[AdminPanelRoutes API] Error reading rag_params.json:', error);
+            if (error.code === 'ENOENT') {
+                res.status(404).json({ error: 'rag_params.json not found.' });
+            } else {
+                res.status(500).json({ error: 'Failed to read rag_params.json', details: error.message });
+            }
+        }
+    });
+
+    adminApiRouter.post('/rag-params', async (req, res) => {
+        const ragParamsPath = path.join(__dirname, '..', 'rag_params.json');
+        const data = req.body;
+        if (typeof data !== 'object' || data === null) {
+             return res.status(400).json({ error: 'Invalid request body. Expected a JSON object.' });
+        }
+        try {
+            await fs.writeFile(ragParamsPath, JSON.stringify(data, null, 2), 'utf-8');
+            res.json({ message: 'RAG Params 文件已成功保存。' });
+        } catch (error) {
+            console.error('[AdminPanelRoutes API] Error writing rag_params.json:', error);
+            res.status(500).json({ error: 'Failed to write rag_params.json', details: error.message });
+        }
+    });
+    // --- End RAG Params API ---
 
     // --- Semantic Groups API ---
     adminApiRouter.get('/semantic-groups', async (req, res) => {

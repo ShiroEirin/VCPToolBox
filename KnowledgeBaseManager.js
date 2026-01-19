@@ -9,6 +9,8 @@ const Database = require('better-sqlite3');
 const chokidar = require('chokidar');
 const { chunkText } = require('./TextChunker'); 
 const { getEmbeddingsBatch } = require('./EmbeddingUtils');
+const EPAModule = require('./EPAModule');
+const ResidualPyramid = require('./ResidualPyramid');
 
 // 尝试加载 Rust Vexus 引擎
 let VexusIndex = null;
@@ -32,19 +34,23 @@ class KnowledgeBaseManager {
             // ⚠️ 务必确认环境变量 VECTORDB_DIMENSION 与模型一致 (3-small通常为1536)
             dimension: parseInt(process.env.VECTORDB_DIMENSION) || 3072,
             
-            batchWindow: 2000,
-            maxBatchSize: 50,
-            indexSaveDelay: 120000, // 日记索引的保存延迟 (2分钟)
-            tagIndexSaveDelay: 300000, // 全局Tag索引的保存延迟 (5分钟)
+            batchWindow: parseInt(process.env.KNOWLEDGEBASE_BATCH_WINDOW_MS, 10) || 2000,
+            maxBatchSize: parseInt(process.env.KNOWLEDGEBASE_MAX_BATCH_SIZE, 10) || 50,
+            indexSaveDelay: parseInt(process.env.KNOWLEDGEBASE_INDEX_SAVE_DELAY, 10) || 120000,
+            tagIndexSaveDelay: parseInt(process.env.KNOWLEDGEBASE_TAG_INDEX_SAVE_DELAY, 10) || 300000,
             
             ignoreFolders: (process.env.IGNORE_FOLDERS || 'VCP论坛').split(',').map(f => f.trim()).filter(Boolean),
-            ignorePrefixes: (process.env.IGNORE_PREFIX || '已整理').split(',').map(p => p.trim()).filter(Boolean),
-            ignoreSuffixes: (process.env.IGNORE_SUFFIX || '夜伽').split(',').map(s => s.trim()).filter(Boolean),
+            ignorePrefixes: (process.env.IGNORE_PREFIXES || process.env.IGNORE_PREFIX || '已整理').split(',').map(p => p.trim()).filter(Boolean),
+            ignoreSuffixes: (process.env.IGNORE_SUFFIXES || process.env.IGNORE_SUFFIX || '夜伽').split(',').map(s => s.trim()).filter(Boolean),
 
             tagBlacklist: new Set((process.env.TAG_BLACKLIST || '').split(',').map(t => t.trim()).filter(Boolean)),
             tagBlacklistSuper: (process.env.TAG_BLACKLIST_SUPER || '').split(',').map(t => t.trim()).filter(Boolean),
             tagExpandMaxCount: parseInt(process.env.TAG_EXPAND_MAX_COUNT, 10) || 30,
             fullScanOnStartup: (process.env.KNOWLEDGEBASE_FULL_SCAN_ON_STARTUP || 'true').toLowerCase() === 'true',
+            // 语言置信度补偿配置
+            langConfidenceEnabled: (process.env.LANG_CONFIDENCE_GATING_ENABLED || 'true').toLowerCase() === 'true',
+            langPenaltyUnknown: parseFloat(process.env.LANG_PENALTY_UNKNOWN) || 0.05,
+            langPenaltyCrossDomain: parseFloat(process.env.LANG_PENALTY_CROSS_DOMAIN) || 0.1,
             ...config
         };
 
@@ -59,6 +65,10 @@ class KnowledgeBaseManager {
         this.isProcessing = false;
         this.saveTimers = new Map();
         this.tagCooccurrenceMatrix = null; // 优化1：Tag共现矩阵
+        this.epa = null;
+        this.residualPyramid = null;
+        this.ragParams = {}; // ✅ 新增：用于存储热调控参数
+        this.ragParamsWatcher = null;
     }
 
     async initialize() {
@@ -98,9 +108,52 @@ class KnowledgeBaseManager {
         // 优化1：启动时构建共现矩阵
         this._buildCooccurrenceMatrix();
 
+        // 初始化 EPA 和残差金字塔模块
+        this.epa = new EPAModule(this.db, {
+            dimension: this.config.dimension,
+            vexusIndex: this.tagIndex
+        });
+        await this.epa.initialize();
+        
+        this.residualPyramid = new ResidualPyramid(this.tagIndex, this.db, {
+            dimension: this.config.dimension
+        });
+
         this._startWatcher();
+        await this.loadRagParams();
+        this._startRagParamsWatcher();
+
         this.initialized = true;
         console.log('[KnowledgeBase] ✅ System Ready');
+    }
+
+    /**
+     * ✅ 新增：加载 RAG 热调控参数
+     */
+    async loadRagParams() {
+        const paramsPath = path.join(__dirname, 'rag_params.json');
+        try {
+            const data = await fs.readFile(paramsPath, 'utf-8');
+            this.ragParams = JSON.parse(data);
+            console.log('[KnowledgeBase] ✅ RAG 热调控参数已加载');
+        } catch (e) {
+            console.error('[KnowledgeBase] ❌ 加载 rag_params.json 失败:', e.message);
+            this.ragParams = { KnowledgeBaseManager: {} };
+        }
+    }
+
+    /**
+     * ✅ 新增：启动参数监听器
+     */
+    _startRagParamsWatcher() {
+        const paramsPath = path.join(__dirname, 'rag_params.json');
+        if (this.ragParamsWatcher) return;
+        
+        this.ragParamsWatcher = chokidar.watch(paramsPath);
+        this.ragParamsWatcher.on('change', async () => {
+            console.log('[KnowledgeBase] 🔄 检测到 rag_params.json 变更，正在重新加载...');
+            await this.loadRagParams();
+        });
     }
 
     _initSchema() {
@@ -214,18 +267,22 @@ class KnowledgeBaseManager {
     // 核心搜索接口 (修复版)
     // =========================================================================
 
-    async search(arg1, arg2, arg3, arg4) {
+    async search(arg1, arg2, arg3, arg4, arg5, arg6) {
         try {
             let diaryName = null;
             let queryVec = null;
             let k = 5;
             let tagBoost = 0;
+            let coreTags = [];
+            let coreBoostFactor = 1.33; // 默认 33% 提升
 
             if (typeof arg1 === 'string' && Array.isArray(arg2)) {
                 diaryName = arg1;
                 queryVec = arg2;
                 k = arg3 || 5;
                 tagBoost = arg4 || 0;
+                coreTags = arg5 || [];
+                coreBoostFactor = arg6 || 1.33;
             } else if (typeof arg1 === 'string') {
                 // 纯文本搜索暂略，通常插件会先向量化
                 return [];
@@ -238,9 +295,9 @@ class KnowledgeBaseManager {
             if (!queryVec) return [];
 
             if (diaryName) {
-                return await this._searchSpecificIndex(diaryName, queryVec, k, tagBoost);
+                return await this._searchSpecificIndex(diaryName, queryVec, k, tagBoost, coreTags, coreBoostFactor);
             } else {
-                return await this._searchAllIndices(queryVec, k, tagBoost);
+                return await this._searchAllIndices(queryVec, k, tagBoost, coreTags, coreBoostFactor);
             }
         } catch (e) {
             console.error('[KnowledgeBase] Search Error:', e);
@@ -248,7 +305,7 @@ class KnowledgeBaseManager {
         }
     }
 
-    async _searchSpecificIndex(diaryName, vector, k, tagBoost) {
+    async _searchSpecificIndex(diaryName, vector, k, tagBoost, coreTags = [], coreBoostFactor = 1.33) {
         const idx = await this._getOrLoadDiaryIndex(diaryName);
         
         // 如果索引为空，直接返回
@@ -265,8 +322,8 @@ class KnowledgeBaseManager {
         try {
             let searchVecFloat;
             if (tagBoost > 0) {
-                // 🌟 TagMemo 逻辑回归：应用 Tag 增强
-                const boostResult = this._applyTagBoost(new Float32Array(vector), tagBoost);
+                // 🌟 TagMemo 逻辑回归：应用 Tag 增强 (强制使用 V3)
+                const boostResult = this._applyTagBoostV3(new Float32Array(vector), tagBoost, coreTags, coreBoostFactor);
                 searchVecFloat = boostResult.vector;
                 tagInfo = boostResult.info;
             } else {
@@ -314,18 +371,19 @@ class KnowledgeBaseManager {
                 matchedTags: tagInfo ? tagInfo.matchedTags : [],
                 boostFactor: tagInfo ? tagInfo.boostFactor : 0,
                 tagMatchScore: tagInfo ? tagInfo.totalSpikeScore : 0, // ✅ 新增
-                tagMatchCount: tagInfo ? tagInfo.matchedTags.length : 0 // ✅ 新增
+                tagMatchCount: tagInfo ? tagInfo.matchedTags.length : 0, // ✅ 新增
+                coreTagsMatched: tagInfo ? tagInfo.coreTagsMatched : [] // 🌟 新增：标记哪些核心 Tag 命中了
             };
         }).filter(Boolean);
     }
 
-    async _searchAllIndices(vector, k, tagBoost) {
+    async _searchAllIndices(vector, k, tagBoost, coreTags = [], coreBoostFactor = 1.33) {
         // 优化2：使用 Promise.all 并行搜索
         let searchVecFloat;
         let tagInfo = null;
 
         if (tagBoost > 0) {
-            const boostResult = this._applyTagBoost(new Float32Array(vector), tagBoost);
+            const boostResult = this._applyTagBoostV3(new Float32Array(vector), tagBoost, coreTags, coreBoostFactor);
             searchVecFloat = boostResult.vector;
             tagInfo = boostResult.info;
         } else {
@@ -369,187 +427,300 @@ class KnowledgeBaseManager {
                 matchedTags: tagInfo ? tagInfo.matchedTags : [],
                 boostFactor: tagInfo ? tagInfo.boostFactor : 0,
                 tagMatchScore: tagInfo ? tagInfo.totalSpikeScore : 0,
-                tagMatchCount: tagInfo ? tagInfo.matchedTags.length : 0
+                tagMatchCount: tagInfo ? tagInfo.matchedTags.length : 0,
+                coreTagsMatched: tagInfo ? tagInfo.coreTagsMatched : []
             } : null;
         }).filter(Boolean);
     }
 
-    // 🌟 TagMemo 最终修复版：带调试探针 + 强类型安全 + 高对比度突触
-    _applyTagBoost(vector, tagBoost) {
-        // 调试探针：每 50 次调用才打印一次，避免刷屏，但能看到是否在工作
+    /**
+     * 🌟 TagMemo V3.7 + EPA + Residual Pyramid + Worldview Gating 增强版
+     */
+    _applyTagBoostV3(vector, baseTagBoost, coreTags = [], coreBoostFactor = 1.33) {
         const debug = true;
-        
+        const originalFloat32 = vector instanceof Float32Array ? vector : new Float32Array(vector);
+        const dim = originalFloat32.length;
+
         try {
-            // [步骤 1] 数据类型防御性转换
-            let searchBuffer;
-            let originalFloat32;
+            // [1] EPA 分析 (逻辑深度与共振) - 识别“你在哪个世界”
+            const epaResult = this.epa.project(originalFloat32);
+            const resonance = this.epa.detectCrossDomainResonance(originalFloat32);
+            const queryWorld = epaResult.dominantAxes[0]?.label || 'Unknown';
+
+            // [2] 残差金字塔分析 (新颖度与覆盖率) - 90% 能量截断
+            const pyramid = this.residualPyramid.analyze(originalFloat32);
+            const features = pyramid.features;
+
+            // [3] 动态调整策略
+            const config = this.ragParams?.KnowledgeBaseManager || {};
+            const logicDepth = epaResult.logicDepth;        // 0~1, 高=逻辑聚焦
+            const entropyPenalty = epaResult.entropy;       // 0~1, 高=信息散乱
+            const resonanceBoost = Math.log(1 + resonance.resonance);
             
-            if (vector instanceof Float32Array) {
-                originalFloat32 = vector;
-                searchBuffer = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
-            } else if (Array.isArray(vector)) {
-                originalFloat32 = new Float32Array(vector);
-                searchBuffer = Buffer.from(originalFloat32.buffer);
-            } else {
-                if(debug) console.warn('[TagMemo] ❌ Vector input type invalid:', typeof vector);
-                return { vector: vector, info: null };
+            // 核心公式：结合 EPA 和残差特征
+            const actRange = config.activationMultiplier || [0.5, 1.5];
+            const activationMultiplier = actRange[0] + features.tagMemoActivation * (actRange[1] - actRange[0]);
+            const dynamicBoostFactor = (logicDepth * (1 + resonanceBoost) / (1 + entropyPenalty * 0.5)) * activationMultiplier;
+            
+            const boostRange = config.dynamicBoostRange || [0.3, 2.0];
+            const effectiveTagBoost = baseTagBoost * Math.max(boostRange[0], Math.min(boostRange[1], dynamicBoostFactor));
+
+            // 🌟 动态核心加权优化 (Dynamic Core Boost Optimization)
+            // 目标范围：1.20 (20%) ~ 1.40 (40%)
+            // 逻辑：逻辑深度越高（意图明确）或覆盖率越低（新领域需要锚点），核心标签权重越高
+            const coreMetric = (logicDepth * 0.5) + ((1 - features.coverage) * 0.5);
+            const coreRange = config.coreBoostRange || [1.20, 1.40];
+            const dynamicCoreBoostFactor = coreRange[0] + (coreMetric * (coreRange[1] - coreRange[0]));
+            
+            if (debug) {
+                console.log(`[TagMemo-V3.7] World=${queryWorld}, Depth=${logicDepth.toFixed(3)}, Resonance=${resonance.resonance.toFixed(3)}`);
+                console.log(`[TagMemo-V3.7] Coverage=${features.coverage.toFixed(3)}, Explained=${(pyramid.totalExplainedEnergy * 100).toFixed(1)}%`);
+                console.log(`[TagMemo-V3.7] Effective Boost: ${effectiveTagBoost.toFixed(3)}, Dynamic Core Boost: ${dynamicCoreBoostFactor.toFixed(3)}`);
             }
 
-            // [步骤 2] Tag 索引召回 (Tag海握手)
-            // 注意：Vexus 搜索如果不传 k，或者索引为空，可能抛错或返回空
-            let tagResults = [];
-            try {
-                // 确保索引已初始化且有数据
-                // if (this.tagIndex && this.tagIndex.size() > 0) ... (vexus-lite 可能没有 size 方法，跳过)
-                tagResults = this.tagIndex.search(searchBuffer, 10);
-            } catch (e) {
-                if(debug) console.warn('[TagMemo] ⚠️ Vexus search exception:', e.message);
-                return { vector: vector, info: null };
-            }
+            // [4] 收集金字塔中的所有 Tags 并应用“世界观门控”与“语言补偿”
+            const allTags = [];
+            const seenTagIds = new Set();
+            // 安全处理 coreTags，过滤非字符串
+            const safeCoreTags = Array.isArray(coreTags) ? coreTags.filter(t => typeof t === 'string') : [];
+            const coreTagSet = new Set(safeCoreTags.map(t => t.toLowerCase()));
             
-            // 🚨 探针 A：如果这里是 0，说明 Tag 索引没数据，或者维度不对
-            if (tagResults.length === 0) {
-                if(debug) console.log('[TagMemo] ⚠️ No tags found in index. (Index empty or dimension mismatch?)');
-                return { vector: vector, info: null };
-            }
+            // 🛡️ 防御性检查：确保 pyramid.levels 存在且为数组
+            const levels = Array.isArray(pyramid.levels) ? pyramid.levels : [];
 
-            // [步骤 2.5] 动态计算 Tag Boost 指数 (Alpha)
-            const avgScore = tagResults.reduce((sum, r) => sum + r.score, 0) / tagResults.length;
-            // 映射范围: [0, 1] -> [1.5, 3.5] (并添加边界限制，防止极端值)
-            const dynamicAlpha = Math.min(3.5, Math.max(1.5, 1.5 + 2.0 * avgScore));
-            // 动态 Beta: 模糊查询时 (avgScore低) 提高降噪常数，宽容高频词
-            const dynamicBeta = 2 + (1 - avgScore) * 3;
-            
-            if(debug) console.log(`[TagMemo] ℹ️ Avg Tag Score: ${avgScore.toFixed(3)}, Alpha: ${dynamicAlpha.toFixed(3)}, Beta: ${dynamicBeta.toFixed(3)}`);
+            levels.forEach(level => {
+                // 🛡️ 防御性检查：确保 level.tags 存在且为数组
+                const tags = Array.isArray(level.tags) ? level.tags : [];
+                
+                tags.forEach(t => {
+                    if (!t || seenTagIds.has(t.id)) return;
+                    
+                    // 🌟 核心 Tag 增强逻辑 (Spotlight)
+                    // 安全访问 t.name
+                    const tagName = t.name ? t.name.toLowerCase() : '';
+                    const isCore = tagName && coreTagSet.has(tagName);
+                    // 🌟 个体相关度微调：如果核心标签本身与查询高度相关，在动态基准上给予额外奖励 (0.95 ~ 1.05x)
+                    const individualRelevance = t.similarity || 0.5;
+                    const coreBoost = isCore ? (dynamicCoreBoostFactor * (0.95 + individualRelevance * 0.1)) : 1.0;
 
-            const tagIds = tagResults.map(r => r.id);
-            const placeholders = tagIds.map(() => '?').join(',');
-
-            // [步骤 3] 优化1：从预计算的共现矩阵中查找关联Tag
-            const coTags = new Map(); // Map<tagId, totalWeight>
-            tagResults.forEach(t1 => {
-                const relatedMap = this.tagCooccurrenceMatrix.get(t1.id);
-                if (relatedMap) {
-                    relatedMap.forEach((weight, t2Id) => {
-                        if (!tagIds.includes(t2Id)) { // 排除原始Tag
-                           coTags.set(t2Id, (coTags.get(t2Id) || 0) + weight * t1.score); // 权重叠加
+                    // A. 语言置信度补偿 (Language Confidence Gating)
+                    // 如果是纯英文技术词汇且当前不是技术语境，引入惩罚
+                    let langPenalty = 1.0;
+                    if (this.config.langConfidenceEnabled) {
+                        // 扩展技术噪音检测：非中文且符合技术命名特征（允许空格以覆盖如 Dadroit JSON Viewer）
+                        // 安全访问 t.name
+                        const tName = t.name || '';
+                        const isTechnicalNoise = !/[\u4e00-\u9fa5]/.test(tName) && /^[A-Za-z0-9\-_.\s]+$/.test(tName) && tName.length > 3;
+                        const isTechnicalWorld = queryWorld !== 'Unknown' && /^[A-Za-z0-9\-_.]+$/.test(queryWorld);
+                        
+                        if (isTechnicalNoise && !isTechnicalWorld) {
+                            // 🌟 阶梯式语言补偿：不再一刀切
+                            // 如果是政治/社会世界观，减轻对英文实体的压制（可能是 Trump, Musk 等重要实体）
+                            // 🌟 更加鲁棒的世界观判定：使用模糊匹配
+                            const isSocialWorld = /Politics|Society|History|Economics|Culture/i.test(queryWorld);
+                            const comp = config.languageCompensator || {};
+                            const basePenalty = queryWorld === 'Unknown'
+                                ? (comp.penaltyUnknown ?? this.config.langPenaltyUnknown)
+                                : (comp.penaltyCrossDomain ?? this.config.langPenaltyCrossDomain);
+                            langPenalty = isSocialWorld ? Math.sqrt(basePenalty) : basePenalty; // 使用平方根软化惩罚
                         }
+                    }
+
+                    // B. 世界观门控 (Worldview Gating)
+                    // 简单实现：如果 Tag 本身有向量，检查其与查询世界的正交性
+                    // 这里暂用 layerDecay 代替复杂的实时投影以保证性能
+                    const layerDecay = Math.pow(0.7, level.level);
+                    
+                    allTags.push({
+                        ...t,
+                        adjustedWeight: (t.contribution || t.weight || 0) * layerDecay * langPenalty * coreBoost,
+                        isCore: isCore
                     });
-                }
+                    seenTagIds.add(t.id);
+                });
             });
 
-            const sortedCoTags = Array.from(coTags.entries())
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, this.config.tagExpandMaxCount);
-
-            let relatedTags = [];
-            if (sortedCoTags.length > 0) {
-                const relatedTagIds = sortedCoTags.map(t => t[0]);
-                const relatedPlaceholders = relatedTagIds.map(() => '?').join(',');
-                const stmt = this.db.prepare(`
-                    SELECT
-                        id, name, vector,
-                        (SELECT COUNT(*) FROM file_tags WHERE tag_id = tags.id) as global_freq
-                    FROM tags
-                    WHERE id IN (${relatedPlaceholders})
-                `);
-                const tagInfoMap = new Map(stmt.all(...relatedTagIds).map(t => [t.id, t]));
-                
-                relatedTags = sortedCoTags.map(([id, weight]) => {
-                    const info = tagInfoMap.get(id);
-                    return info ? { ...info, co_weight: weight } : null;
-                }).filter(Boolean);
+            // [4.5] 逻辑分支拉回 (Logic Pull-back)
+            // 利用共现矩阵拉回与第一梯队 Tag 强相关的逻辑词
+            if (allTags.length > 0 && this.tagCooccurrenceMatrix) {
+                // 🌟 增强逻辑拉回：从前 5 个高权重标签中拉回关联词，且增加拉回深度
+                const topTags = allTags.slice(0, 5);
+                topTags.forEach(parentTag => {
+                    const related = this.tagCooccurrenceMatrix.get(parentTag.id);
+                    if (related) {
+                        // 找回前 4 个最相关的关联词（提升高频实体的召回机会）
+                        const sortedRelated = Array.from(related.entries())
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 4);
+                            
+                        sortedRelated.forEach(([relId, weight]) => {
+                            if (!seenTagIds.has(relId)) {
+                                // 仅记录 ID，稍后统一批量查询
+                                allTags.push({
+                                    id: relId,
+                                    adjustedWeight: parentTag.adjustedWeight * 0.5, // 关联词权重减半
+                                    isPullback: true
+                                });
+                                seenTagIds.add(relId);
+                            }
+                        });
+                    }
+                });
             }
 
-            // 🚨 探针 B：如果这里是 0，说明 file_tags 表是空的，或者 Tag 之间没有关联
-            // 启用【回退策略】：如果找不到扩展词，直接使用步骤 2 召回的 Tag 作为上下文
-            if (relatedTags.length === 0) {
-                if(debug) console.log(`[TagMemo] ℹ️ Sparse graph (0 relations). Fallback to ${tagIds.length} direct tags.`);
+            // [4.6] 核心 Tag 补全 (确保聚光灯不遗漏)
+            if (coreTagSet.size > 0) {
+                const missingCoreTags = Array.from(coreTagSet).filter(ct =>
+                    !allTags.some(at => at.name && at.name.toLowerCase() === ct)
+                );
                 
-                const getDirectTags = this.db.prepare(`SELECT id, name, vector, 10 as co_weight, 100 as global_freq FROM tags WHERE id IN (${placeholders})`);
-                relatedTags = getDirectTags.all(...tagIds);
-                
-                if (relatedTags.length === 0) return { vector: vector, info: null }; // 彻底没救了
+                if (missingCoreTags.length > 0) {
+                    try {
+                        const placeholders = missingCoreTags.map(() => '?').join(',');
+                        const rows = this.db.prepare(`SELECT id, name, vector FROM tags WHERE name IN (${placeholders})`).all(...missingCoreTags);
+                        
+                        // 获取当前 pyramid 的最大权重作为基准
+                        const maxBaseWeight = allTags.length > 0 ? Math.max(...allTags.map(t => t.adjustedWeight / 1.33)) : 1.0;
+
+                        rows.forEach(row => {
+                            if (!seenTagIds.has(row.id)) {
+                                allTags.push({
+                                    id: row.id,
+                                    name: row.name,
+                                    // 虚拟召回的核心标签使用动态计算的加权因子
+                                    adjustedWeight: maxBaseWeight * dynamicCoreBoostFactor,
+                                    isCore: true,
+                                    isVirtual: true // 标记为非向量召回
+                                });
+                                seenTagIds.add(row.id);
+                            }
+                        });
+                    } catch (e) {
+                        console.warn('[TagMemo-V3] Failed to supplement core tags:', e.message);
+                    }
+                }
             }
 
-            // [步骤 4] 向量合成 (高对比度算法)
-            const dim = originalFloat32.length;
+            if (allTags.length === 0) return { vector: originalFloat32, info: null };
+
+            // [5] 批量获取向量与名称 (性能优化：1次查询替代 N次循环查询)
+            const allTagIds = allTags.map(t => t.id);
+            const tagRows = this.db.prepare(
+                `SELECT id, name, vector FROM tags WHERE id IN (${allTagIds.map(() => '?').join(',')})`
+            ).all(...allTagIds);
+            const tagDataMap = new Map(tagRows.map(r => [r.id, r]));
+
+            // [5.5] 语义去重 (Semantic Deduplication)
+            // 目的：消除冗余标签（如“委内瑞拉局势”与“委内瑞拉危机”），为多样性腾出空间
+            const deduplicatedTags = [];
+            const sortedTags = [...allTags].sort((a, b) => b.adjustedWeight - a.adjustedWeight);
+            
+            for (const tag of sortedTags) {
+                const data = tagDataMap.get(tag.id);
+                if (!data || !data.vector) continue;
+                
+                const vec = new Float32Array(data.vector.buffer, data.vector.byteOffset, dim);
+                let isRedundant = false;
+                
+                for (const existing of deduplicatedTags) {
+                    const existingData = tagDataMap.get(existing.id);
+                    const existingVec = new Float32Array(existingData.vector.buffer, existingData.vector.byteOffset, dim);
+                    
+                    // 计算余弦相似度
+                    let dot = 0, normA = 0, normB = 0;
+                    for (let d = 0; d < dim; d++) {
+                        dot += vec[d] * existingVec[d];
+                        normA += vec[d] * vec[d];
+                        normB += existingVec[d] * existingVec[d];
+                    }
+                    const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+                    
+                    const dedupThreshold = config.deduplicationThreshold ?? 0.88;
+                    if (similarity > dedupThreshold) {
+                        isRedundant = true;
+                        // 权重合并：将冗余标签的部分能量转移给代表性标签，并保留 Core 属性
+                        existing.adjustedWeight += tag.adjustedWeight * 0.2;
+                        if (tag.isCore) existing.isCore = true;
+                        break;
+                    }
+                }
+                
+                if (!isRedundant) {
+                    if (!tag.name) tag.name = data.name; // 补全名称
+                    deduplicatedTags.push(tag);
+                }
+            }
+
+            // [6] 构建上下文向量
             const contextVec = new Float32Array(dim);
-            let totalSpikeScore = 0;
+            let totalWeight = 0;
             
-            relatedTags.forEach(t => {
-                if (!t.vector) return;
-                
-                // 必须从 Buffer 转回 Float32Array
-                const v = new Float32Array(t.vector.buffer, t.vector.byteOffset, dim);
-                
-                // 💡 核心算法：指数级毛刺增强 + 对数级降噪
-                // 1. 基础强度：共现次数的 Alpha 次方 (动态增强)
-                let logicStrength = Math.pow(t.co_weight || 1, dynamicAlpha);
-                
-                // 2. 降噪因子：全局频率的对数 (动态 Beta 降噪)
-                let noisePenalty = Math.log((t.global_freq || 1) + dynamicBeta);
-                
-                // 3. 最终得分
-                let score = logicStrength / noisePenalty;
-                
-                // 安全检查
-                if (!isFinite(score) || isNaN(score)) score = 0;
-
-                for (let i = 0; i < dim; i++) {
-                    contextVec[i] += v[i] * score;
+            for (const t of deduplicatedTags) {
+                const data = tagDataMap.get(t.id);
+                if (data && data.vector) {
+                    const v = new Float32Array(data.vector.buffer, data.vector.byteOffset, dim);
+                    for (let d = 0; d < dim; d++) contextVec[d] += v[d] * t.adjustedWeight;
+                    totalWeight += t.adjustedWeight;
                 }
-                totalSpikeScore += score;
-            });
-            
-            // 归一化上下文向量
-            if (totalSpikeScore > 0) {
+            }
+
+            if (totalWeight > 0) {
+                // 归一化上下文向量
                 let mag = 0;
-                for (let i = 0; i < dim; i++) {
-                    contextVec[i] /= totalSpikeScore; // 平均化
-                    mag += contextVec[i] * contextVec[i];
+                for (let d = 0; d < dim; d++) {
+                    contextVec[d] /= totalWeight;
+                    mag += contextVec[d] * contextVec[d];
                 }
                 mag = Math.sqrt(mag);
-                // 再次单位化，确保方向纯净
-                if (mag > 1e-9) {
-                    for (let i = 0; i < dim; i++) contextVec[i] /= mag;
-                }
+                if (mag > 1e-9) for (let d = 0; d < dim; d++) contextVec[d] /= mag;
             } else {
-                return { vector: vector, info: null }; // 计算出问题，回退
+                return { vector: originalFloat32, info: null };
             }
 
-            // [步骤 5] 最终融合
+            // [6] 最终融合
             const fused = new Float32Array(dim);
             let fusedMag = 0;
-            for (let i = 0; i < dim; i++) {
-                fused[i] = (1 - tagBoost) * originalFloat32[i] + tagBoost * contextVec[i];
-                fusedMag += fused[i] * fused[i];
+            for (let d = 0; d < dim; d++) {
+                fused[d] = (1 - effectiveTagBoost) * originalFloat32[d] + effectiveTagBoost * contextVec[d];
+                fusedMag += fused[d] * fused[d];
             }
             
-            // 最终结果单位化
             fusedMag = Math.sqrt(fusedMag);
-            if (fusedMag > 1e-9) {
-                for (let i = 0; i < dim; i++) fused[i] /= fusedMag;
-            }
+            if (fusedMag > 1e-9) for (let d = 0; d < dim; d++) fused[d] /= fusedMag;
 
-            if(debug) console.log(`[TagMemo] ✅ Boost Applied! Fusion complete. (Spikes: ${relatedTags.length})`);
-            
-            // 收集 Tag 信息
-            const matchedTags = relatedTags.map(t => t.name).filter(Boolean);
-            
             return {
                 vector: fused,
                 info: {
-                    matchedTags: matchedTags,
-                    boostFactor: tagBoost,
-                    spikeCount: relatedTags.length,
-                    totalSpikeScore: totalSpikeScore // ✅ 新增：返回总得分
+                    // 🌟 标记核心 Tag 召回情况 (安全映射)
+                    coreTagsMatched: deduplicatedTags.filter(t => t.isCore && t.name).map(t => t.name),
+                    // 仅返回权重足够高的 Tag，过滤掉被压制的噪音，提升召回纯净度
+                    matchedTags: (() => {
+                        if (deduplicatedTags.length === 0) return [];
+                        const maxWeight = Math.max(...deduplicatedTags.map(t => t.adjustedWeight));
+                        return deduplicatedTags.filter(t => {
+                            // 🌟 核心修正：Core Tags 必须始终包含在 Normal Tags 中，防止排挤效应
+                            if (t.isCore) return true;
+
+                            const tName = t.name || '';
+                            const isTech = !/[\u4e00-\u9fa5]/.test(tName) && /^[A-Za-z0-9\-_.\s]+$/.test(tName);
+                            if (isTech) {
+                                // 🌟 软化 TF-IDF 压制：将英文实体的过滤门槛从 0.2 降至 0.08
+                                return t.adjustedWeight > maxWeight * (config.techTagThreshold ?? 0.08);
+                            }
+                            // 🌟 进一步降低门槛：从 0.03 降至 0.015
+                            // 理由：Normal 必须是 Core 的超集，且要容纳高频背景主语
+                            return t.adjustedWeight > maxWeight * (config.normalTagThreshold ?? 0.015);
+                        }).map(t => t.name).filter(Boolean);
+                    })(),
+                    boostFactor: effectiveTagBoost,
+                    epa: { logicDepth, entropy: entropyPenalty, resonance: resonance.resonance },
+                    pyramid: { coverage: features.coverage, novelty: features.novelty, depth: features.depth }
                 }
             };
 
         } catch (e) {
-            console.error('[KnowledgeBase] TagMemo CRITICAL FAIL:', e);
-            return { vector: vector, info: null }; // 绝对底线：任何错误都返回原向量，保证不崩
+            console.error('[KnowledgeBase] TagMemo V3 CRITICAL FAIL:', e);
+            return { vector: originalFloat32, info: null };
         }
     }
 
@@ -559,9 +730,27 @@ class KnowledgeBaseManager {
      * @param {number} tagBoost - 增强因子 (0 到 1)
      * @returns {{vector: Float32Array, info: object|null}} - 返回增强后的向量和调试信息
      */
-    applyTagBoost(vector, tagBoost) {
-        // 包装私有方法，提供稳定的公共接口
-        return this._applyTagBoost(vector, tagBoost);
+    applyTagBoost(vector, tagBoost, coreTags = [], coreBoostFactor = 1.33) {
+        // 🚀 升级：默认使用 V3 增强算法，提供更深层的语义关联和噪音抑制
+        return this._applyTagBoostV3(vector, tagBoost, coreTags, coreBoostFactor);
+    }
+
+    /**
+     * 获取向量的 EPA 分析数据（逻辑深度、共振等）
+     */
+    getEPAAnalysis(vector) {
+        if (!this.epa || !this.epa.initialized) {
+            return { logicDepth: 0.5, resonance: 0, entropy: 0.5, dominantAxes: [] };
+        }
+        const vec = vector instanceof Float32Array ? vector : new Float32Array(vector);
+        const projection = this.epa.project(vec);
+        const resonance = this.epa.detectCrossDomainResonance(vec);
+        return {
+            logicDepth: projection.logicDepth,
+            entropy: projection.entropy,
+            resonance: resonance.resonance,
+            dominantAxes: projection.dominantAxes
+        };
     }
  
     // =========================================================================
@@ -997,12 +1186,22 @@ class KnowledgeBaseManager {
     }
 
     _extractTags(content) {
-        const match = content.match(/Tag:\s*(.+)$/im);
-        if (!match) return [];
-        let tags = match[1].split(/[,，、]/).map(t => t.trim()).filter(Boolean);
-        
-        // 🔧 修复：清理每个tag末尾的句号
-        tags = tags.map(t => t.replace(/[。.]+$/g, '').trim()).filter(Boolean);
+        // 增强型正则：支持多行 Tag 提取，并兼容多种分隔符 (中英文逗号、分号、顿号、竖线)
+        const tagLines = content.match(/Tag:\s*(.+)$/gim);
+        if (!tagLines) return [];
+
+        let allTags = [];
+        tagLines.forEach(line => {
+            const tagContent = line.replace(/Tag:\s*/i, '');
+            const splitTags = tagContent.split(/[,，、;|｜]/).map(t => t.trim()).filter(Boolean);
+            allTags.push(...splitTags);
+        });
+
+        // 🔧 修复：清理每个tag末尾的句号，并应用统一的 Embedding 预处理（处理多余空格、表情等）
+        let tags = allTags.map(t => {
+            let cleaned = t.replace(/[。.]+$/g, '').trim();
+            return this._prepareTextForEmbedding(cleaned);
+        }).filter(t => t !== '[EMPTY_CONTENT]');
         
         if (this.config.tagBlacklistSuper.length > 0) {
             const superRegex = new RegExp(this.config.tagBlacklistSuper.join('|'), 'g');
@@ -1043,6 +1242,10 @@ class KnowledgeBaseManager {
     async shutdown() {
         console.log('[KnowledgeBase] shutting down...');
         await this.watcher?.close();
+        if (this.ragParamsWatcher) {
+            this.ragParamsWatcher.close();
+            this.ragParamsWatcher = null;
+        }
 
         // 确保所有待保存的索引都被写入磁盘
         for (const [name, timer] of this.saveTimers) {

@@ -43,45 +43,46 @@
         <div class="main-content">
             <!-- 左侧：工具选择区 -->
             <div class="left-panel">
-                <!-- 过滤和搜索 -->
-                <div class="filter-section">
-                    <input type="search" id="tool-search" placeholder="🔍 搜索工具...">
-                    <div class="filter-actions">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="show-selected-only">
-                            <span>只显示已选</span>
-                        </label>
-                        <button id="select-all-btn" class="btn-secondary">全选</button>
-                        <button id="deselect-all-btn" class="btn-secondary">清空</button>
-                    </div>
-                    
-                    <!-- 插件显示设置 -->
-                    <div class="plugin-filter-section">
-                        <button id="toggle-plugin-filter-btn" class="btn-plugin-filter">
-                            <span class="icon">⚙️</span>
-                            <span class="text">插件显示设置</span>
-                            <span class="arrow">▼</span>
-                        </button>
-                        <div id="plugin-filter-panel" class="plugin-filter-panel" style="display: none;">
-                            <div class="plugin-filter-header">
-                                <span>选择要显示的插件：</span>
-                                <div class="plugin-filter-actions">
-                                    <button id="plugin-select-all-btn" class="btn-filter-action">全选</button>
-                                    <button id="plugin-deselect-all-btn" class="btn-filter-action">清空</button>
+                <!-- 工具列表 -->
+                <div class="tools-container collapsible-section">
+                    <h2 class="section-header">可用工具 <span id="tool-count">(加载中...)</span> <span class="toggle-icon">▼</span></h2>
+                    <div class="section-content">
+                        <!-- 过滤和搜索 -->
+                        <div class="filter-section">
+                            <input type="search" id="tool-search" placeholder="🔍 搜索工具...">
+                            <div class="filter-actions">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="show-selected-only">
+                                    <span>只显示已选</span>
+                                </label>
+                                <button id="select-all-btn" class="btn-secondary">全选</button>
+                                <button id="deselect-all-btn" class="btn-secondary">清空</button>
+                            </div>
+                            
+                            <!-- 插件显示设置 -->
+                            <div class="plugin-filter-section">
+                                <button id="toggle-plugin-filter-btn" class="btn-plugin-filter">
+                                    <span class="icon">⚙️</span>
+                                    <span class="text">插件显示设置</span>
+                                    <span class="arrow">▼</span>
+                                </button>
+                                <div id="plugin-filter-panel" class="plugin-filter-panel" style="display: none;">
+                                    <div class="plugin-filter-header">
+                                        <span>选择要显示的插件：</span>
+                                        <div class="plugin-filter-actions">
+                                            <button id="plugin-select-all-btn" class="btn-filter-action">全选</button>
+                                            <button id="plugin-deselect-all-btn" class="btn-filter-action">清空</button>
+                                        </div>
+                                    </div>
+                                    <div id="plugin-filter-list" class="plugin-filter-list">
+                                        <!-- 插件复选框将动态加载 -->
+                                    </div>
                                 </div>
                             </div>
-                            <div id="plugin-filter-list" class="plugin-filter-list">
-                                <!-- 插件复选框将动态加载 -->
-                            </div>
                         </div>
-                    </div>
-                </div>
-
-                <!-- 工具列表 -->
-                <div class="tools-container">
-                    <h2>可用工具 <span id="tool-count">(加载中...)</span></h2>
-                    <div id="tools-list" class="tools-list">
-                        <!-- 工具项将动态加载 -->
+                        <div id="tools-list" class="tools-list">
+                            <!-- 工具项将动态加载 -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -89,29 +90,32 @@
             <!-- 右侧：配置和预览区 -->
             <div class="right-panel">
                 <!-- 配置文件管理 -->
-                <div class="config-manager">
-                    <h2>📁 配置管理</h2>
-                    <div class="config-selector">
-                        <select id="config-file-select">
-                            <option value="">-- 新建配置文件 --</option>
-                        </select>
-                        <input type="text" id="new-config-name" placeholder="输入配置文件名..." style="display: none;">
+                <div class="config-manager collapsible-section">
+                    <h2 class="section-header">📁 配置管理 <span class="toggle-icon">▼</span></h2>
+                    <div class="section-content">
+                        <div class="config-selector">
+                            <select id="config-file-select">
+                                <option value="">-- 新建配置文件 --</option>
+                            </select>
+                            <input type="text" id="new-config-name" placeholder="输入配置文件名..." style="display: none;">
+                        </div>
+                        
+                        <div class="config-actions">
+                            <button id="load-config-btn" class="btn-primary">加载</button>
+                            <button id="create-config-btn" class="btn-primary">新建</button>
+                            <button id="delete-config-btn" class="btn-danger" disabled>删除</button>
+                            <button id="save-config-btn" class="btn-success" disabled>💾 保存</button>
+                        </div>
+                        
+                        <span id="config-status" class="status-message"></span>
                     </div>
-                    
-                    <div class="config-actions">
-                        <button id="load-config-btn" class="btn-primary">加载</button>
-                        <button id="create-config-btn" class="btn-primary">新建</button>
-                        <button id="delete-config-btn" class="btn-danger" disabled>删除</button>
-                        <button id="save-config-btn" class="btn-success" disabled>💾 保存</button>
-                    </div>
-                    
-                    <span id="config-status" class="status-message"></span>
                 </div>
 
                 <!-- 预览区域 -->
-                <div class="preview-section">
-                    <h2>📝 生成预览</h2>
-                    <div class="preview-controls">
+                <div class="preview-section collapsible-section">
+                    <h2 class="section-header">📝 生成预览 <span class="toggle-icon">▼</span></h2>
+                    <div class="section-content">
+                        <div class="preview-controls">
                         <label class="checkbox-label">
                             <input type="checkbox" id="include-header" checked>
                             <span>包含文件头</span>
@@ -123,7 +127,8 @@
                         <button id="copy-preview-btn" class="btn-copy">📋 复制</button>
                         <button id="export-txt-btn" class="btn-export" disabled>📤 导出TXT</button>
                     </div>
-                    <textarea id="preview-output" readonly placeholder="选择工具后将在此显示配置内容..."></textarea>
+                        <textarea id="preview-output" readonly placeholder="选择工具后将在此显示配置内容..."></textarea>
+                    </div>
                 </div>
             </div>
         </div>

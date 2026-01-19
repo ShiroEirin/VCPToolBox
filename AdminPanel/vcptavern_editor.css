@@ -16,6 +16,9 @@ body {
     border-radius: 8px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     border: 1px solid var(--border-color);
+    height: auto;
+    min-height: calc(100vh - 40px);
+    box-sizing: border-box;
 }
 
 h1, h2 {
@@ -178,6 +181,7 @@ html[data-theme='light'] .preset-manager button {
    }
    .container {
        padding: 15px;
+       min-height: calc(100vh - 20px);
    }
    .preset-manager {
        flex-direction: column;

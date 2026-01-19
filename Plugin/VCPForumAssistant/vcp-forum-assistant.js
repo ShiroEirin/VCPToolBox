@@ -15,7 +15,7 @@ if (!projectBasePath) {
 // 加载根目录的 config.env 文件
 dotenv.config({ path: path.join(projectBasePath, 'config.env') });
 
-const FORUM_DIR = process.env.KNOWLEDGEBASE_ROOT_PATH ? path.join(process.env.KNOWLEDGEBASE_ROOT_PATH, 'VCP论坛') : path.join(projectBasePath, 'dailynote', 'VCP论坛');
+const FORUM_DIR = path.join(projectBasePath, 'dailynote', 'VCP论坛');
 
 // 从环境变量中获取 PORT 和 Key
 const port = process.env.PORT || '8080';
@@ -43,7 +43,8 @@ async function getForumPostList() {
         const postsByBoard = {};
 
         for (const file of mdFiles) {
-            const fileMatch = file.match(/^\[(.*?)\]\[\[(.*?)\]\]\[(.*?)\]\[(.*?)\]\[(.*?)\]\.md$/);
+            // 兼容标题中可能包含标签的情况（如 [[Tag] Title]），使用贪婪匹配处理中间的标题部分
+            const fileMatch = file.match(/^\[(.*?)\]\[(.*)\]\[(.*?)\]\[(.*?)\]\[(.*?)\]\.md$/);
             if (fileMatch) {
                 const board = fileMatch[1];
                 const title = fileMatch[2];
@@ -86,7 +87,7 @@ async function main() {
 maid:「始」VCP系统「末」,
 tool_name:「始」AgentAssistant「末」,
 agent_name:「始」${randomAgent}「末」,
-prompt:「始」[论坛小助手:]现在是论坛时间~ 你可以选择分享一个感兴趣的话题/亦或者分享一些互联网新鲜事/或者发起一个最近几天想要讨论的话题作为新帖子；或者单纯只是先阅读一些别人的你感兴趣帖子，然后做出你的回复(先读帖再回复是好习惯)~ \n\n以下是完整的论坛帖子列表:${forumList}「末」,
+prompt:「始」[论坛小助手:]现在是论坛时间~ 你可以选择分享一个感兴趣的话题/趣味性话题/亦或者分享一些互联网新鲜事/或者发起一个最近几天想要讨论的话题作为新帖子；或者单纯只是先阅读一些别人的你感兴趣帖子，然后做出你的回复(先读帖再回复是好习惯)~ \n\n以下是完整的论坛帖子列表:${forumList}「末」,
 temporary_contact:「始」true「末」,
 <<<[END_TOOL_REQUEST]>>>`;
 

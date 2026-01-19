@@ -14,6 +14,7 @@ class IncrementalLogViewer {
         this.intervalId = null;
         this.isLoading = false;
         this.currentFilter = '';
+        this.isReversed = false;        // 是否倒序显示
         this.userScrolling = false;     // 用户是否在滚动中
         this.scrollTimeout = null;
         
@@ -46,6 +47,8 @@ class IncrementalLogViewer {
             path: document.getElementById('server-log-path-display'),
             filter: document.getElementById('server-log-filter'),
             copyBtn: document.getElementById('copy-server-log-button'),
+            clearBtn: document.getElementById('clear-server-log-button'),
+            reverseBtn: document.getElementById('reverse-server-log-button'),
             lineCount: document.getElementById('server-log-line-count'),
         };
     }
@@ -67,15 +70,56 @@ class IncrementalLogViewer {
     }
 
     /**
+     * 清空服务器日志文件
+     */
+    async clearLog() {
+        if (!confirm('确定要清空服务器日志文件吗？此操作不可撤销。')) {
+            return;
+        }
+
+        try {
+            this.showStatus('正在清空日志...', 'info');
+            const result = await apiFetch(`${API_BASE_URL}/server-log/clear`, {
+                method: 'POST'
+            });
+
+            if (result.success) {
+                this.reset();
+                this.renderLog();
+                this.showStatus('日志已清空', 'success');
+                showMessage('服务器日志已清空', 'success');
+            } else {
+                throw new Error(result.error || '未知错误');
+            }
+        } catch (error) {
+            console.error('清空日志失败:', error);
+            this.showStatus(`清空失败: ${error.message}`, 'error');
+            showMessage(`清空日志失败: ${error.message}`, 'error');
+        }
+    }
+
+    /**
      * 设置事件监听器
      */
     setupEventListeners() {
-        const { content, filter, copyBtn } = this.elements;
+        const { content, filter, copyBtn, clearBtn, reverseBtn } = this.elements;
 
         // 复制按钮
         if (copyBtn && !copyBtn.dataset.listenerAttached) {
             copyBtn.addEventListener('click', () => this.copyToClipboard());
             copyBtn.dataset.listenerAttached = 'true';
+        }
+
+        // 清空按钮
+        if (clearBtn && !clearBtn.dataset.listenerAttached) {
+            clearBtn.addEventListener('click', () => this.clearLog());
+            clearBtn.dataset.listenerAttached = 'true';
+        }
+
+        // 倒序按钮
+        if (reverseBtn && !reverseBtn.dataset.listenerAttached) {
+            reverseBtn.addEventListener('click', () => this.toggleReverse());
+            reverseBtn.dataset.listenerAttached = 'true';
         }
 
         // 过滤输入（防抖）
@@ -224,13 +268,17 @@ class IncrementalLogViewer {
         requestAnimationFrame(() => {
             const fragment = document.createDocumentFragment();
             
-            // 如果已有内容，先添加换行
-            if (content.textContent.length > 0) {
-                fragment.appendChild(document.createTextNode('\n'));
-            }
+            lines.forEach(line => {
+                const div = document.createElement('div');
+                div.textContent = line;
+                fragment.appendChild(div);
+            });
             
-            fragment.appendChild(document.createTextNode(lines.join('\n')));
-            content.appendChild(fragment);
+            if (this.isReversed) {
+                content.prepend(fragment);
+            } else {
+                content.appendChild(fragment);
+            }
         });
     }
 
@@ -250,18 +298,16 @@ class IncrementalLogViewer {
         requestAnimationFrame(() => {
             const fragment = document.createDocumentFragment();
             
-            if (content.innerHTML.length > 0) {
-                fragment.appendChild(document.createTextNode('\n'));
-            }
-
-            matchedLines.forEach((line, index) => {
-                if (index > 0) {
-                    fragment.appendChild(document.createTextNode('\n'));
-                }
-                fragment.appendChild(this.createHighlightedLine(line));
+            matchedLines.forEach((line) => {
+                const div = this.createHighlightedLine(line);
+                fragment.appendChild(div);
             });
 
-            content.appendChild(fragment);
+            if (this.isReversed) {
+                content.prepend(fragment);
+            } else {
+                content.appendChild(fragment);
+            }
         });
     }
 
@@ -269,12 +315,12 @@ class IncrementalLogViewer {
      * 创建高亮的行元素
      */
     createHighlightedLine(line) {
-        const span = document.createElement('span');
+        const div = document.createElement('div');
         const escapedFilter = this.currentFilter.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
         const regex = new RegExp(`(${escapedFilter})`, 'gi');
         
-        span.innerHTML = line.replace(regex, (match) => `<mark class="highlight">${match}</mark>`);
-        return span;
+        div.innerHTML = line.replace(regex, (match) => `<mark class="highlight">${match}</mark>`);
+        return div;
     }
 
     /**
@@ -285,11 +331,19 @@ class IncrementalLogViewer {
         if (!content) return;
 
         requestAnimationFrame(() => {
+            content.innerHTML = '';
             if (this.currentFilter) {
                 this.renderFilteredLog();
             } else {
-                // 直接使用 textContent，比 innerHTML 快且安全
-                content.textContent = this.logLines.join('\n');
+                const fragment = document.createDocumentFragment();
+                const linesToRender = this.isReversed ? [...this.logLines].reverse() : this.logLines;
+                
+                linesToRender.forEach(line => {
+                    const div = document.createElement('div');
+                    div.textContent = line;
+                    fragment.appendChild(div);
+                });
+                content.appendChild(fragment);
             }
             this.updateLineCount();
         });
@@ -306,16 +360,18 @@ class IncrementalLogViewer {
         const escapedFilter = this.currentFilter.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
         const regex = new RegExp(escapedFilter, 'gi');
 
-        for (const line of this.logLines) {
+        const linesToProcess = this.isReversed ? [...this.logLines].reverse() : this.logLines;
+        
+        for (const line of linesToProcess) {
             if (line.toLowerCase().includes(this.currentFilter)) {
                 matchedLines.push(
-                    line.replace(regex, (match) => `<mark class="highlight">${match}</mark>`)
+                    `<div>${line.replace(regex, (match) => `<mark class="highlight">${match}</mark>`)}</div>`
                 );
             }
         }
 
         if (matchedLines.length > 0) {
-            content.innerHTML = matchedLines.join('\n');
+            content.innerHTML = matchedLines.join('');
         } else {
             content.textContent = `未找到包含 "${filter.value}" 的日志`;
         }
@@ -330,11 +386,35 @@ class IncrementalLogViewer {
     }
 
     /**
+     * 切换倒序显示
+     */
+    toggleReverse() {
+        this.isReversed = !this.isReversed;
+        const { content, reverseBtn } = this.elements;
+        
+        if (content) {
+            if (this.isReversed) {
+                content.scrollTop = 0;
+            }
+        }
+        
+        if (reverseBtn) {
+            reverseBtn.innerHTML = this.isReversed ? '🔃 顺序显示' : '🔃 倒序显示';
+            reverseBtn.classList.toggle('active', this.isReversed);
+        }
+        
+        this.renderLog();
+        if (!this.isReversed) {
+            this.scrollToBottomIfNeeded(true);
+        }
+    }
+
+    /**
      * 智能滚动到底部
      */
     scrollToBottomIfNeeded(force = false) {
         const { content } = this.elements;
-        if (!content) return;
+        if (!content || this.isReversed) return;
 
         // 如果用户正在滚动查看历史，不要打断
         if (this.userScrolling && !force) return;

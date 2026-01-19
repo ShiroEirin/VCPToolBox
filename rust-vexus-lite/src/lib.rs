@@ -14,6 +14,14 @@ pub struct SearchResult {
     pub score: f64,
 }
 
+#[napi(object)]
+pub struct SvdResult {
+    pub u: Vec<f64>, // 扁平化的正交基底向量集 (k * dim)
+    pub s: Vec<f64>, // 特征值 (奇异值)
+    pub k: u32,
+    pub dim: u32,
+}
+
 /// 统计信息
 #[napi(object)]
 pub struct VexusStats {
@@ -264,6 +272,62 @@ impl VexusIndex {
             table_type,
             filter_diary_name,
             dimensions: self.dimensions,
+        })
+    }
+
+    /// 高性能 SVD 分解 (用于 EPA 基底构建)
+    /// flattened_vectors: n * dim 的扁平化向量数组
+    /// n: 向量数量
+    /// max_k: 最大保留的主成分数量
+    #[napi]
+    pub fn compute_svd(&self, flattened_vectors: Buffer, n: u32, max_k: u32) -> Result<SvdResult> {
+        let dim = self.dimensions as usize;
+        let n = n as usize;
+        let max_k = max_k as usize;
+
+        let vec_slice: &[f32] = unsafe {
+            std::slice::from_raw_parts(
+                flattened_vectors.as_ptr() as *const f32,
+                flattened_vectors.len() / std::mem::size_of::<f32>(),
+            )
+        };
+
+        if vec_slice.len() != n * dim {
+            return Err(Error::from_reason(format!(
+                "Flattened vectors length mismatch: expected {}, got {}",
+                n * dim,
+                vec_slice.len()
+            )));
+        }
+
+        // 使用 nalgebra 进行 SVD 分解
+        // M 是 n x dim 矩阵
+        use nalgebra::DMatrix;
+        let matrix = DMatrix::from_row_slice(n, dim, vec_slice);
+        
+        // 计算 SVD: M = U * S * V^T
+        // 我们需要的是 V^T 的行，它们是原始空间中的主成分
+        let svd = matrix.svd(false, true);
+        
+        let s = svd.singular_values.as_slice().iter().map(|&x| x as f64).collect::<Vec<_>>();
+        let v_t = svd.v_t.ok_or_else(|| Error::from_reason("Failed to compute V^T matrix".to_string()))?;
+        
+        let k = std::cmp::min(s.len(), max_k);
+        let mut u_flattened = Vec::with_capacity(k * dim);
+        
+        for i in 0..k {
+            let row = v_t.row(i);
+            // nalgebra 的 row view 可能不连续，手动迭代以确保安全
+            for &val in row.iter() {
+                u_flattened.push(val as f64);
+            }
+        }
+
+        Ok(SvdResult {
+            u: u_flattened,
+            s: s[..k].to_vec(),
+            k: k as u32,
+            dim: dim as u32,
         })
     }
 }
