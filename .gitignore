@@ -202,25 +202,18 @@ docker-compose.yml
 .spec-workflow/
 .serena/
 
-# VectorStore binary and map files (AI model data)
-VectorStore/*.bin
-VectorStore/*_map.json
-VectorStore/diary_name_vectors.json
-VectorStore/manifest.json
-VectorStore/*.json
-
 # Snow AI tool cache
 .snow/
-
-# VectorStore index and database files (generated at runtime)
-VectorStore/*.usearch
-VectorStore/knowledge_base.sqlite*
 
 # Build target directory
 target/
 
 # Plugin binary cache files (运行时二进制缓存，不应提交)
 **/*.bin
+# 但允许 VectorStore 目录的文件被提交
+!VectorStore/*.bin
+!VectorStore/*_map.json
+!VectorStore/*.json
 
 # AI agent and system configuration files
 agent_map.json
