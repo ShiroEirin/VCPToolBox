@@ -3,7 +3,7 @@ const fsSync = require('fs');
 const path = require('path');
 const glob = require('glob');
 const { minimatch } = require('minimatch');
-const pdf = require('pdf-parse');
+// pdf-parse 改为动态导入，因为其依赖 pdfjs-dist 已改为纯 ESM 模块
 const mammoth = require('mammoth');
 const ExcelJS = require('exceljs');
 const axios = require('axios');
@@ -275,6 +275,8 @@ async function readFile(filePath, encoding = 'utf8') {
     const videoExtensions = ['.mp4', '.webm', '.mov'];
 
     if (extension === '.pdf') {
+      // 动态导入 pdf-parse，因为其依赖 pdfjs-dist 是纯 ESM 模块
+      const pdf = (await import('pdf-parse')).default;
       const data = await pdf(fileBuffer);
       content = data.text;
       isExtracted = true;
