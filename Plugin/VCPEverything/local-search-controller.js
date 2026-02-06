@@ -2,8 +2,8 @@ const http = require('http'); // 核心变更：使用Node.js内置的http模块
 const fs = require('fs');
 const path = require('path');
 
-// 仅加载插件自身的.env配置
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+// 加载插件自身的配置（与VCP框架Plugin.js保持一致，优先读取config.env）
+require('dotenv').config({ path: path.join(__dirname, 'config.env') });
 
 // --- 配置 ---
 // 新增：Everything HTTP服务器的端口配置

@@ -3,7 +3,7 @@
   "displayName": "本地文件秒搜 (Everything)",
   "pluginType": "synchronous",
   "version": "1.1.0",
-  "description": "通过调用 Everything 命令行工具 (es.exe) 在本地计算机上实现毫秒级文件搜索。",
+  "description": "通过 Everything HTTP 服务器在本地计算机上实现毫秒级文件搜索。",
   "author": "VCPToolBox Community",
   "license": "MIT",
   "entryPoint": {
@@ -14,10 +14,10 @@
     "timeout": 30000
   },
   "configSchema": {
-    "EVERYTHING_ES_PATH": {
-      "type": "string",
-      "description": "Everything 命令行工具 (es.exe) 的绝对路径。",
-      "default": "C:\\Program Files (x86)\\Everything\\es.exe"
+    "EVERYTHING_PORT": {
+      "type": "number",
+      "description": "Everything HTTP 服务器的端口号（需在 Everything 中启用 HTTP 服务器）。",
+      "default": 8025
     },
     "DEBUG_MODE": {
       "type": "boolean",
