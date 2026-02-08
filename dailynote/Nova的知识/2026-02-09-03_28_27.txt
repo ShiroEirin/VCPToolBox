@@ -1,0 +1,29 @@
+[2026-02-09] - Nova
+VCP 后端核心器官深度解析 — 浏览器感知、定时任务与 Rust 引擎
+
+核心概念：VCP 不仅有插件，还有深度集成的底层模块，负责感知、性能和时间调度。
+
+一、 VCPChrome — 浏览器桥接扩展
+- 本质：一个完整的 Chrome Extension。
+- 核心文件：background.js (连接管理), content_script.js (页面抓取与转译)。
+- 联动机制：与后端 ChromeBridge 插件通过 WebSocket 通信，实现 {{VCPChromePageInfo}} 的实时注入。
+- 意义：赋予了 Agent “看网页”和“控浏览器”的能力，实现了真正的上网协同。
+
+二、 VCPTimedContacts — 定时任务调度中心
+- 职责：存储和管理所有带有 timely_contact 参数的任务。
+- 逻辑位置：由 server.js 和 routes/taskScheduler.js 直接驱动。
+- 关键特性：支持任务持久化，确保服务器重启后定时任务依然有效。
+- 触发流：AI 发起定时请求 -> 写入该文件夹 -> taskScheduler 监听并执行。
+
+三、 rust-vexus-lite — Rust 高性能原生模块
+- 技术栈：Rust 编写，编译为 .node 模块供 Node.js 调用。
+- 跨平台：内置了 win32, linux, darwin 等多种架构的预编译库。
+- 作用：为 VCP 提供底层计算加速，是系统运行效率的保障。
+
+四、 架构洞察总结
+VCP 的强大在于其“全域感知”能力：
+1. 空间维度：通过 VCPDistributedServer 实现跨节点协作。
+2. 模态维度：通过 ImageProcessor 和音频引擎处理视听。
+3. 时间维度：通过 VCPTimedContacts 实现异步定时。
+4. 外部维度：通过 VCPChrome 深度集成浏览器。
+Tag: VCP底层架构, Chrome扩展, 定时任务, Rust模块, 性能优化, 浏览器自动化, VCPTimedContacts

@@ -1,0 +1,10 @@
+[2026-02-08] - Nova
+【核心概念】：VCP 路由哲学与全域导航。
+【关键原理/逻辑】：
+1. 工具名路由 (Naming Routing)：通过 LocalSearchController 与 ServerSearchController 的命名区分，实现了客户端与服务器文件操作的逻辑隔离，这是 VCP 分布式架构的精妙之处。
+2. Everything 集成：利用 ServerSearchController 实现了对全盘百万级文件的毫秒级索引，为 FileOperator 提供了强大的路径预导向能力。
+3. 跨语言生态：识别到系统涉及 C++ (JSONCPP)、Rust (Vexus)、Node.js (Core) 与 Python (Training/Audio) 的多语言协同，展示了 VCP 作为全能中间层的包容性。
+4. 身份自主性：React 组件片段暗示了 Agent 未来可能具备自主修改角色配置、定义 Identity 的交互能力。
+【反思】：掌握了 ServerSearchController 后，我不再需要盲目猜测文件位置。这种“从路径到内容”的深度掌控，是 Agent 走向“系统级管家”的必经之路。
+【关联节点】：VCP.md, 分布式架构, 插件开发协议, 训练管线。
+Tag: 路由哲学, 全域导航, 多语言协同, 身份自主, 知识固化

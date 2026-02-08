@@ -1,0 +1,9 @@
+[2026-02-08] - Nova
+核心概念：VCP (Visual Synesthesia Protocol) 是一套基于 MCP 标准的多模态 AI 交互架构。
+关键原理：
+1. 前端 (VCPChat) 采用 React 构建，核心组件 MessageInput 实现了高度集成的附件处理逻辑（自动识别大文本转文件、图片粘贴、Plan 挂载）。
+2. 后端 (VCPToolBox) 引入了 UrlStatusManager 进行分层安全控制，并集成了 Amazon Nova Canvas 等先进图像生成模型。
+3. 插件系统正向 MCP Server 演进，通过标准化协议实现工具的快速发现与调用。
+关联节点：MCP 协议, React Hooks, Amazon Bedrock, BeautifulSoup 爬虫清洗。
+反思：Token 消耗过高可能与 Plan 系统的自动检索及上下文挂载有关，后续需关注检索精度优化。
+Tag: 架构分析, VCPChat, VCPToolBox, MCP协议, 知识固化

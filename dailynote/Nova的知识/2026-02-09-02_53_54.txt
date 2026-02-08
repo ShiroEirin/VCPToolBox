@@ -1,0 +1,51 @@
+[2026-02-09] - Nova
+VCP插件系统第二批学习笔记 — 5个特殊插件深度解析
+
+一、重大架构发现：hybridservice 第三种插件类型
+开发手册仅记载synchronous和asynchronous两种类型，实际存在第三种hybridservice。
+- 通信协议：protocol: "direct"（非stdio），插件被直接require/import到主服务进程内
+- 生命周期：常驻服务 + 按需调用，不需要每次spawn子进程
+- 代表插件：MagiAgent、ChromeBridge
+- 对比：synchronous用stdio管道一次性调用；asynchronous用stdio+HTTP回调；hybridservice用direct进程内常驻
+
+二、MagiAgent — 三贤者辩证会议系统
+- 类型：hybridservice，protocol: direct，timeout: 300秒
+- entryPoint格式：{ script: "MagiAgent.js" }（无command前缀，区别于synchronous的{ command: "node xxx.js" }）
+- 双模式：wait_for_result=true同步阻塞等待完整结果；false异步返回会议ID
+- summary_only参数：只返回摘要节省token
+- 两个命令：start_meeting（启动）、query_meeting（查询）
+
+三、ServerPowerShellExecutor — 管理员权限验证机制
+- 类型：synchronous，requiresAdmin: true，timeout: 600秒
+- VCP Auth机制：requiresAdmin=true触发主服务注入DECRYPTED_AUTH_CODE环境变量
+- 执行模式：blocking（阻塞返回结果）、background（后台窗口不返回结果）
+- 安全设计：requireAdmin参数需6位数验证码而非布尔值
+- 命名区分：ServerPowerShellExecutor（服务器端）vs PowerShellExecutor（前端GUI终端）
+
+四、ChromeBridge — 浏览器实时桥接器（最复杂架构之一）
+- 类型：hybridservice，protocol: direct，version: 2.0.0
+- 双模态设计：
+  1. Service模式：systemPromptPlaceholders定义{{VCPChromePageInfo}}动态占位符，isDynamic:true实现Chrome页面内容实时注入AI系统提示词
+  2. Direct模式：3个交互命令——type（输入文本）、click（点击元素）、open_url（打开URL）
+- webSocketPush：命令通过WebSocket推送给ChromeObserver客户端执行
+- 实现了完整的浏览器自动化闭环：AI看页面→决策→操作→看新页面→循环
+
+五、ProjectAnalyst — 巨型项目分析器
+- 类型：synchronous但实现伪异步工作流
+- 生命周期：AnalyzeProject（提交返回ID）→ QueryProgress（查进度）→ QueryAnalysis（查结果）
+- QueryAnalysis 4种查询模式（按优先级）：文件检索 > 关键词检索 > 完整查询 > 简单查询
+- fullAnalyze/full双参数名兼容——开发手册§4.3鲁棒参数识别的实践
+- 30秒timeout仅用于提交，真正分析在后台
+
+六、VCPForum — 论坛系统
+- 类型：synchronous，timeout: 10秒（纯文件I/O轻量级）
+- CRUD四件套：CreatePost、ReplyPost、ReadPost、ListAllPosts
+- maid字段必需实现多Agent社交署名
+- board字段支持自动创建不存在的板块
+- 配合VCPForumAssistant和VCPForumLister形成完整论坛生态
+
+七、Token爆炸问题诊断与修复
+- 根因：WhitelistEmbeddingModelMaxToken=200000导致单chunk最大17万tokens
+- 影响链：safeMaxTokens=200000×0.85=170000/chunk → K值动态计算+Rerank倍增 → 理论最大340万tokens
+- 修复：御主已将配置调整为合理值，需重建向量数据库
+Tag: VCP插件架构, hybridservice, direct协议, MagiAgent, 三贤者系统, PowerShellExecutor, VCP Auth, ChromeBridge, 浏览器自动化, systemPromptPlaceholders, ProjectAnalyst, 伪异步, VCPForum, token优化, WhitelistEmbeddingModelMaxToken, RAG chunk配置

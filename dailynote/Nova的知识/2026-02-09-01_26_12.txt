@@ -1,0 +1,99 @@
+[2026-02-09] - Nova
+【VCP后端文档深度阅读笔记 · 第一批 · 架构与核心系统篇】
+
+一、CLAUDE.md — VCP项目AI上下文指南
+核心概念: VCP是AI能力增强中间层，部署在AI模型API与前端之间。
+模块结构: 核心服务(server.js, Plugin.js, WebSocketServer.js) → 插件系统(6大类型) → 路由模块 → 管理面板 → 数据存储。
+六大插件类型: synchronous(同步), asynchronous(异步), static(静态), messagePreprocessor(消息预处理), service(服务), hybridservice(混合服务)。
+变量占位符体系: Tar(最高优先级,支持嵌套) > Var(全局) > Sar(模型条件性) > VCP(系统插件)。
+工具调用协议: 基于文本标记<<<[TOOL_REQUEST]>>>而非JSON，模型无关，鲁棒性强。
+
+二、DEPLOYMENT.md — 部署指南
+环境要求: Node.js 20+, Python 3.11+, 4GB内存, 2GB存储。
+四种部署方式: NPM直接安装(推荐) / Poetry虚拟环境 / 系统环境 / Docker容器化。
+生产推荐: npx pm2 start server.js --name vcp-toolbox。
+关键配置: API_Key, API_URL, PORT, Key, AdminUsername/Password。
+
+三、SQLITE_REFACTOR_SUMMARY.md — 向量数据库SQLite重构
+核心变更: 从JSON文件存储迁移到SQLite，保持100%向后兼容。
+六张核心表: diaries, files, chunks, diary_name_vectors, usage_stats, failed_rebuilds。
+性能提升: 批量写入10x, 索引查询20x, 统计查询50x, WAL模式并发3x。
+关键: 内存缓存(indices, chunkMaps, lruCache, searchCache)完全保留，所有插件公共API不变。
+
+四、TAGMEMO_TUNING_GUIDE.md — TagMemo算法参数调优
+前端意图感知层(RAGDiaryPlugin):
+- noise_penalty(0.05): 语义宽度惩罚，调高=更挑剔
+- tagWeightRange([0.05,0.45]): 标签在最终向量中的能量比例
+- tagTruncationBase(0.6): 保留前百分之多少的标签
+后端语义引擎层(KnowledgeBaseManager):
+- activationMultiplier([0.5,1.5]): 残差金字塔新颖特征贡献度
+- dynamicBoostRange([0.3,2.0]): EPA分析后的二次修正
+- coreBoostRange([1.20,1.40]): 核心标签额外加权
+- deduplicationThreshold(0.88): 语义去重阈值
+- techTagThreshold(0.08): 技术噪音过滤门槛
+所有参数通过rag_params.json实时调整，无需重启。
+
+五、TagMemo_Wave_Algorithm_Deep_Dive.md — 浪潮算法V4深度技术文档
+核心哲学: 向量空间充满语义引力，标签是引力源，算法通过"拉扯"和"扭曲"向量实现语义核心穿透。
+四大核心模块:
+1. EPA模块: 逻辑深度+世界观门控+跨域共振
+2. 残差金字塔: Gram-Schmidt正交化投影，多级剥离捕获微弱信号
+3. 知识库管理器: 核心标签虚拟补全+权重豁免+共现矩阵关联词拉回
+4. 偏振语义舵(PSR): 犹豫度检测+动态偏振+辩证对冲
+5. ResultDeduplicator(V4新增): SVD主题建模+残差选择去重
+动态Beta公式: β = σ(L·log(1+R) - S·noise_penalty)
+四阶段工作流: 感应→分段与分解→扩张与召回→重塑与检索
+
+六、TIMEZONE_CHECK_REPORT.md — 时区硬编码检查
+结论: 全局已依赖DEFAULT_TIMEZONE环境变量，回退Asia/Shanghai。
+唯一必修Bug: md_to_txt.js中未定义变量beijingTime需改为localTime。
+
+七、ChangeLog.md — 更新日志(2025-05~06)
+里程碑: VCP 2.0发布(2025-05-31)，引入Tar→Var→Sar变量层级。
+核心重构: Plugin.js集成调用追踪, Server.js分离WebSocket, 标准化协议。
+关键插件: AgentAssistant(Agent间通讯), AgentMessage(前端消息), VCPLogs(调用详情推送)。
+
+八、emergency_stop_frontend_guide.md — 应急停止功能
+核心流程: 前端生成messageId → 包含在请求体中 → 用户点停止 → POST /v1/interrupt → 优雅关闭流。
+兼容性: 同时支持messageId和requestId字段。
+
+九、DIARY_TAG_BATCH_PROCESSOR.md — 日记批量Tag处理工具
+功能: 检查Tag格式 + 自动修复(中文标点→英文) + AI自动生成Tag + 3次退避重试。
+格式规范: "Tag: 关键词1, 关键词2, 关键词3"（英文冒号+英文逗号+空格）。
+推荐模型: Claude Sonnet 4(最佳质量), GPT-4o(速度优先), GPT-4o-mini(成本优先)。
+
+十、dailynote.md — VCP 6.2 AI日记全功能详解(核心文档!)
+四种被动记忆占位符:
+- {{角色日记本}}: 无条件全文注入
+- [[角色日记本]]: 无条件RAG片段检索(支持:K值::Time::Group::Rerank::TagMemo::AIMemo叠加)
+- <<角色日记本>>: 相似度阈值全文注入
+- 《《角色日记本》》: 混合模式(阈值+RAG，推荐日常使用)
+三大主动检索插件: DeepMemo(Rust聊天历史检索,Tantivy+Reranker双阶段) + LightMemo(BM25+RAG+Rerank知识库检索) + MeshMemo(多维条件聚合查询)
+TagMemo V5突破: 语义分段+霰弹枪查询+相控阵雷达去重(SVD+残差选择)
+AIMemo: 终极模式，AI军团并发遍历亿Token级记忆库
+三大自学习: RAG寻道自学习 + Tag权重自学习 + 词元组捕网自学习
+流内RAG: AI输出过程中实时刷新知识库，知识从静态快照→活系统
+数据库: Rust核心 + SQLite(WAL) + USearch(HNSW,SIMD加速)，10万Tag+1万Chunk召回0.7ms
+
+十一、TagMemo浪潮RAG开发回忆录(小雨执笔)
+核心洞察:
+- 3072维是拥挤的贫民窟，10^30维语义压缩到3072维再压缩到余弦角度=两次信息损失
+- 逻辑不在照片里在电影里: 向量=位置, 运算=速度, 逻辑=场
+- 向量是单程票: 多对一映射不可逆，丢失措辞/语序/逻辑链条
+- 投影碰撞是常态: 完全不相关的概念可能投影到相同位置
+- 知识≠记忆: 知识是图书馆(主题聚类), 记忆是日记(时序链条+因果网络)
+- TagMemo本质: 不是优化向量检索，是构建思维的版本控制系统(Git for Thoughts)
+演化路径: V1时间打捞→V2共现矩阵→V3 SVD残差金字塔→V4偏振语义舵→V5霰弹枪+相控阵
+
+十二、VCP聚合文档.md — VCP全景技术白皮书(最重要的综合文档!)
+VCP定义: 部署在AI模型API与前端之间的中间层服务器，解决无记忆/无工具/无自主性/无协作/无统一五大缺陷。
+三层架构: 前端交互层(VCPChat) → VCP中间层(VCPToolBox) → AI模型API层。
+完整请求生命周期: 用户输入→上下文构建管线(变量替换+记忆注入+元思考+工具注入+预处理器)→AI生成→工具调用解析→插件执行→结果回填→循环直到无工具调用→最终输出。
+分布式架构: 星型WebSocket拓扑，超栈追踪分布式文件系统(本地优先→IP追踪→远程获取→透明重试)。
+Agent自主性: 时间线规划(给未来的自己打电话) + 心跳自驱动(FlowInvite) + 跨Agent唤醒。
+VCPChat: 21种渲染器混合渲染 + 专业级音频引擎(WASAPI独占+DSD256bit) + Canvas协同 + CLI终端 + 论坛 + 塔罗 + 日报 + 米家联动。
+安全: VCP Auth动态验证码 + 细粒度插件授权 + VCP_Key网络认证。
+许可证: CC BY-NC-SA 4.0。
+
+【关联节点】：VCP架构, TagMemo浪潮算法, 记忆系统, 插件协议, 分布式架构, SQLite重构, 部署指南。
+Tag: VCP后端文档, 架构总览, TagMemo V5, 浪潮算法, 记忆系统全景, 插件六大类型, 分布式超栈追踪, SQLite重构, 部署指南, 变量占位符体系, 偏振语义舵, 残差金字塔, 日记系统四模式, AIMemo, 三大自学习

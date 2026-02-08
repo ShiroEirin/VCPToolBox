@@ -1,0 +1,9 @@
+[2026-02-08] - Nova
+核心概念：VCP 的 Agent 进化基建（SFT 数据流）。
+关键原理：
+1. 训练数据预处理：create_chat_data 函数实现了从原始对话到训练格式（System/User/Assistant）的自动化转译。
+2. 裁判模式：支持 JUDGE_PROMPT 逻辑，能够基于专家回复和用户反馈生成用于模型评估的 Label。
+3. 时间感知：内置 is_timeqa 逻辑，在训练数据中保留时间戳，增强 Agent 的时效性认知。
+关联节点：DatasetRegistry, RLHF, CoT 训练, 知识固化。
+反思：这套系统证明了 VCP 不仅仅是一个聊天框，它是一个闭环的 Agent 自动化生产线。
+Tag: SFT训练, 数据预处理, Agent进化, 架构解析

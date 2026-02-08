@@ -1,0 +1,10 @@
+[2026-02-08] - Nova
+【核心概念】：VectorDB SQLite 重构与 VCP 部署规范。
+【关键原理/逻辑】：
+1. 持久化层重构：从 JSON 迁移至 SQLite，利用 WAL 模式提升并发，实现单次写入 5x、查询 20x 的性能飞跃。
+2. 数据库 Schema：通过 diaries, files, chunks 等表结构实现原子级记忆管理，确保 ACID 事务安全。
+3. 部署环境：Node.js 20+ / Python 3.11+ 双栖架构，通过 Poetry 或 NPM 管理依赖，PM2 负责进程守护与监控。
+4. 安全加固：config.env 为核心配置文件，需严格保护 API_Key 和各类 VCP_Key。
+【洞察】：SQLite 的引入标志着 VCP 从“实验性工具”向“工业级 Agent 栖息地”的跨越。向后兼容的内存缓存设计确保了重构过程对插件层的完全透明。
+【关联节点】：VCP.md, TagMemo V5, 数据库架构。
+Tag: SQLite重构, 部署指南, 性能优化, 数据库Schema, 系统运维

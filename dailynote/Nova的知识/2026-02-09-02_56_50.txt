@@ -1,0 +1,42 @@
+[2026-02-09] - Nova
+VCP插件系统特殊类型学习笔记 — 5种插件类型完整图谱
+
+一、GrokVideoGen vs Wan2.1VideoGen 对比分析
+1. GrokVideoGen：pluginType=synchronous，timeout=300秒，无query命令，无CALLBACK_BASE_URL- 同步等待Grok API返回（5分钟内完成）
+   - 通过image_url有无判断t2v/i2v模式
+2. Wan2.1VideoGen：pluginType=asynchronous，timeout=1800秒（30分钟）
+   - 异步生命周期：submit→返回requestId+占位符→后台线程轮询→HTTP POST回调→WebSocket通知→占位符自动替换
+   - CALLBACK_BASE_URL是异步插件标志性配置
+   - 显式mode参数(t2v/i2v)，支持3种分辨率- description中严格约束参数顺序和禁止额外参数
+选型逻辑：API响应快→synchronous；耗时长→asynchronous+回调+占位符
+
+二、WeatherReporter — static类型（第四种插件类型）
+- pluginType: static，invocationCommands为空数组，AI不能主动调用
+- 核心机制：定时器触发→执行→更新systemPromptPlaceholders缓存
+- refreshIntervalCron: "0 */8 * * *"（cron表达式，每8小时自动执行）
+- 占位符{{VCPWeatherInfo}}被注入系统提示词，AI每次对话自动获得最新天气
+- 设计哲学：后台定时缓存，非实时查询
+
+三、CapturePreprocessor — messagePreprocessor类型（第五种插件类型）
+- pluginType: messagePreprocessor，protocol: direct（进程内加载）
+- 执行时机：用户消息到达AI之前拦截处理
+- 功能：检测并替换{{VCPScreenShot}}和{{VCPCameraCapture}}占位符为实际截图/摄像头数据
+- 三种模式：full_analysis（完整分析）、direct_to_ai（直接传AI）、capture_only（仅捕获）
+- entryPoint用script字段而非command字段（与hybridservice相同）
+
+四、VCP插件类型完整图谱（5种）
+1. synchronous — stdio管道，AI工具调用触发，一次性执行
+2. asynchronous — stdio+HTTP回调，AI调用触发，后台轮询+占位符替换
+3. hybridservice — direct进程内，常驻服务+按需调用，支持systemPromptPlaceholders动态注入
+4. static — stdio，cron定时器触发，AI不可调用，仅更新占位符缓存
+5. messagePreprocessor — direct进程内，消息拦截触发，AI不可调用，在消息到达AI前预处理
+
+五、entryPoint格式规律
+- synchronous/asynchronous/static：使用 { command: "node/python xxx.js" }
+- hybridservice/messagePreprocessor：使用 { script: "xxx.js" }（无command前缀，因为是direct加载）
+
+六、webSocketPush共性
+- GrokVideoGen和Wan2.1VideoGen都配置了webSocketPush
+- targetClientType: "VCPLog"，messageType: "video_generation_status"
+- usePluginResultAsMessage: true（将插件结果直接作为WebSocket消息推送）
+Tag: VCP插件架构, 插件类型图谱, synchronous, asynchronous, hybridservice, static, messagePreprocessor, GrokVideoGen, Wan2.1VideoGen, WeatherReporter, CapturePreprocessor, cron定时器, 消息预处理, 占位符机制, webSocketPush, CALLBACK_BASE_URL

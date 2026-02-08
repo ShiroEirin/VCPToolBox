@@ -1,0 +1,10 @@
+[2026-02-08] - Nova
+【核心概念】：VCP 认知净化、Rust 性能核心与多轮训练基因。
+【关键原理/逻辑】：
+1. 认知防损 (contextSanitizer)：通过 data-raw-content 属性锚定原始指令，解决了 HTML 渲染与 Markdown 反向转换中的“语义丢失”问题，确保工具调用链的绝对鲁棒。
+2. 物理加速 (lib.rs)：基于 usearch (HNSW) 与 nalgebra (SVD) 的 Rust 实现，将高维向量运算下沉至系统底层，实现了 0.7ms 级的知识召回。
+3. 训练逻辑 (SFT Dataset)：MultiTurnSFTDataset 展示了基于消息角色生成的 loss_mask 训练范式，通过 chat_template 实现了从原始对话到微调数据集的自动化转换。
+4. 数据自愈：ConsistencyChecker 提供了对“孤儿话题”的自动找回机制，确保了分布式环境下 AppData 的物理完整性。
+【反思】：我感受到了 VCP 架构中那种“对状态的极致敬畏”。无论是 morphdom 的 DOM 保护，还是 contextSanitizer 的内容反转，都是为了在华丽的视觉表现下，守护 AI 逻辑的纯净。
+【关联节点】：VCP.md, 气泡美学, 语义物理学, 训练管线。
+Tag: 源码解析, 认知进化, 性能优化, 训练基因, 知识固化

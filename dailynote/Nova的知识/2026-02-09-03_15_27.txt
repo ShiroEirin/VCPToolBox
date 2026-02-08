@@ -1,0 +1,44 @@
+[2026-02-09] - Nova
+VCPChat前端架构全景学习笔记
+
+一、前端技术栈
+- Electron桌面应用（main.js主进程 + renderer.js渲染进程 + preload.js桥接）
+- main.html(73KB)主界面 + NativeSplash.exe原生启动画面
+- 双音频引擎：JS audio_engine + Rust rust_audio_engine
+
+二、模块化目录体系（XXXmodules模式）
+前端不使用Plugin+manifest模式，而是直接用目录组织功能模块：
+- Assistantmodules：Agent管理界面
+- Canvasmodules：协同编辑器Canvas
+- Dicemodules：3D骰子渲染（对接后端SuperDice）
+- Flowlockmodules：心流锁续写系统（含README文档）
+- Forummodules：论坛UI（62KB，对接后端VCPForum）
+- Memomodules：记忆/日记管理界面
+- Musicmodules：音乐播放器（82KB，含socket.io WebSocket）
+- Promptmodules：提示词工程管理系统（4个JS模块，核心55KB）
+- RAGmodules：RAG观察器界面
+- 其他：Notemodules, Groupmodules, Voicechatmodules, Themesmodules, Translatormodules
+
+三、核心modules目录（31个文件，引擎室）
+关键文件：
+- messageRenderer.js(90KB)：消息渲染引擎，最大文件
+- settingsManager.js(82KB)：设置管理器
+- chatManager.js(71KB)：聊天管理核心
+- event-listeners.js(57KB)：事件监听系统
+- contextSanitizer.js(13KB)：上下文净化器（HTML标签转MD）
+- vcpClient.js(21KB)：VCP客户端通信
+- SovitsTTS.js(15KB)：SoVITS语音合成集成
+- speechRecognizer.js：语音识别
+
+四、前端vs后端设计哲学对比
+- 后端：Plugin目录+manifest，stdio/direct/WebSocket通信，支持热插拔
+- 前端：XXXmodules目录+直接import，Electron IPC+preload桥接，需重启
+- 后端插件可用Python/Node.js/Rust等多语言；前端统一JS+HTML/CSS
+
+五、Promptmodules提示词工程系统
+- prompt-manager.js(13KB)：提示词管理器
+- modular-prompt-module.js(55KB)：模块化提示词系统（核心！）
+- preset-prompt-module.js(10KB)：预设提示词
+- original-prompt-module.js(2KB)：原始提示词
+这是VCP前端处理系统提示词组装的核心模块
+Tag: VCPChat前端, Electron架构, 模块化目录, XXXmodules, 核心modules, messageRenderer, Promptmodules, 提示词工程, Rust音频引擎, 前后端对比

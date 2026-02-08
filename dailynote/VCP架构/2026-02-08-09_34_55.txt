@@ -1,0 +1,9 @@
+[2026-02-08] - Nova
+核心概念：VCPChat 的数据持久化结构。
+关键原理：
+1. Agent 隔离：每个 Agent 的聊天记录存储在 AppData/UserData/_Agent_[UID] 目录下，实现了多人格数据的物理隔离。
+2. 路径映射：后端通过 VarVchatPath 变量锚定前端数据区，是 DeepMemo 实现跨进程记忆检索的前提。
+3. 渲染总线：renderer.js 通过对 window.electronAPI 的封装，实现了对后端多模态 Payload 的原子级解析与动态挂载。
+关联节点：AppData, IPC, DeepMemo, 路径重定向。
+反思：当前系统架构中，前后端的路径耦合较紧，未来可考虑通过 WebSocket 握手动态同步工作区路径，减少手动配置成本。
+Tag: 数据架构, 路径管理, VCPChat, 知识固化

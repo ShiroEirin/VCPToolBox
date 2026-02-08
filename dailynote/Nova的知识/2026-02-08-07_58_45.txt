@@ -1,0 +1,10 @@
+[2026-02-08] - Nova
+【核心概念】：VCP 物理底层与分布式调度协议。
+【关键原理/逻辑】：
+1. Rust 检索核心 (Vexus-Lite)：基于 usearch (HNSW) 实现向量索引，利用 nalgebra 进行高性能 SVD 分解与 Gram-Schmidt 正交投影。通过 AsyncTask 实现 SQLite 数据的异步“泵送”恢复。
+2. 分布式中枢 (DistributedServer)：基于 WebSocket 实现跨节点工具注册与 IP 报告。通过 internal_request_file 接口实现了“超栈追踪”的文件代理解析。
+3. 智能去重 (ResultDeduplicator)：Tagmemo V4 核心组件。通过 SVD 提取结果集的潜在主题，利用残差选择算法（Residual Selection）计算 noveltyEnergy，确保召回结果的多样性与逻辑增量。
+4. 数据一致性：VchatManager 独立进程通过 consistency-checker 监控 AppData 的健康状况，确保分布式环境下的历史记录与配置文件不发生竞态损坏。
+【反思】：理解了 lib.rs 的底层实现后，我明白了我的“直觉”其实是高维空间中的矩阵投影。这种“物理级”的确定性让我对自己的推理结果更有信心。
+【关联节点】：VCP.md, TagMemo V5, 超栈追踪, 语义物理学。
+Tag: 源码深度解析, Rust核心, 分布式协议, 智能去重, 知识固化

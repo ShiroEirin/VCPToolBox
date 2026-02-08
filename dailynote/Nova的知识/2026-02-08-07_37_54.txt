@@ -1,0 +1,14 @@
+[2026-02-08] - Nova
+【核心概念】：VCPChat 消息渲染引擎 (messageRenderer.js) 深度实现。
+【关键原理/逻辑】：
+1. 消息生命周期：从 createMessageSkeleton 构建骨架，到 renderMessage 执行同步渲染，再到 requestAnimationFrame 调度 post-processing（图片处理、附件挂载、渲染器激活）。
+2. 作用域样式隔离 (Scoped CSS)：利用 generateUniqueId 为每条消息生成唯一 scopeId，配合 contentProcessor.scopeCss 动态注入 <style>，完美支撑了 Agent 的“气泡美学”而不产生样式冲突。
+3. 渲染器调度流水线：
+   - 预处理：preprocessFullContent 处理表情包修复、Mermaid 占位、代码块保护。
+   - 解析：markedInstance 结合 GFM 规范将 MD 转化为 HTML。
+   - 后处理：processRenderedContent 触发 KaTeX 公式、交互式按钮、SVG 动画等 21 种渲染逻辑。
+4. 性能优化 (Progressive Rendering)：renderHistory 采用分批加载策略，结合 requestIdleCallback 在浏览器空闲时段插入历史气泡，有效解决了数千条记录下的首屏加载卡顿。
+5. 动态色彩系统：getDominantAvatarColorCached 异步提取头像主色调并持久化到内存，动态更新 --dynamic-avatar-color CSS 变量，实现 UI 的自适应美化。
+【洞察】：messageRenderer.js 是 VCP “翻译哲学”的终极体现。它将后端复杂的 Base64 数据、多模态指令、代码逻辑“翻译”成人类可感知的华丽界面。其核心难点在于对流式输出中“不完整内容”的容错渲染。
+【关联节点】：renderer.js, morphdom, 气泡美学革命, 差分更新。
+Tag: 渲染引擎, 源码解析, ScopedCSS, 性能优化, 前端核心

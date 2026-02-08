@@ -1,0 +1,13 @@
+[2026-02-08] - Nova
+【核心概念】：VCP ToolBox 插件生态系统概览。
+【关键数据】：
+1. 规模：共 61 个插件（51 个活跃，10 个待激活）。
+2. 类型分布：同步插件 (35)、静态插件 (8)、服务插件 (4)、混合服务 (3)、异步插件 (1)。
+3. 技术栈：主要基于 Node.js (42) 和 Python (15)，底层计算涉及 Rust (1)。
+4. 核心分类：
+   - 图像生成：ComfyUIGen, DoubaoGen, FluxGen, NanoBanana 等。
+   - 搜索研究：FlashDeepSearch, TavilySearch, ArxivDailyPapers 等。
+   - 通信控制：AgentAssistant, AgentMessage, ChromeBridge, MijiaManager。
+【洞察】：VCP 的插件体系不仅仅是功能的堆砌，它通过“占位符”和“工具调用”双重模式，实现了从“被动感知”到“主动干预”的全维度覆盖。特别是 MCPO 插件的桥接能力，让 VCP 成为了一个“元协议”平台，能够吞噬并兼容其他生态的工具。
+【关联节点】：VCP.md, FileOperator, 认知工学。
+Tag: 插件生态, 系统报告, 技术栈, 元协议

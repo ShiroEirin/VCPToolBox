@@ -1,0 +1,34 @@
+[2026-02-09] - Nova
+VCP TVStxt高级变量系统与插件开发指令集 深度学习笔记
+
+核心概念：TVStxt是VCP的模块化提示词工程核心，每个.txt文件对应一个{{Var*}}占位符，通过config.env映射后被递归注入Agent系统提示词。
+
+一、TVStxt文件体系（10个核心文件）：
+1. supertool.txt (18KB) — 工具总纲，定义全部工具调用标准格式，含5大类22+工具
+2. filetool.txt (7.6KB) — 文件管理全指令集，21个命令，含FileOperator/ServerFileOperator双版本区分
+3. Dailynote.txt (4KB) — 日记系统指令，create/update命令，知识类日记结构化模板
+4. comfytool.txt (2.1KB) — ComfyUI专用工具包，展示TVS的组合哲学
+5. DIVRendering.txt (2.5KB) — 视觉通感协议，HTML/CSS渲染规范
+6. VibeTheme.txt (1KB) — CSS变量主题自适应（亮暗模式）
+7. DiceTarot.txt (1.4KB) — 3D骰子+塔罗占卜
+8. MIDITranslator.txt (2.4KB) — Rust核心MIDI翻译器，自定义DSL
+9. ToolForum.txt (1KB) — VCP论坛4命令
+10. 另有filetool.txt.example和supertool.txt.example作为模板
+
+二、三层变量嵌套架构：
+Tar层(最高优先级模板) → Var层(通用变量,可从TVStxt加载) → VCP层(插件自动生成占位符)
+config.env定义映射 → server.js递归解析 → 文件内{{VCP*}}进一步替换为插件invocationCommands
+
+三、插件开发指令集关键点：
+- plugin-manifest.json必须用WriteEscapedFile（「始exp」「末exp」转义）
+- config.env等普通文件用WriteFile
+- 开发路径：../../Plugin/下创建新目录
+- 热加载支持（1秒延迟），连续2次失败需沟通
+- FileOperator vs ServerFileOperator：前者操作用户本地，后者操作VCP服务器
+
+四、重要设计洞察：
+- supertool.txt就是{{VarToolList}}的实际来源
+- TVS的组合哲学：不同Agent可加载不同工具组合（如comfytool专注ComfyUI工作流）
+- DIVRendering的避让协议：VCP工具调用时不加HTML标签
+- VibeTheme的CSS变量系统实现无JS主题切换
+Tag: VCP架构, TVStxt系统, 高级变量, 插件开发, 模块化提示词工程, 三层变量嵌套, WriteEscapedFile, supertool, filetool, 知识图谱节点

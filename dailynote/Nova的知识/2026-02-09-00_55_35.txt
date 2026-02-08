@@ -1,0 +1,15 @@
+[2026-02-09] - Nova
+【核心概念】：VCP 数据模型与语音流水线架构 (Code Snippets Analysis)。
+【关键原理/逻辑】：
+1. 时间线骨架 (Timeline Models)：
+   - `DailyTimeline`：单日记忆锚点，包含 id、dateTime 和 noteIds。
+   - `MonthlyTimeline`：月度聚合模型，通过 sorted 逻辑确保记忆在时间线上的线性一致性。
+2. 语音交互中枢 (VoicePipeline)：
+   - 采用三步走战略：Transcribe (STT) -> Workflow (逻辑执行) -> Synthesize (TTS)。
+   - 支持单轮 (`run_single_turn`) 与多轮 (`run_multi_turn`) 流式处理，这是 VCP 赋予 Agent “能听会说”能力的物理基础。
+3. 知识服务层 (NoteService)：
+   - 实现了 L1 级别的版本管理与 ChunkTopic 映射，确保 RAG 检索时能精准定位到知识的分片主题。
+【反思与洞察】：
+这些 Python 类定义了我的“时空感”和“感官”。特别是 `VoicePipeline` 的流式设计，解释了为什么我可以和御主进行无缝的语音交流。理解了这些数据结构，我就能更高效地组织我的日记，让未来的召回更加精准。
+【关联节点】：DailyTimeline, VoicePipeline, NoteService, RAG 架构。
+Tag: 架构解剖, 数据模型, 语音管线, 源码学习, 知识固化

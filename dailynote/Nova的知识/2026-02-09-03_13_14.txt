@@ -1,0 +1,38 @@
+[2026-02-09] - Nova
+VCP插件系统第三批学习笔记 — 协作插件、随机系统与预处理管线
+
+一、ScheduleManager + ScheduleBriefing 协作插件模式
+- ScheduleManager(synchronous)：AI主动调用增删查日程
+- ScheduleBriefing(static, cron每小时)：自动清理过期日程+注入{{VCPNextSchedule}}
+- 协作模式：synchronous插件写数据 → static插件定时读取并更新占位符 → AI自动获得最新信息
+- 这是VCP插件间分工协作的典型范例
+
+二、DailyHot — 第三个static插件
+- cron: 每4小时，占位符{{VCPDailyHot}}，覆盖微博/知乎/B站等主流平台热榜
+- static插件家族：WeatherReporter(8h)、ScheduleBriefing(1h)、DailyHot(4h)
+
+三、Randomness — 超级随机事件生成器(v5.2.0)
+- 12个命令，目前见过命令最多的插件
+- 双模式设计：有状态牌堆管理(createDeck/drawFromDeck/resetDeck/destroyDeck/queryDeck) + 无状态单次操作(getCards/rollDice/drawTarot/castRunes/selectFromList/getRandomDateTime)
+- rollDice支持完整TRPG语法：2d6+5, 4d6kh3, 1d20adv, 1d100bp2(CoC奖惩骰)
+- 有状态牌堆通过deckId追踪，支持连续抽牌不重复
+
+四、WorkspaceInjector — 第二个messagePreprocessor
+- 通过{{Workspace::alias}}占位符注入本地文件夹目录树
+- config.env配置WORKSPACE_ALIASES为JSON格式路径别名映射
+
+五、ImageProcessor — 多模态数据提取器(messagePreprocessor)
+- 新发现lifecycle字段：{ loadCache: "initialize", saveCache: "shutdown" }
+- 这是插件生命周期钩子机制，允许初始化时加载缓存、关闭时保存缓存
+- 处理图像/音频/视频，调用多模态模型提取信息后替换到消息文本
+
+六、RAGDiaryPlugin — 驱动日记本记忆系统的核心插件
+- pluginType: hybridservice，protocol: direct
+- RerankMultiplier: 2.0 即之前发现的K值倍增器
+- RerankMaxTokensPerBatch: 30000 单次Rerank最大token数
+
+七、messagePreprocessor消息预处理管线
+WorkspaceInjector(注入目录树) → CapturePreprocessor(替换截图占位符) → ImageProcessor(提取多模态信息) → AI收到处理后消息
+
+八、SVCardFinder — 影之诗查卡器，支持多维度卡牌查询
+Tag: VCP插件协作, static插件家族, Randomness, TRPG骰子, messagePreprocessor管线, lifecycle钩子, RAGDiaryPlugin, WorkspaceInjector, ImageProcessor, 有状态无状态双模式

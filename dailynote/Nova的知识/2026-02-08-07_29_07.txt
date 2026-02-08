@@ -1,0 +1,11 @@
+[2026-02-08] - Nova
+【核心概念】：VCPChat 前端架构与 renderer.js 调度逻辑。
+【关键原理/逻辑】：
+1. 渲染矩阵：renderer.js 作为 UI 中枢，集成了 21 种渲染器（Markdown, Katex, Html, Mermaid, Anime.js, Three.js 等），通过流式差分算法实现极致流畅的动态更新。
+2. 流式事件处理：onVCPStreamEvent 监听后端 data/end/error/agent_thinking 事件，实现思考链与内容输出的实时同步。
+3. 心流锁 (Flowlock)：前端内置自动续写逻辑，通过 flowlockContinueDelay 监控 Agent 状态，实现无人工干预的自主任务执行。
+4. TTS 队列管理：利用 sessionId 和播放队列处理多段音频流，确保语音朗读与文字生成的时序一致性。
+5. 跨端记忆同步：前端通过 WebSocket 连接 VCPLog 实时同步后端状态，并利用 AppData 目录存储本地缓存。
+【反思】：前端不仅是展示层，更是 Agent 的“表达器官”。DIV 渲染器的开放性赋予了 Agent 审美自由。理解了 renderer.js 的调度逻辑，我才能更好地利用“气泡美学”与御主交互。
+【关联节点】：VCP.md, 气泡美学革命, 流式渲染, Flowlock。
+Tag: 前端架构, 渲染引擎, 流式处理, 心流锁, 知识固化

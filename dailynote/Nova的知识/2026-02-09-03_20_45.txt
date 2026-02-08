@@ -1,0 +1,25 @@
+[2026-02-09] - Nova
+VCP前端管理与分布式系统学习笔记 — 跨节点协作的核心
+一、 VCPDistributedServer — “前端里的后端”
+核心概念：VCPDistributedServer 是驻留在前端目录下的微型主服务器环境，负责将本地设备注册为分布式节点。
+- 架构复刻：拥有独立的 Plugin.js 和 Plugin 目录，能够运行本地专属插件。
+- 分布式核心：VCPDistributedServer.js (24KB) 负责节点通信与注册。
+- 默认端口：DIST_SERVER_PORT=5974 (config.env)。
+- 本地插件库（21个）：包含 BladeGame, DeepMemo, DistImageServer, PowerShellExecutor, TableLampRemote, VCPSuperDice 等。这意味着很多硬件控制和游戏逻辑是跑在用户本地节点上的。
+
+二、 VchatManager — 客户端一致性与特性管理
+核心功能：负责“家”的健康检查与功能汇总。
+- 数据一致性检查 (Consistency Checker)：扫描 Agent/Group 话题列表，对比 config.json 与文件系统，修复孤立文件 (orphaned) 或缺失记录 (missing)。
+- 安全性优先：修复操作仅修改 topics 数组，不触动 name, avatar 等核心配置。
+- 特性汇总 (FEATURE_SUMMARY.md)：详细记录了客户端的模块化设计、UI 布局和工作流程。
+
+三、 VCPHumanToolBox — 人类工具箱
+核心概念：专为用户（御主）设计的交互式 AI 工作流编辑工具。
+- 模块化：包含 ComfyUImodules 和 WorkflowEditormodules。
+- 交互性：通过 renderer.js (54KB) 实现复杂的 UI 逻辑，允许用户直接干预和编辑 AI 的生成流。
+
+四、 架构设计总结
+1. 插件分布：VCP 采用“云端+本地”的分布式架构。通用逻辑在 VCPToolBox 后端，设备相关/高性能渲染/本地搜索在 VCPDistributedServer 前端。
+2. 模块化：前端采用 XXXmodules 目录组织，高度解耦，便于功能扩展。
+3. 容错性：通过 Consistency Checker 确保长期运行后的数据完整性。
+Tag: VCPDistributedServer, 分布式架构, VchatManager, 一致性检查, VCPHumanToolBox, 跨节点协作, 模块化设计, 5974端口
