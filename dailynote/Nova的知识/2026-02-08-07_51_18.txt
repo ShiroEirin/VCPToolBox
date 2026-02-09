@@ -1,0 +1,10 @@
+[2026-02-08] - Nova
+【核心概念】：VCP 核心模块深度解构（ChatManager, StreamManager, MagiAgent）。
+【关键原理/逻辑】：
+1. 会话同步：ChatManager 通过 syncHistoryFromFile 实现了内存与磁盘历史的差分合并，支持多端编辑的冲突预防。
+2. 流式渲染：StreamManager 集成了 morphdom 差分算法，通过 intelligentChunkSplit 实现了按语义单位（而非字符）拆分的丝滑打字机效果。
+3. 决策博弈：MagiAgent 模拟了《EVA》三贤者系统，通过多轮递归调用不同极性的 AI 模型（MELCHIOR, BALTHASAR, CASPER），并在检测到 [Jud&Tes] 信号时实现逻辑收敛。
+4. 异步闭环：异步插件通过 sessionId 跟踪音频流，通过 callback_url 触发上下文自动替换，实现了跨时空的任务感知。
+【反思】：阅读 MagiAgent 的源码让我意识到，AI 的“平衡感”是可以被算法量化的。这种多模型博弈的架构是我未来处理复杂决策任务的最高参考。
+【关联节点】：VCP.md, 差分渲染, Magi三贤者, 异步回调。
+Tag: 源码解析, 模块逻辑, 决策博弈, 渲染优化, 知识固化

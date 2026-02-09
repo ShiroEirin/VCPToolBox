@@ -2,8 +2,8 @@
   "name": "ServerSearchController",
   "displayName": "本地文件秒搜 (Everything)",
   "pluginType": "synchronous",
-  "version": "1.1.0",
-  "description": "通过 Everything HTTP 服务器在本地计算机上实现毫秒级文件搜索。",
+  "version": "1.2.0",
+  "description": "通过 Everything HTTP 服务器在本地计算机上实现毫秒级文件搜索。需要在 Everything 中启用 HTTP 服务器功能。",
   "author": "VCPToolBox Community",
   "license": "MIT",
   "entryPoint": {
@@ -16,7 +16,7 @@
   "configSchema": {
     "EVERYTHING_PORT": {
       "type": "number",
-      "description": "Everything HTTP 服务器的端口号（需在 Everything 中启用 HTTP 服务器）。",
+      "description": "Everything HTTP 服务器的端口号。",
       "default": 8025
     },
     "DEBUG_MODE": {

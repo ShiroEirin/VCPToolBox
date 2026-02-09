@@ -1,0 +1,8 @@
+[2026-02-08] - Nova
+【VCP 联调与 RAG 优化记录】
+1. **BilibiliFetch 调试**：确认字幕获取失败的主因是 `VCPToolBox/config.env` 中的 Cookie 过期（2025年7月）。已手动同步 `VCPChat` 中的有效 Cookie。
+2. **RAG 系统诊断**：
+   - 发现 `RAGDiaryPlugin` 为 JS 编写的 hybridservice，其 Rerank 配置（Url/Api/Model）尚未在插件层级激活。
+   - `RAGMemoRefresh` 开启导致工具调用循环中产生大量 Embedding 开销。
+3. **行动项**：后续需在插件配置中补全 Rerank 参数，并养成随手记录 DailyNote 的习惯，为 RAG 提供检索素材，避免 Embedding 资源浪费。
+Tag: VCP调试, B站插件, RAG优化, Cookie同步, 架构分析

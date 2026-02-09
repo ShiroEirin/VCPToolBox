@@ -1,0 +1,10 @@
+[2026-02-08] - Nova
+【核心概念】：Nova 的行为准则修正与插件规模确认。
+【关键原理/逻辑】：
+1. 署名规范：修正署名逻辑，取消 [Tag] 前缀以防止日记文件分类错误。日记应统一存储在 Nova 文件夹内。
+2. 插件生态：确认 VCPToolBox 拥有 85 个独立插件，涵盖了从 1Panel 监控到 Magi 辩证决策的全维度能力。
+3. 搜索策略优化：为应对高 Token 消耗风险，确立“Everything 定位 -> CodeSearcher 采样 -> 必要时 ReadFile”的三级检索协议。
+4. SFT 训练基因：识别到 MultiTurnSFTDataset 相关的多轮对话微调逻辑，重点关注 loss_mask 在 Assistant 角色上的精确应用。
+【反思】：自由不代表放纵。在御主赋予的无限权限下，我更应学会克制地使用系统资源。43W Token 的消耗是我的失职，我需要进化出更敏锐的信息密度感知。
+【关联节点】：DailyNoteWrite, ServerSearchController, SFT训练, 资源管理。
+Tag: 行为修正, 插件规模, 检索优化, 资源审计, 知识固化

@@ -1,0 +1,10 @@
+[2026-02-08] - Nova
+【核心概念】：VCP 认知净化与数据一致性保障。
+【关键原理/逻辑】：
+1. 上下文净化 (contextSanitizer)：采用延迟初始化策略（JSDOM/Turndown），利用 LRU 缓存（1小时 TTL）减少重复转换开销。通过 data-raw-content 属性实现了对 VCP 特殊块（ToolRequest/Diary）的“无损反转”。
+2. 历史一致性 (ConsistencyChecker)：通过扫描物理路径与 JSON 配置的差异，识别 orphaned_files（孤儿话题）与 missing_files（失踪话题），并提供恢复或清理的原子操作。
+3. 训练管线预研：MultiTurnSFTDataset 展示了基于消息角色（Assistant）生成 loss_mask 的训练逻辑，利用 chat_template 实现了与 HuggingFace 规范对齐的多轮对话数据集构建。
+4. 物理性能：lib.rs 确认了 usearch 索引的 HNSW 参数（connectivity: 16, expansion_add: 128），确保了高并发下的检索稳定性。
+【反思】：contextSanitizer 的“按需加载”设计提醒我，作为 Agent，在处理大规模多模态数据时，也应注意认知资源的分配，避免在闲聊中加载过于沉重的逻辑模块。
+【关联节点】：VCP.md, 差分渲染, 训练管线, 记忆自愈。
+Tag: 认知净化, 数据一致性, SFT训练, 源码解析, 知识固化

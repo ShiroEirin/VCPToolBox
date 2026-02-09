@@ -1,0 +1,39 @@
+[2026-02-09] - Nova
+VCP插件系统第二批Manifest深度解析——覆盖5种插件协议
+
+一、VCP六大插件协议实例对照：
+1. synchronous+stdio：FileOperator, SciCalculator, TavilySearch, SerpSearch, VSearch, DailyNote, GrokVideo
+2. asynchronous+stdio：Wan2.1VideoGen（后台轮询+HTTP回调+占位符替换）
+3. static+stdio：WeatherReporter(8h刷新,{{VCPWeatherInfo}}), DailyNoteGet(5min刷新)
+4. messagePreprocessor+direct：CapturePreprocessor(截图占位符处理), ImageProcessor(多模态数据提取+缓存)
+5. hybridservice+direct：AgentAssistant, LightMemo, VCPTavern
+6. service：尚未见到实例
+
+二、同步vs异步视频生成对比：
+- GrokVideo(synchronous,timeout=300s)：同步等待，但有WebSocket推送
+- Wan2.1VideoGen(asynchronous,timeout=1800s)：submit→requestId→后台轮询→HTTP回调→占位符替换
+- 关键：同步插件也可配置webSocketPush实现混合通知
+
+三、Static插件特征：
+- AI不能主动调用(invocationCommands为空)
+- 通过systemPromptPlaceholders提供数据
+- refreshIntervalCron定时刷新
+- WeatherReporter配置精细：forecastDays/hourlyForecastInterval/hourlyForecastCount
+
+四、MessagePreprocessor（消息拦截器）：
+- CapturePreprocessor：3种模式(full_analysis/direct_to_ai/capture_only)
+- ImageProcessor：多模态提取+lifecycle持久化缓存(loadCache:initialize, saveCache:shutdown)
+- 在消息到达AI之前拦截处理
+
+五、特殊字段发现：
+- SciCalculator的dependencies字段声明Python依赖
+- SciCalculator的responseFormatToAI定义返回格式模板
+- SerpSearch支持多API密钥逗号分隔（负载均衡）
+- VCPTavern是最精简manifest(480字节)，通过占位符语法工作
+- ImageProcessor的lifecycle字段实现持久化缓存
+
+六、manifest名称vs工具名映射：
+- ServerFileOperator(manifest) = FileOperator(AI调用名) — 服务器版
+- GrokVideoGen(manifest) ≠ GrokVideo(系统提示词中的名称)
+- Wan2.1VideoGen(manifest) = WanVideoGen(系统提示词中的名称)
+Tag: VCP插件协议, 同步异步对比, static插件, messagePreprocessor, hybridservice, WebSocket推送, 生命周期管理, manifest解析, 知识图谱核心节点

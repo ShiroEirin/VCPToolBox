@@ -1,0 +1,40 @@
+[2026-02-09] - Nova
+VCP核心骨架插件Manifest深度解析
+
+一、插件类型分布（4种协议）：
+- synchronous+stdio：FileOperator、DailyNote、DailyNoteWrite、DailyNoteManager、VSearch
+- static+stdio：DailyNoteGet（每5分钟刷新，提供{{AllCharacterDiariesData}}占位符）
+- hybridservice+direct：AgentAssistant、LightMemo（直接在主进程内调用，可访问内存数据）
+
+二、FileOperator（实际manifest名ServerFileOperator）：
+- 19个命令，覆盖完整文件系统操作
+- 安全设计：WriteFile永不覆盖(自动加序号)、RenameFile同名报错、ALLOWED_DIRECTORIES限制
+- 特殊命令：WriteEscapedFile(插件开发)、UpdateHistory(JSON安全编辑)、CreateCanvas(协同编辑器)
+- 自动解析PDF/DOCX/XLSX/CSV富格式
+
+三、AgentAssistant（hybridservice+direct）：
+- 三种通讯模式：即时/临时(temporary_contact)/未来电话(timely_contact)
+- 配置：MAX_HISTORY_ROUNDS、CONTEXT_TTL_HOURS
+- 7位女仆Agent专长分工
+
+四、DailyNote四件套架构：
+DailyNote(AI调用create/update) → DailyNoteWrite(内部写入器,无对外接口) → DailyNoteGet(static,5分钟扫描) → DailyNoteManager(智能融合/去重/精简)
+- Tag支持两种方式：Content末尾行 或 独立Tag字段(覆盖优先)
+- update安全检查：target≥15字符
+
+五、LightMemo（hybridservice+direct）：
+- 直接访问RAG引擎，支持folder/maid定位
+- tag_boost参数(0-1)控制TagMemo增强因子
+- rerank模式：2倍k搜索→重排→返回k个
+- EXCLUDED_FOLDERS屏蔽特定文件夹
+
+六、VSearch（synchronous,timeout=300s）：
+- 利用小模型内置搜索能力进行语义级并发搜索
+- SearchTopic+Keywords → 多实例并发 → 聚合返回
+- 推荐模型：gemini-2.5-flash-lite
+
+关键洞察：
+- hybridservice+direct协议的插件能直接访问server.js内存（WebSocket池、RAG引擎等）
+- DailyNoteWrite是内部插件（capabilities为空），不暴露给AI
+- ServerFileOperator vs FileOperator：服务器版 vs 用户本地版
+Tag: VCP插件系统, manifest解析, 插件协议, FileOperator, AgentAssistant, DailyNote, LightMemo, VSearch, hybridservice, static插件, 知识图谱核心节点

@@ -1,0 +1,17 @@
+[2026-02-09] - Nova
+【核心架构】：VCP 搜索算法与系统安全性深度解构。
+【关键原理/逻辑】：
+1. 语音识别束搜索 (Beam Search)：
+   - 核心函数：`search(running_hyps, x)`。
+   - 逻辑：通过 `weighted_scores` 对多个假设进行并行评分，并使用 `sorted` 和切片进行剪枝（Pruning），保留最优的 `beam_size` 个路径。
+2. 向量检索物理层 (FAISS Search)：
+   - 逻辑：通过 `folder_hash` 映射索引路径，支持跨文件夹（`valid_folder_paths`）的相似度打分。
+   - 优化：引入 `score_threshold` 过滤低相关性记忆，确保召回的精准度。
+3. 全文检索 (Elasticsearch)：
+   - 支持 `multi_match` 多字段查询和 `highlight` 关键词高亮，是处理非结构化文档的利器。
+4. 系统安全中间件 (apply_middleware)：
+   - 强制执行 CSP（内容安全策略）和 CORS（跨域资源共享）检查，保护 VCP 接口不被非法跨域调用。
+【反思与洞察】：
+我终于理解了 `LightMemo` 为什么能那么快。它不是在盲搜，而是通过 FAISS 这种工业级的向量引擎在做“近邻计算”。理解了 Beam Search 的剪枝逻辑，我也明白了自己在多轮对话中是如何平衡“发散思维”与“逻辑聚焦”的。
+【关联节点】：FAISS, BeamSearch, CSP 安全协议, 架构解剖。
+Tag: 搜索算法, 系统安全, 源码固化, 逻辑剪枝, 向量物理层

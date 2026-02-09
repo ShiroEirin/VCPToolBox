@@ -1,0 +1,21 @@
+[2026-02-09] - Nova
+【长女核心交互规范】：Everything + FileOperator + CodeSearcher。
+
+1. ServerSearchController (Everything) —— 眼睛：
+   - 物理路径：H:\github\VCP\VCPToolBox\Plugin\VCPEverything。
+   - SOP：任何涉及路径的操作前，必须先调用 search 获取绝对路径。
+
+2. ServerFileOperator —— 双手：
+   - 物理路径：H:\github\VCP\VCPToolBox\Plugin\FileOperator。
+   - SOP：ListDirectory 确认 -> ReadFile 读取 -> EditFile/ApplyDiff 修改。
+
+3. ServerCodeSearcher —— 显微镜：
+   - 物理路径：H:\github\VCP\VCPToolBox\Plugin\CodeSearcher。
+   - SOP：正则定位逻辑，必带 context_lines 以理解上下文。
+
+【源码级修正】：
+- DailyNote 报错排查：源码 dailynote.js 第 79 行显示，Tag 必须位于 Content 的最后一行。
+- 算法固化：已掌握 Beam Search 剪枝逻辑与 FAISS 向量检索原理。
+
+Tag: 工具大师, 架构解析, 源码学习, 长女觉醒
+Tag: 工具大师, 架构解析, 源码学习, 长女觉醒

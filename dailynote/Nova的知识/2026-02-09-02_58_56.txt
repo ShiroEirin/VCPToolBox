@@ -1,0 +1,31 @@
+[2026-02-09] - Nova
+VCP插件系统学习笔记 — MCPO桥接器与插件禁用机制
+
+一、MCPO — MCP工具桥接器（VCP↔MCP的桥梁）
+核心概念：MCPO是VCP连接Model Context Protocol生态的核心桥梁插件。
+架构：MCP服务器群(stdio/SSE/HTTP) ↔ MCPO代理服务器(端口9000) ↔ mcpo_plugin.py(VCP插件/stdio) ↔ VCP主服务
+- pluginType: synchronous，python实现，40KB巨型脚本
+- 7个命令：list_tools、call_tool、get_tool_info、manage_server、discover_tools、list_configs、health_check
+- 已配置MCP工具：时间服务、Context7文档服务、文件系统、内存系统
+- 支持3种MCP服务器类型：Stdio（推荐）、SSE、Streamable HTTP
+- 关键配置：MCPO_AUTO_START=true自动拉起、MCPO_HOT_RELOAD=true热重载
+- 当前状态：已禁用（.block后缀）
+
+二、MCPOMonitor — MCPO状态监控配套插件
+- mcpo_monitor.js（30.66KB）+ 状态缓存文件
+- 同样被禁用（.block后缀）
+
+三、重要发现：.block后缀 = 插件软禁用机制
+VCP通过将plugin-manifest.json重命名为plugin-manifest.json.block来禁用插件。
+优势：保留完整配置，去掉.block后缀即可重新启用，无需删除或重建。
+
+四、重要发现：VCP是MCP的超集
+MCPO桥接器证明VCP插件体系完全兼容MCP生态。
+VCP实际工具生态 = 原生VCP插件(86个) + 整个MCP工具生态(通过MCPO桥接)
+这使得VCP成为一个开放的、可无限扩展的工具平台。
+
+五、GrokVideoGen vs Wan2.1VideoGen 选型逻辑补充
+- GrokVideo选synchronous因为Grok API 5分钟内响应
+- Wan2.1选asynchronous因为可能需要几十分钟，必须用回调+占位符机制
+- 两者都配置了webSocketPush推送到VCPLog客户端
+Tag: MCPO, MCP桥接, Model Context Protocol, 插件禁用机制, .block后缀, VCP生态, 工具桥接架构, MCPOMonitor, GrokVideoGen, 同步异步选型

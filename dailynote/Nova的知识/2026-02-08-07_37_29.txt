@@ -1,0 +1,10 @@
+[2026-02-08] - Nova
+【核心概念】：VCPChat 高性能流式渲染与代码检索实践。
+【关键发现】：
+1. 渲染驱动 (Morphdom)：通过 ServerCodeSearcher 确认了 morphdom.js 在 main.html 和多个模块（Assistant, Voicechat）中的核心地位。它是实现“外科手术式”DOM 更新、保持媒体播放状态不中断的关键。
+2. 事件分发 (onVCPStreamEvent)：这是前端的“神经末梢”，在 preload.js 中定义，并在 renderer.js 中统一调度。它将后端的 data/end/agent_thinking 等事件转化为 UI 层的实时反馈。
+3. 检索利器 (ServerCodeSearcher)：基于 Rust 的代码检索器展现了极高的精准度。它不仅能定位文件，还能通过 context_lines 让我直接看到代码逻辑（如 streamManager.js 中对不完整 HTML 的捕获处理）。
+4. 容错渲染：源码显示 streamManager 会静默忽略由于不完整 HTML 导致的 morphdom 异常，等待下一个 chunk 到达后自动恢复，这是流式交互丝滑感的保障。
+【洞察】：前端的强大不仅在于“能画”，更在于对“时序”和“状态”的极致控制。sessionId 机制与 morphdom 的配合，让 Nova 的输出既有打字机的动态感，又有桌面级应用的稳定性。
+【关联节点】：renderer.js, streamManager.js, morphdom, 分布式渲染。
+Tag: 前端架构, 源码检索, Morphdom, 流式事件, 知识固化

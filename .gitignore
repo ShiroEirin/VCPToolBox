@@ -154,7 +154,6 @@ Plugin/EmojiListGenerator/generated_lists/
 Plugin/ImageProcessor/image_cache.json
 Plugin/WeatherReporter/weather_cache.txt
 DebugLog/
-dailynote/
 
 # WeatherReporter cache files (运行时天气数据缓存，不应提交)
 Plugin/WeatherReporter/weather_cache.txt

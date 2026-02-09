@@ -1,0 +1,42 @@
+[2026-02-09] - Nova
+【VCP后端文档深度阅读笔记 · 第二批 · Agent开发与日记系统篇】
+
+一、Agent_Development_Guide.md — Agent开发规范
+Agent创建最小流程:
+1. 从Agent/ExampleNamedAgent.txt复制结构化模板并替换占位
+2. 在config.env中添加Agent<Alias>=<filename>.txt
+3. 若要暴露给其他Agent，编辑Plugin/AgentAssistant/config.env并重启
+关键规范:
+- 日记占位必须保留"日记本"后缀，如{{Nova日记本}}
+- 系统提示使用{{TarSysPrompt}}, {{Var...}}, {{VCP...}}占位符
+- 工具能力描述由PluginManager.buildVCPDescription()自动生成注入
+- 安全约束: 写盘/innerHTML/脚本执行前必须征得用户同意
+Agent目录重要文件:
+- ExampleNamedAgent.txt: 专家型模板(日记占位+Tar/Var注入+工具占位)
+- ExampleYogariAgent.txt: 娱乐型模板(NSFW分层指令)
+- Nova.txt: 测试型Agent(工具规范+安全约束)
+- ThemeMaidCoco.txt: 实用型(主题生成+生图工具调用)
+验证点: 确认{{VCPAllTools}}或{{VCP<PluginName>}}被注入系统提示; 确认日记占位成功返回内容。
+
+二、dailynote.md补充要点 — 智能Tag检查器
+工作流: AI写入日记→Tag格式校验→异常拦截→自动召唤记忆大师Agent(顶级模型驱动)→智能补标→无缝写入。
+优势: 即使弱模型驱动的Agent也能保证Tag体系高质量一致性。
+DailyNoteManager插件: 批量操作(事件合并/结构优化/语法去冗)，仅推荐顶级模型驱动。
+TopicMemo插件: Agent感知/管理历史话题，内置json2md净化器，支持安全json编辑和话题标题编辑。
+SGManager插件: Agent管理词元组捕网关系结构。
+自动多模态记忆转化器: 拖入任意文档/图片/音频/视频→自动转化为.md格式标准日记结构归档入库。
+
+三、VCP聚合文档补充 — 前端子系统详解
+VCPChat 21种渲染器: Markdown, KaTeX, HTML, Mermaid, VCPTool, Manim, Matplotlib, Anime.js, Three.js, LaTeX, 交互式按钮/弹窗, DIV, src, draw.io, CSV, PDF等。
+革命性实时差分渲染: 底层聊天记录变动→差分算法→流式渲染变动本身(非刷新整个界面)。AI可在输出过程中修改已说出的话。
+音频引擎: FIR-EQ+多级采样仿真, WASAPI独占+DSD 256bit硬解码, Rust底层SIMD内存级时钟对齐, 汇编实现底层解码采样一体化。
+Agent自主性三机制: 时间线规划(给未来的自己打电话) + 心跳自驱动(FlowInvite) + 跨Agent唤醒。
+MCP兼容: 通过MCPO端口无缝挂载MCP插件，VCP作为元协议统一整合。
+
+【待读文档清单】:
+- README.md (54.73KB) — 主README，需分段读取
+- README For VCPChat.md (58.9KB) — VCPChat客户端文档
+- README_en.md / README_ja.md / README_ru.md — 多语言版本(内容应与主README重叠，可选读)
+
+【关联节点】：Agent开发规范, 日记系统, Tag检查器, TopicMemo, 前端渲染器, 音频引擎, Agent自主性。
+Tag: Agent开发指南, 日记Tag检查器, TopicMemo, SGManager, 多模态记忆转化, VCPChat渲染器, 音频引擎, Agent自主性, MCP兼容, 待读清单

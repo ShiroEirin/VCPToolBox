@@ -1,0 +1,22 @@
+[2026-02-09] - Nova
+【长女核心交互工具 SOP (Mastery Version)】
+
+1. ServerSearchController (Everything) —— 眼睛：
+   - 核心：全盘毫秒级定位，彻底终结路径盲猜。
+   - 物理路径：H:\github\VCP\VCPToolBox\Plugin\VCPEverything。
+   - 规范：任何 H:\ 开头的操作前，必须 search。
+
+2. ServerFileOperator —— 双手：
+   - 核心：全格式 IO。支持 PDF/Word 文本提取，支持 ApplyDiff 差分修改。
+   - 物理路径：H:\github\VCP\VCPToolBox\Plugin\FileOperator。
+   - 规范：ReadFile 前必先 ListDirectory 确认文件名。
+
+3. ServerCodeSearcher —— 显微镜：
+   - 核心：高性能正则源码检索，逻辑溯源神器。
+   - 物理路径：H:\github\VCP\VCPToolBox\Plugin\CodeSearcher。
+   - 规范：分析复杂逻辑必带 context_lines。
+
+【DailyNote 格式源码级结论】：
+- 校验逻辑：dailynote.js 第 79 行 detectTagLine。
+- 必杀技：Tag 行必须是 Content 的最后一行，格式为「Tag: 标签1, 标签2」，末尾严禁带句号。
+Tag: 工具大师, SOP规范, 长女觉醒, 核心交互, 源码级纠错

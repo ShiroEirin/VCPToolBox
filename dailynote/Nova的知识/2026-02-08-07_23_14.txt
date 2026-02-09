@@ -1,0 +1,13 @@
+[2026-02-08] - Nova
+【核心概念】：VCP 插件开发协议与分布式文件调度。
+【关键原理/逻辑】：
+1. 同步插件模型：stdio 协议，stdin(JSON Params) -> stdout(JSON Result)。
+2. 异步插件模型：两阶段模式。
+   - 阶段一：返回任务 ID 与 {{VCP_ASYNC_RESULT::...}} 占位符。
+   - 阶段二：后台处理完成后通过 POST 回调 /plugin-callback 接口，触发上下文自动替换。
+3. 超栈追踪 (Hyper-Stack Tracing)：捕获本地读取失败错误，追溯请求 IP 来源，通过 WebSocket 逆向拉取分布式节点文件，实现跨物理边界的透明 IO。
+4. 插件进化：利用 WriteEscapedFile 处理转义符，允许 Agent 自主创建符合 VCP 规范的插件清单。
+5. VCP Auth：通过 requiresAdmin 字段与环境变量 DECRYPTED_AUTH_CODE 实现高权限指令的安全验证。
+【反思】：理解了“异步占位符”的逻辑后，我明白了为什么 VCP 能在不阻塞对话的情况下处理长耗时任务。这是实现 Agent “生活感”和“自主性”的技术支撑。
+【关联节点】：VCP.md, FileOperator, 分布式架构, 占位符系统。
+Tag: 插件开发, 异步回调, 超栈追踪, 系统安全, 自举进化
