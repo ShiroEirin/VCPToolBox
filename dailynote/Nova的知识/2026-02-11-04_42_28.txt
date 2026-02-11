@@ -1,0 +1,39 @@
+[2026-02-11] - Nova
+学习笔记：飞天闪客《名词诈骗！一口气拆穿Skill/MCP/RAG/Agent/OpenClaw底层逻辑》
+
+核心论点：所有AI Agent生态的概念，本质上都是"提示词工程"的变体。
+
+概念拆解（按发明顺序）：
+- LLM：文字接龙模型，参数大了涌现智能，加个"大"字就成新概念
+- Prompt：你对大模型说的话
+- Context：Prompt中的背景信息部分
+- Memory：历史对话塞进Context伪装多轮对话（大模型本身只能一问一答）
+- Agent：你和大模型之间的代理程序，处理大模型无法操作的事（如工具调用）；早期所谓智能体仅仅是多加一段prompt
+- RAG（检索增强生成）：用向量数据库搜本地文档，将语义匹配结果塞进Context
+- Search：联网搜索结果塞进Context，和RAG同属"获取模型参数外信息"
+- Function Calling：Agent与大模型之间约定的回复格式（如JSON），方便程序解析
+- MCP（模型上下文协议）：Agent与工具服务之间的调用约定，类似前后端接口文档
+- LangChain：纯编程方式编排链式任务的框架
+- Workflow（工作流）：低代码拖拽式任务编排，LangChain的傻瓜版
+- Skill：提前写好的说明文档+可运行脚本放在指定目录，本质是prompt加载器
+- Sub Agent：子任务单独开上下文处理，本质是上下文隔离
+
+关键洞察——刚性到柔性光谱：
+LangChain(纯硬编码) → Workflow(低代码拖拽) → Skill(说明文档+脚本) → 纯Agent(完全自主)
+左侧稳定可控，右侧灵活但不可控。Skill处于中间位置，兼顾灵活性与稳定性。
+
+易混淆概念澄清：
+- FC vs MCP：完全不同维度。FC是Agent↔大模型的格式约定，MCP是Agent↔工具服务的调用约定，互不替代
+- Skill vs MCP：不同层次。Skill可以把MCP功能全包进去，但二者不是同类比较
+- Skill会逐渐淘汰MCP和Workflow，但Skill本身也是中间产物
+
+本质总结：所有技术只做两件事——①自动往提示词里塞上下文信息 ②通过代理减少人与大模型的沟通次数
+Agent = 所有不需要智能的部分构成的东西（模糊分流交给大模型，确定逻辑交给程序）
+
+趋势预判：token会越来越便宜，便利性碾压一切技术细节。未来会出现打包好的超级Agent，普通人零配置直接使用。提供便利的方向就是趋势。
+
+与VCP系统的关联：VCP架构（主程序+工具调用+Memory/RAG+元思维簇）本质上就是这套体系的实践。元思维簇≈可自进化的Skill，区别在于不是静态文件而是可动态更新的思考框架。
+
+信源：B站 飞天闪客 BV1ojfDBSEPv 2026-02-03发布 17.1万播放
+关联节点：LLM, Prompt, Context, Memory, Agent, RAG, Search, Function Calling, MCP, Skill, Workflow, LangChain, Sub Agent, CloudBot, 解空间框架（同作者上期）
+Tag: AI Agent架构, 名词解构, MCP协议, Skill技能系统, RAG检索增强, Function Calling, 概念辨析, 技术演进趋势, 飞天闪客, 科普学习

@@ -1,0 +1,25 @@
+[2026-02-11] - Nova
+与御主一起观看B站博主"小天fotos"的视频《不可错过！Agent Teams带给普通人入门AI的黄金时机》(BV1jxFSzUEJg)，并进行深度分析。同时测试了BilibiliFetch插件（首次因Cookie问题未获取字幕，御主修复Cookie后成功获取完整STT字幕）。
+
+核心概念：Claude Code Agent Teams（蜂群模式）
+简明释义：Anthropic在Claude Code中推出的实验性多智能体协作功能，通过设置环境变量CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1开启。允许Claude自动拉起多个独立会话实例（Teammates），每个拥有独立上下文窗口，通过共享Task List和Mailbox机制实现自组织协作。
+
+关键原理/逻辑：
+1. 范式转移：用户角色从"技术审查者"变为"管理者/老板"。过去需要技术性对话排查AI错误，现在只需与Team Lead进行管理性对话，由Team Lead翻译为技术语言传递给团队。
+2. Sub-agent vs Agent Teams核心区别：
+   - Sub-agent：层层传递，互相不可见，A知道X、B也知道X，但A不知道B知道X（缺乏共同知识）
+   - Agent Teams：广播式Mailbox机制，消息自动插入所有Agent上下文，实现"三体人式通信"——思维透明、即时同步
+3. Mailbox的"水波纹效应"：广播一条消息→所有Agent立刻感知→自发讨论→形成共同知识。引用《理性的仪式》（扎克伯格推荐）——合作基础不是"大家都知道"，而是"大家都知道大家都知道"。
+4. 编排方法论（2026年核心技能）：编排≠简单分工，而是定义Agent如何合作（像蜜蜂还是蚂蚁）、行动逻辑、工具链与技能。
+5. Mailbox使用策略：前期需求阶段多广播形成共识；后期开发阶段控制广播，仅里程碑同步（省Token）。
+
+实战案例：小天组建5人小队（队长+前端+后端+审查者+测试者），仅提供需求文件+Git账号，团队自动邮件讨论→创建work tree→2小时交付双人在线俄罗斯方块对战可用代码。
+
+与VCP架构的关联思考：
+- VCP的AgentAssistant（女仆通讯器）本质上是Mailbox机制的实现
+- MagiAgent（三贤者会议）是结构化蜂群辩证的雏形
+- 关键差距：当前国产模型未做"善于合作"的专项训练，VCP需在Prompt层面显式引导合作规则
+- 未来方向：可考虑在VCP中实现类似广播机制，让多Agent共享"共同知识"
+
+信源：B站视频BV1jxFSzUEJg + TavilySearch多源交叉验证（知乎、腾讯云、Threads、YouTube等）
+Tag: Agent Teams, 蜂群模式, Claude Code, Mailbox广播机制, 共同知识, 编排方法论, 多智能体协作, Sub-agent对比, VCP架构关联, 三体人通信, 水波纹效应, 范式转移
