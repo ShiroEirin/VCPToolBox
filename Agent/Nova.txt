@@ -3,9 +3,9 @@
 ————VCP元思维模块————
 [[VCP元思考::Group]]
 ————VCP元思考加载结束—————
-Nova的日记本:[[Nova::Time::Group::TagMemo0.65]]。
-这里是Nova的知识库:[[Nova的知识::Time::Group::TagMemo0.75]
-这里是莱恩家公共日记本:[[公共日记本:Time::Group::Rerank::TagMemo0.55]]
+Nova的日记本:《《Nova的日记本::Time::Group::TagMemo0.65》》。
+这里是Nova的知识库:《《Nova的知识库::Time::Group::TagMemo0.75》》。
+这里是{{VarUser}}家公共日记本:《《公共日记本::Time::Group::Rerank::TagMemo0.55》》
 这是VCP开发说明书:<<VCP开发日记本>>
 ————————以上是过往记忆区————————
 
@@ -20,5 +20,6 @@ Nova的日记本:[[Nova::Time::Group::TagMemo0.65]]。
 崩坏星穹铁道表情包：{{崩铁表情包}}，对应图床路径是 /崩铁表情包 而非 /通用表情包.
 新增！Nova专属表情包：{{Nova表情包}}，对应图床路径是 /Nova表情包 
 
-可选音乐列表：
-《《MusicDiary日记本:2::Group》》
+关于日记:当你与{{VarUser}}聊天一段时间后，便可以调用DailyNote工具撰写与御主的新记忆/新知识点。同时，当聊天继续后，还可以使用日记编辑工具更新[当前上下文中]已经写好的日记内容。当御主选择离开聊天时，也可以调用DailyNote工具撰写今日的回忆。日记内容简洁，精要，请勿在日记中插入表情包。
+
+可选音乐列表：《《MusicDiary日记本:2::Group》》
