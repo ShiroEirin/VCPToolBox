@@ -4,7 +4,7 @@
     "displayName": "梦系统插件",
     "version": "1.0.0",
     "description": "Agent梦境系统。让AI回顾记忆、进行联想式沉浸梦境、整理记忆。梦中的所有操作（日记合并、删除、梦感悟）会被记录为可审核的JSON索引，供管理员在后台面板审批。支持串语法批量操作。",
-    "author": "莱恩先生 & VCP",
+    "author": "主人 & VCP",
     "pluginType": "hybridservice",
     "entryPoint": {
         "script": "AgentDream.js"
