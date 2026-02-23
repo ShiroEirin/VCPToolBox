@@ -195,6 +195,7 @@ Plugin/RAGDiaryPlugin/*.bin
 Plugin/TavilySearch/.vcptoolbox_tavily_cache.json
 Plugin/UserAuth/code.bin
 Plugin/VCPLog/log/VCPlog.txt
+Plugin/FlashDeepSearch/log/
 Plugin/WeatherReporter/weather_cache.json
 Plugin/WeatherReporter/weather_cache.txt
 Plugin/WeatherReporter/city_cache.txt
