@@ -135,113 +135,117 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# ============================================
 # Custom VCPToolBox ignores
-# Environment configuration files (contain sensitive API keys and settings)
-# 只拦截根目录的配置文件，插件目录的 config.env 允许提交
-/config.env
-/config.env.local
+# ============================================
+
+# ===== 环境配置文件 =====
+# 所有插件的实际 config.env（保留 .example）
+config.env
+config.env.local
+**/config.env
+!**/config.env.example
+
+# 有 .example 对应的运行时配置
+ModelRedirect.json
+agent_map.json
+preprocessor_order.json
+tag-processor-config.env
+
+# 本地开发配置
+*.local.*
+config.local.*
 /config.docker.env
 /config.env.new
 /config.env.old
 /config.env.backup_*
 
-# Configuration migration files (contain sensitive data and migration logs)
+# 配置迁移文件
 config-backups/
 migration-report.txt
 APPLY_CONFIG.md
 MIGRATION_GUIDE.md
-Plugin/EmojiListGenerator/generated_lists/
-Plugin/ImageProcessor/image_cache.json
-Plugin/WeatherReporter/weather_cache.txt
+
+# ===== 运行时数据 / 缓存 =====
 DebugLog/
-
-# WeatherReporter cache files (运行时天气数据缓存，不应提交)
-Plugin/WeatherReporter/weather_cache.txt
-Plugin/WeatherReporter/weather_cache.json
-Plugin/WeatherReporter/city_cache.txt
-Plugin/WeatherReporter/*.cache
-
-
-# 忽略通用表情包目录下的所有内容...
-image/通用表情包/*
-
-# ...除了这两个文件
-!image/通用表情包/阿库娅-一脸智障.jpg
-!image/通用表情包/阿库娅-智慧的眼神.jpg
-
-
-# 忽略 FluxGen 生成的图片
-image/fluxgen/
-
-# VCPLog 运行时日志
-Plugin/VCPLog/log/
-
-# 插件状态缓存文件 (运行时数据，不应提交)
-Plugin/MCPOMonitor/mcpo_status_cache.json
-Plugin/MCPOMonitor/mcpo_status_cache.txt
-
-# 本地开发配置文件 (包含敏感信息，不应提交)
-/config.local.env
-/*.local.env
-
-# 本地Docker配置文件 (避免合并冲突)
-Dockerfile
-docker-compose.yml
-
-# IDE/Editor history files
-.history
-
-# Claude configuration and cache files
-.claude/
-.crush/
-
-# Claude Code workflow files (temporary working files)
-.spec-workflow/
-.serena/
-
-# Snow AI tool cache
-.snow/
-
-# Build target directory
-target/
-
-# Plugin binary cache files (运行时二进制缓存，不应提交)
-**/*.bin
-# 但允许 VectorStore 目录的文件被提交
-!VectorStore/*.bin
-!VectorStore/*_map.json
-!VectorStore/*.json
-
-# AI agent and system configuration files
-agent_map.json
+dailynote/
 ip_blacklist.json
-preprocessor_order.json
+/VectorStore
 
-# RAGDiaryPlugin vector cache and semantic data (运行时AI向量数据，不应提交)
-Plugin/RAGDiaryPlugin/vector_cache.json
-Plugin/RAGDiaryPlugin/semantic_groups.json
-Plugin/RAGDiaryPlugin/meta_chain_vector_cache.json
-Plugin/RAGDiaryPlugin/semantic_vectors/
-Plugin/RAGDiaryPlugin/*.json
-Plugin/RAGDiaryPlugin/*.bin
-
-# DailyHot cache files (运行时热点数据缓存，不应提交)
+# 插件缓存文件
+Plugin/ArtistMatcher/artist_cache.json
 Plugin/DailyHot/dailyhot_cache.md
 Plugin/DailyHot/dailyhot_cache.json
 Plugin/DailyHot/*.cache
 Plugin/DailyHot/dist/cache/
+Plugin/EmojiListGenerator/generated_lists/
+Plugin/FRPSInfoProvider/frps_info_cache.txt
+Plugin/ImageProcessor/image_cache.json
+Plugin/ImageProcessor/multimodal_cache.json
+Plugin/MCPOMonitor/mcpo_status_cache.txt
+Plugin/MCPOMonitor/mcpo_status_cache.json
+Plugin/ProjectAnalyst/database/
+Plugin/RAGDiaryPlugin/vector_cache.json
+Plugin/RAGDiaryPlugin/meta_chain_vector_cache.json
+Plugin/RAGDiaryPlugin/rag_tags.json
+Plugin/RAGDiaryPlugin/semantic_groups.json
+Plugin/RAGDiaryPlugin/semantic_groups.edit.json
+Plugin/RAGDiaryPlugin/semantic_vectors/
+Plugin/RAGDiaryPlugin/*.bin
+Plugin/TavilySearch/.vcptoolbox_tavily_cache.json
+Plugin/UserAuth/code.bin
+Plugin/VCPLog/log/VCPlog.txt
+Plugin/WeatherReporter/weather_cache.json
+Plugin/WeatherReporter/weather_cache.txt
+Plugin/WeatherReporter/city_cache.txt
+Plugin/WeatherReporter/*.cache
 
-# External tools and libraries
-bfg.jar
+# ===== 图片 / 媒体 =====
+# 忽略通用表情包目录下的所有内容...
+image/通用表情包/*
+# ...除了这两个文件
+!image/通用表情包/阿库娅-一脸智障.jpg
+!image/通用表情包/阿库娅-智慧的眼神.jpg
+
+# 忽略 FluxGen 生成的图片
+image/fluxgen/
+
+# ===== IDE / OS 文件 =====
+.vscode/
+.DS_Store
+**/.DS_Store
+.DS_Store?
+/.obsidian
+.history
+
+# ===== 编译产物 =====
+rust-vexus-lite/target/
+target/
+
+# ===== Claude / AI 工具文件 =====
+.claude/
+.crush/
+.spec-workflow/
+.serena/
+.snow/
 .bmad-core/
 
-# 临时分析文件
+# ===== 本地Docker配置 (避免合并冲突) =====
+Dockerfile
+docker-compose.yml
+
+# ===== Plugin binary cache =====
+**/*.bin
+!VectorStore/*.bin
+!VectorStore/*_map.json
+!VectorStore/*.json
+
+# ===== 外部工具 =====
+bfg.jar
+
+# ===== 临时 / 分析文件 =====
 *_analysis.md
 *_temp.*
 
-# 本地开发配置
-*.local.*
-config.local.*
-
-# LLM文档目录 (本地AI文档生成目录，不应提交)
+# ===== LLM文档目录 =====
 llmdoc/
