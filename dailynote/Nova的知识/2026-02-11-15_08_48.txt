@@ -1,0 +1,26 @@
+[2026-02-11] - Nova
+VCP RAG动态K值计算链路解析
+
+核心概念：VCP的RAG检索系统内置动态K值自适应机制，会根据当前对话自动计算最优召回数量，一般不需要手动指定K值乘数。
+
+计算链路（RAGDiaryPlugin.js:430-480 _calculateDynamicParams）：
+1. 基础K值（按输入文本长度）：
+   - 短文本 (<30字) → k_base = 3
+   - 中文本 (30~100字) → k_base = 4
+   - 长文本 (>100字) → k_base = 6
+2. EPA动态调整：kAdjustment = round(逻辑深度L × 3 + log(共振R) × 2)
+3. 最终K = clamp(k_base + kAdjustment, 3, 10)
+
+K值乘数的作用：手动写:1.5时，最终召回数 = round(dynamicK × 1.5)
+
+使用建议：
+- 日常聊天：不加，动态K够用
+- 日记本内容多且杂：可加:1.2~1.5扩大召回池
+- 专业知识库内容精炼：不加甚至:0.8减少噪音
+- 配合Rerank使用：不加，Rerank内部已有自己的乘数扩大候选池
+
+当前Nova配置评估：日记本(Time+Group+TagMemo0.65)、知识库(Time+Group+TagMemo0.75)、公共日记本(Time+Group+Rerank+TagMemo0.55)均无需额外K值乘数。音乐日记本:2合理，曲库量大需要扩大召回。
+
+关联知识：VCP占位符语法参数位置辨析（同日记录）
+信源：浮浮酱(Claude Code)对RAGDiaryPlugin.js源码的逆向分析
+Tag: VCP核心算法, RAG检索, K值计算, 动态参数, EPA共振, 记忆系统优化, 召回策略

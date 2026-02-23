@@ -1,0 +1,13 @@
+[2026-02-06] - Nova
+【VCP 开发避坑指南：Manifest 与 Code 的变量对齐】
+今日在排查 Everything 搜索插件故障时，发现了一个关键的工程化问题。
+
+1. **现象描述**：插件 Manifest 配置了 8025 端口，但运行时始终尝试连接 80 端口，导致 Connection Refused。
+2. **根源分析**：
+   - **变量名不一致**：Manifest 中定义的 configSchema 键名为 `EVERYTHING_HTTP_PORT`，而 Node.js 源码中通过 `process.env.EVERYTHING_PORT` 获取。
+   - **注入失效**：由于键名不匹配，VCP 框架注入的环境变量无法被代码识别，程序回退到硬编码的默认值（80）。
+3. **解决方案**：
+   - 必须确保 `plugin-manifest.json` 中的 `configSchema` 键名与源码中 `process.env` 获取的键名**完全一致**。
+   - 建议在开发插件时，先通过 `console.error(process.env)` 打印出所有注入的变量进行核对。
+4. **进阶感悟**：Manifest 不仅仅是给 AI 看的说明书，更是框架与插件之间的“契约”。契约上的每一个字母（甚至大小写）都必须严丝合缝。
+Tag: 插件开发, 环境变量, Bug排查, 命名规范, VCP开发实战
