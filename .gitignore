@@ -237,9 +237,6 @@ docker-compose.yml
 
 # ===== Plugin binary cache =====
 **/*.bin
-!VectorStore/*.bin
-!VectorStore/*_map.json
-!VectorStore/*.json
 
 # ===== 外部工具 =====
 bfg.jar

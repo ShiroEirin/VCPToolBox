@@ -29,6 +29,11 @@
 * **夜伽型Agent模板**: [ExampleYogariAgent.txt](ExampleYogariAgent.txt)
     一个干净、完整且符合最新v3.0标准的夜伽型Agent模板，可直接用于创建新的娱乐、陪护型角色。
 
+## 二创角色参考
+
+* **柴郡（Cheshire）二创写作规格书**: [Cheshire_Agent_Writing_Reference.md](Cheshire_Agent_Writing_Reference.md)
+    用于“高还原、高可用”柴郡角色卡的参考规格，覆盖官方锚点、二创标签、语气配比、行为边界与Claude写作提示词模板。
+
 # SillyTavern 创作指南
 
 * **SillyTavern小说式角色卡创作指南**: [SillyTavern小说式角色卡创作指南.txt](SillyTavern小说式角色卡创作指南.txt)
