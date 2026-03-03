@@ -62,6 +62,7 @@ class KnowledgeBaseManager {
         this.initialized = false;
         this.diaryNameVectorCache = new Map();
         this.pendingFiles = new Set();
+        this.fileRetryCount = new Map(); // 🛡️ 文件重试计数器，防止无限循环
         this.batchTimer = null;
         this.isProcessing = false;
         this.saveTimers = new Map();
@@ -981,8 +982,9 @@ class KnowledgeBaseManager {
     async _flushBatch() {
         if (this.isProcessing || this.pendingFiles.size === 0) return;
         this.isProcessing = true;
+
+        // 1. 📋 准备批次：先从队列中取出，但不立即永久删除
         const batchFiles = Array.from(this.pendingFiles).slice(0, this.config.maxBatchSize);
-        batchFiles.forEach(f => this.pendingFiles.delete(f));
         if (this.batchTimer) clearTimeout(this.batchTimer);
 
         console.log(`[KnowledgeBase] 🚌 Processing ${batchFiles.length} files...`);
@@ -1019,7 +1021,15 @@ class KnowledgeBaseManager {
                 } catch (e) { if (e.code !== 'ENOENT') console.warn(`Read error ${filePath}:`, e.message); }
             }));
 
-            if (docsByDiary.size === 0) { this.isProcessing = false; return; }
+            if (docsByDiary.size === 0) {
+                // 🛡️ 所有文件均无变更，安全移出队列，防止无限自检循环
+                batchFiles.forEach(f => {
+                    this.pendingFiles.delete(f);
+                    this.fileRetryCount.delete(f);
+                });
+                this.isProcessing = false;
+                return;
+            }
 
             // 2. 收集所有文本进行 Embedding
             const allChunksWithMeta = [];
@@ -1057,6 +1067,8 @@ class KnowledgeBaseManager {
             if (allChunksWithMeta.length > 0) {
                 const texts = allChunksWithMeta.map(i => i.text);
                 chunkVectors = await getEmbeddingsBatch(texts, embeddingConfig);
+                // 🛡️ getEmbeddingsBatch 现在保证 chunkVectors.length === texts.length
+                // 失败/超长的位置为 null，后续写入 DB 时会跳过这些 null 向量
             }
 
             let tagVectors = [];
@@ -1064,7 +1076,9 @@ class KnowledgeBaseManager {
                 const tagLimit = 100;
                 for (let i = 0; i < newTags.length; i += tagLimit) {
                     const batch = newTags.slice(i, i + tagLimit);
-                    tagVectors.push(...await getEmbeddingsBatch(batch, embeddingConfig));
+                    const batchVectors = await getEmbeddingsBatch(batch, embeddingConfig);
+                    // 同样保证长度对齐，null 表示失败
+                    tagVectors.push(...batchVectors);
                 }
             }
 
@@ -1078,6 +1092,7 @@ class KnowledgeBaseManager {
                 const getTagId = this.db.prepare('SELECT id FROM tags WHERE name = ?');
 
                 newTags.forEach((t, i) => {
+                    if (!tagVectors[i]) return; // 🛡️ 跳过向量化失败的 tag
                     const vecBuf = Buffer.from(new Float32Array(tagVectors[i]).buffer);
                     insertTag.run(t, vecBuf);
                     const id = getTagId.get(t).id;
@@ -1131,7 +1146,7 @@ class KnowledgeBaseManager {
 
                         doc.chunks.forEach((txt, i) => {
                             const meta = metaMap.get(`${doc.relPath}:${i}`);
-                            if (meta && meta.vector) {
+                            if (meta && meta.vector) { // 🛡️ null 向量的 chunk 自然被跳过，不会写入错误数据
                                 const vecBuf = Buffer.from(new Float32Array(meta.vector).buffer);
                                 const r = addChunk.run(fileId, i, txt, vecBuf);
                                 updates.get(dName).push({ id: r.lastInsertRowid, vec: vecBuf });
@@ -1206,6 +1221,12 @@ class KnowledgeBaseManager {
                 this._scheduleIndexSave(dName);
             }
 
+            // 5. ✅ 成功处理后，移除文件并清空重试计数
+            batchFiles.forEach(f => {
+                this.pendingFiles.delete(f);
+                this.fileRetryCount.delete(f); // 清空重试计数
+            });
+
             console.log(`[KnowledgeBase] ✅ Batch complete. Updated ${updates.size} diary indices.`);
 
             // 优化1：数据更新后，异步重建共现矩阵
@@ -1217,6 +1238,20 @@ class KnowledgeBaseManager {
             if (e.stack) {
                 console.error('Stack Trace:', e.stack);
             }
+
+            // 🛡️ 核心修复：重试计数，防止确定性失败导致无限循环
+            const MAX_FILE_RETRIES = 3;
+            batchFiles.forEach(f => {
+                const count = (this.fileRetryCount.get(f) || 0) + 1;
+                if (count >= MAX_FILE_RETRIES) {
+                    console.error(`[KnowledgeBase] ⛔ File "${f}" failed ${MAX_FILE_RETRIES} times. Removing from queue permanently.`);
+                    this.pendingFiles.delete(f);
+                    this.fileRetryCount.delete(f);
+                } else {
+                    this.fileRetryCount.set(f, count);
+                    console.warn(`[KnowledgeBase] ⚠️ File "${f}" retry ${count}/${MAX_FILE_RETRIES}.`);
+                }
+            });
         }
         finally {
             this.isProcessing = false;
