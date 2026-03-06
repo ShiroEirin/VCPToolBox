@@ -1,0 +1,18 @@
+{
+  "name": "IMAPSearch",
+  "displayName": "IMAP 邮件本地搜索",
+  "version": "1.0.0",
+  "pluginType": "synchronous",
+  "description": "在IMAPIndex插件生成的本地邮件存储中执行全文搜索",
+  "author": "VCP Team",
+  "enabled": true,
+  "entry": "main.py",
+  "runtime": "python",
+  "commands": [
+    "IMAPSearch"
+  ],
+  "config": {
+    "indexDir": "./mail_index",
+    "pageSize": 50
+  }
+}

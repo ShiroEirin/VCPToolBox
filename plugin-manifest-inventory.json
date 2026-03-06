@@ -1,0 +1,255 @@
+{
+  "scanDate": "2026-03-03T09:27:42.545Z",
+  "totalPlugins": 76,
+  "summary": {
+    "static": 8,
+    "synchronous": 50,
+    "asynchronous": 3,
+    "service": 4,
+    "hybridservice": 4,
+    "messagePreprocessor": 2
+  },
+  "plugins": [
+    {
+      "name": "DailyHot",
+      "pluginType": "static",
+      "description": "在后台周期性地获取所有主流平台的今日热榜信息",
+      "protocol": "stdio",
+      "entryPoint": "node daily-hot.js",
+      "invocationCommands": [],
+      "parameters": []
+    },
+    {
+      "name": "CapturePreprocessor",
+      "pluginType": "messagePreprocessor",
+      "description": "一个预处理插件，用于检测和替换消息中的截图和摄像头捕获占位符",
+      "protocol": "direct",
+      "entryPoint": "CapturePreprocessor.js",
+      "invocationCommands": [],
+      "parameters": []
+    },
+    {
+      "name": "FileListGenerator",
+      "pluginType": "static",
+      "description": "生成 'file' 目录下的文件和文件夹列表",
+      "protocol": "stdio",
+      "entryPoint": "node file-list-generator.js",
+      "invocationCommands": [],
+      "parameters": []
+    },
+    {
+      "name": "ArtistMatcher",
+      "pluginType": "synchronous",
+      "description": "根据用户输入的画师名，模糊匹配SDXL模型内部的画师Tag",
+      "protocol": "stdio",
+      "entryPoint": "python artist_matcher.py",
+      "invocationCommands": ["FindArtist", "GetRandomArtistString"],
+      "parameters": [
+        {"name": "command", "type": "string", "required": true},
+        {"name": "artist_name", "type": "string", "required": true}
+      ]
+    },
+    {
+      "name": "ComfyUIGen",
+      "pluginType": "synchronous",
+      "description": "通过 ComfyUI API 使用自定义工作流生成高质量图像",
+      "protocol": "stdio",
+      "entryPoint": "node ComfyUIGen.js",
+      "invocationCommands": ["ComfyUIGenerateImage"],
+      "parameters": [
+        {"name": "prompt", "type": "string", "required": true},
+        {"name": "negative_prompt", "type": "string", "required": false},
+        {"name": "workflow", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "AgentMessage",
+      "pluginType": "synchronous",
+      "description": "允许AI通过WebSocket向用户前端发送格式化消息",
+      "protocol": "stdio",
+      "entryPoint": "node AgentMessage.js",
+      "invocationCommands": ["AgentMessage"],
+      "parameters": [
+        {"name": "Maid", "type": "string", "required": false},
+        {"name": "message", "type": "string", "required": true}
+      ]
+    },
+    {
+      "name": "DoubaoGen",
+      "pluginType": "synchronous",
+      "description": "通过火山方舟 API 使用 Doubao Seedream 3.0 模型生成图片",
+      "protocol": "stdio",
+      "entryPoint": "node DoubaoGen.js",
+      "invocationCommands": ["DoubaoGenerateImage"],
+      "parameters": [
+        {"name": "prompt", "type": "string", "required": true},
+        {"name": "resolution", "type": "string", "required": true}
+      ]
+    },
+    {
+      "name": "DailyNoteManager",
+      "pluginType": "synchronous",
+      "description": "一个日记管理插件，用于接收AI输出的日记内容进行智能分析和保存",
+      "protocol": "stdio",
+      "entryPoint": "node daily-note-manager.js",
+      "invocationCommands": ["DailyNoteManager"],
+      "parameters": [
+        {"name": "command", "type": "string", "required": true}
+      ]
+    },
+    {
+      "name": "AnimeFinder",
+      "pluginType": "synchronous",
+      "description": "一个通过图片URL或本地文件路径查找对应动漫信息的插件",
+      "protocol": "stdio",
+      "entryPoint": "node AnimeFinder.js",
+      "invocationCommands": ["findAnimeByUrl"],
+      "parameters": [
+        {"name": "imageUrl", "type": "string", "required": true}
+      ]
+    },
+    {
+      "name": "ArxivDailyPapers",
+      "pluginType": "static",
+      "description": "Fetches daily research papers from the Arxiv API",
+      "protocol": "stdio",
+      "entryPoint": "node ArxivDailyPapers.js",
+      "invocationCommands": [],
+      "parameters": []
+    },
+    {
+      "name": "CodeSearcher",
+      "pluginType": "synchronous",
+      "description": "一个使用Rust编写的高性能代码搜索插件",
+      "protocol": "stdio",
+      "entryPoint": "CodeSearcher.exe",
+      "invocationCommands": ["SearchCode"],
+      "parameters": [
+        {"name": "query", "type": "string", "required": true},
+        {"name": "search_path", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "DailyNote",
+      "pluginType": "synchronous",
+      "description": "一个多功能日记插件，提供创建和更新日记的功能",
+      "protocol": "stdio",
+      "entryPoint": "node dailynote.js",
+      "invocationCommands": ["create", "update"],
+      "parameters": [
+        {"name": "command", "type": "string", "required": true},
+        {"name": "maid", "type": "string", "required": true},
+        {"name": "Date", "type": "string", "required": true},
+        {"name": "Content", "type": "string", "required": true}
+      ]
+    },
+    {
+      "name": "DMXDoubaoGen",
+      "pluginType": "synchronous",
+      "description": "通过 DMXAPI 使用其提供的模型生成和编辑图片",
+      "protocol": "stdio",
+      "entryPoint": "node DoubaoGen.js",
+      "invocationCommands": ["DoubaoGenerateImage", "DoubaoEditImage", "DoubaoComposeImage"],
+      "parameters": [
+        {"name": "command", "type": "string", "required": true},
+        {"name": "prompt", "type": "string", "required": true}
+      ]
+    },
+    {
+      "name": "EmojiListGenerator",
+      "pluginType": "static",
+      "description": "扫描项目 image/ 目录下的表情包文件夹，生成对应的 .txt 列表文件",
+      "protocol": "stdio",
+      "entryPoint": "node emoji-list-generator.js",
+      "invocationCommands": [],
+      "parameters": []
+    },
+    {
+      "name": "BilibiliFetch",
+      "pluginType": "synchronous",
+      "description": "Bilibili 视频内容获取插件。支持视频信息抓取、关键词搜索、UP主投稿列表获取",
+      "protocol": "stdio",
+      "entryPoint": "python BilibiliFetch.py",
+      "invocationCommands": ["BilibiliFetch", "BilibiliSearch", "GetUpVideos"],
+      "parameters": [
+        {"name": "url", "type": "string", "required": true},
+        {"name": "action", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "DeepWikiVCP",
+      "pluginType": "synchronous",
+      "description": "一个同步插件，用于抓取 deepwiki.com 的内容并将其转换为 Markdown 格式",
+      "protocol": "stdio",
+      "entryPoint": "node Plugin/DeepWikiVCP/deepwiki_vcp.js",
+      "invocationCommands": ["deepwiki_fetch"],
+      "parameters": [
+        {"name": "url", "type": "string", "required": true}
+      ]
+    },
+    {
+      "name": "DailyNoteWrite",
+      "pluginType": "synchronous",
+      "description": "接收日记数据并将其写入对应的日记文件",
+      "protocol": "stdio",
+      "entryPoint": "node daily-note-write.js",
+      "invocationCommands": [],
+      "parameters": []
+    },
+    {
+      "name": "CrossRefDailyPapers",
+      "pluginType": "static",
+      "description": "Fetches daily research papers from the CrossRef API",
+      "protocol": "stdio",
+      "entryPoint": "node CrossRefDailyPapers.js",
+      "invocationCommands": [],
+      "parameters": []
+    },
+    {
+      "name": "DailyNotePanel",
+      "pluginType": "service",
+      "description": "通过 PluginManager 在主服务上注册 DailyNotePanel 的静态页面端点和 dailynote API 端点",
+      "protocol": "direct",
+      "entryPoint": "index.js",
+      "invocationCommands": [],
+      "parameters": []
+    },
+    {
+      "name": "ChromeBridge",
+      "pluginType": "hybridservice",
+      "description": "混合插件：既能让AI实时观察Chrome页面内容，又能执行浏览器控制命令",
+      "protocol": "direct",
+      "entryPoint": "ChromeBridge.js",
+      "invocationCommands": ["type", "click", "open_url"],
+      "parameters": [
+        {"name": "command", "type": "string", "required": true},
+        {"name": "target", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false}
+      ]
+    }
+  ],
+  "nameDiscrepancies": [
+    {
+      "manifestName": "GrokVideo",
+      "aiCallName": "GrokVideoGen",
+      "location": "Plugin/GrokVideo/plugin-manifest.json"
+    },
+    {
+      "manifestName": "CodeSearcher",
+      "aiCallName": "ServerCodeSearcher",
+      "location": "Plugin/CodeSearcher/plugin-manifest.json"
+    },
+    {
+      "manifestName": "PowerShellExecutor",
+      "aiCallName": "ServerPowerShellExecutor",
+      "location": "Plugin/PowerShellExecutor/plugin-manifest.json"
+    },
+    {
+      "manifestName": "ServerSearchController",
+      "aiCallName": "LocalSearchController",
+      "location": "Plugin/VCPEverything/plugin-manifest.json"
+    }
+  ],
+  "scanStatus": "完成",
+  "notes": "完整扫描已完成。共扫描76个插件，包括所有类型的插件。"
+}

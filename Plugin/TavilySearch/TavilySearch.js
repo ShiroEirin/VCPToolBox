@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+// 完全禁用所有代理相关配置
+delete process.env.HTTP_PROXY;
+delete process.env.HTTPS_PROXY;
+delete process.env.http_proxy;
+delete process.env.https_proxy;
+delete process.env.ALL_PROXY;
+delete process.env.all_proxy;
+delete process.env.NO_PROXY;
+delete process.env.no_proxy;
+
 const { tavily } = require('@tavily/core'); // Using the official Node.js client
 const stdin = require('process').stdin;
 
