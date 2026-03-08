@@ -1,11 +1,18 @@
-[2026-03-03] - Codex
+[2026-03-06] - Nova
 [VCP百科全书] 插件说明——MCPO（原子切片）
+⚠️ 格式警告：此插件使用旧版manifest格式，以下字段已过时
+  - entry → 新版应使用 entryPoint.command
+  - runtime → 新版应使用 entryPoint.type
+  - commands → 新版应使用 capabilities.invocationCommands
+  - config → 新版应使用 configSchema
 
 一、插件身份
 - name: MCPO
 - displayName: MCPO 工具桥接器
+- version: 1.0.0
 - pluginType: synchronous
-- command: list_tools, call_tool, get_tool_info, manage_server, discover_tools, list_configs, health_check
+- author: VCP Team
+- description: 基于mcpo的MCP工具桥接插件，能够自动发现、缓存和调用MCP工具
 
 二、核心能力
 - 基于 mcpo 的 MCP 工具桥接插件，能够自动发现、缓存和调用 MCP 工具，支持多种 MCP 服务器类型。
@@ -14,35 +21,52 @@
 三、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+四、配置重点（旧版格式）
+- config.cacheExpiry: 3600 (缓存过期时间，秒)
+- config.timeout: 30 (超时时间，秒)
+- ⚠️ 注意：config字段为旧版格式，新版应使用configSchema对象格式
 
 五、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
 
-六、调用示例
+六、调用规则与使用情形
+1. list_tools - 列出所有可用工具
+   使用情形：需要查看当前可用的MCP工具列表时调用
+2. call_tool - 调用指定工具
+   使用情形：需要执行特定的MCP工具时调用，需提供tool_name_param和params参数
+3. get_tool_info - 获取工具信息
+   使用情形：需要了解某个工具的详细信息和参数要求时调用
+4. manage_server - 管理MCP服务器
+   使用情形：需要启动、停止或管理MCP服务器实例时调用
+5. discover_tools - 发现工具
+   使用情形：需要重新扫描和发现可用的MCP工具时调用
+6. list_configs - 列出配置
+   使用情形：需要查看当前MCP服务器的配置信息时调用
+7. health_check - 健康检查
+   使用情形：需要验证MCP服务状态和连接是否正常时调用
+
+七、调用示例
 
 1. list_tools - 列出所有可用工具
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」MCPO「末」,
-action:「始」list_tools「末」
+tool_name:「始」MCPO「末",
+command:「始」list_tools「末」
 <<<[END_TOOL_REQUEST]>>>
 
 2. call_tool - 调用指定工具
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」MCPO「末」,
-action:「始」call_tool「末」,
-tool_name_param:「始」example_tool「末」,
+tool_name:「始」MCPO「末",
+command:「始」call_tool「末",
+tool_name_param:「始」example_tool「末",
 params:「始」{"key": "value"}「末」
 <<<[END_TOOL_REQUEST]>>>
 
 3. manage_server - 管理MCP服务器
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」MCPO「末」,
-action:「始」manage_server「末」,
+tool_name:「始」MCPO「末",
+command:「始」manage_server「末",
 server_action:「始」start「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: MCPO, synchronous, 同步调用, list_tools, call_tool, get_tool_info, manage_server, discover_tools, multi-command
+Tag: MCPO, synchronous, 同步调用, list_tools, call_tool, get_tool_info, manage_server, discover_tools, multi-command, 旧版格式

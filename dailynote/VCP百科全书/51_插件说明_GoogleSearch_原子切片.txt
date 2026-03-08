@@ -5,27 +5,102 @@
 - name: GoogleSearch
 - displayName: 谷歌搜索 (API版)
 - pluginType: synchronous
-- command: GoogleSearch
+- protocol: stdio
+- timeout: 15000ms (15秒)
+- version: 2.0.0
+- author: Kilo Code
+- 主要命令：GoogleSearch
 
 二、核心能力
 - 一个使用Google Custom Search API进行搜索的同步插件。
-- 提供可调用命令：GoogleSearch。
+- 基于Google Custom Search JSON API，提供高质量的网页搜索结果。
 
-三、占位符与注入点
+三、configSchema 配置项
+| 配置项 | 类型 | 描述 | 必填 |
+|--------|------|------|------|
+| GOOGLE_SEARCH_API | string | 谷歌自定义搜索API密钥 | 是 |
+| GOOGLE_CX | string | 谷歌自定义搜索引擎ID | 是 |
+| GOOGLE_PROXY_PORT | string | 用于API请求的代理端口（可选） | 否 |
+
+### 3.1 配置获取指南
+1. **GOOGLE_SEARCH_API**: 
+   - 访问 https://developers.google.com/custom-search/v1/overview
+   - 点击"Get a Key"创建项目并获取API密钥
+   
+2. **GOOGLE_CX**:
+   - 访问 https://programmablesearchengine.google.com/
+   - 创建自定义搜索引擎
+   - 在"基本资料"页面获取搜索引擎ID（cx）
+
+四、GoogleSearch 命令详解
+
+### 4.1 功能描述
+调用此工具在谷歌上执行搜索，返回相关网页结果。
+
+### 4.2 参数说明
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "GoogleSearch" |
+| query | string | 是 | 需要在谷歌上搜索的关键词或查询语句 |
+
+### 4.3 返回结果
+搜索结果包含以下字段：
+- **title**: 网页标题
+- **link**: 网页链接
+- **snippet**: 网页摘要/描述
+- **displayLink**: 显示域名
+
+五、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
-
-五、排障建议
+六、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- API错误：检查GOOGLE_SEARCH_API和GOOGLE_CX配置是否正确。
+- 配额超限：Google Custom Search API有每日查询限额，注意使用量。
+- 代理问题：如在中国大陆使用，可能需要配置GOOGLE_PROXY_PORT。
 
-六、调用示例
+七、调用示例
+
+基础搜索:
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」GoogleSearch「末」,
-command:「始」GoogleSearch「末」
+command:「始」GoogleSearch「末」,
+query:「始」如何学习编程？「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: GoogleSearch, synchronous, 同步调用, 检索, 信息获取
+技术查询:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GoogleSearch「末」,
+command:「始」GoogleSearch「末」,
+query:「始」VCP插件开发教程「末」
+<<<[END_TOOL_REQUEST]>>>
+
+学术研究:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GoogleSearch「末」,
+command:「始」GoogleSearch「末」,
+query:「始」transformer architecture attention mechanism paper「末」
+<<<[END_TOOL_REQUEST]>>>
+
+八、使用场景
+1. **信息检索**: 快速查找网页信息
+2. **知识验证**: 核实事实和数据
+3. **资源发现**: 寻找教程、文档、工具
+4. **竞品分析**: 搜索相关产品或服务信息
+
+九、注意事项
+- 免费版Google Custom Search API有每日100次查询限制
+- 超出限额后需要付费或等待次日重置
+- 搜索结果受搜索引擎配置影响（可设置搜索整个网络或特定网站）
+- 建议使用英文关键词获得更全面的结果
+
+十、与其他搜索插件对比
+| 特性 | GoogleSearch | PubMedSearch | FlashDeepSearch |
+|------|--------------|--------------|-----------------|
+| 数据源 | 通用网页 | 医学文献 | 多源综合 |
+| 实时性 | 高 | 中 | 高 |
+| 专业度 | 通用 | 医学专业 | 研究深度 |
+| 适用场景 | 日常查询 | 学术文献 | 深度研究 |
+
+Tag: GoogleSearch, synchronous, 同步调用, 检索, 信息获取, GOOGLE_SEARCH_API, GOOGLE_CX, GOOGLE_PROXY_PORT, configSchema, GoogleCustomSearch, 网页搜索, timeout15000

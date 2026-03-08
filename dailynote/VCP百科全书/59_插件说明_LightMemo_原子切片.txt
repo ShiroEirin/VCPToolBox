@@ -1,31 +1,70 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件说明——LightMemo（原子切片）
+[2026-03-03] - Nova
+[VCP百科全书] 插件说明——LightMemo（原子切片）修正版
 
 一、插件身份
 - name: LightMemo
 - displayName: 轻量回忆插件 (LightMemo)
 - pluginType: hybridservice
+- protocol: direct
+- entryPoint: LightMemo.js
 - command: SearchRAG
 
 二、核心能力
 - 一个允许AI主动搜索其RAG知识库（日记、知识库）的插件，作为DeepMemo（上下文搜索）的补充。
 - 提供可调用命令：SearchRAG。
 
-三、占位符与注入点
+三、参数详解（SearchRAG命令）
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| query | string | ✓ | - | 用于向量搜索的查询内容 |
+| maid | string | ✗ | - | AI自己的署名，用于在非全局搜索模式下定位相关日记本。如果提供了 folder 参数，则此参数会被忽略 |
+| folder | string | ✗ | - | 指定搜索的日记文件夹名称（如"小冰的知识"）。如果提供此参数，将只在该文件夹中搜索并忽略 maid 过滤 |
+| k | number | ✗ | 5 | 返回的结果数量 |
+| rerank | boolean | ✗ | false | 是否启用Rerank。如果为true，将以2倍k值搜索，然后重排并返回k个结果 |
+| search_all_knowledge_bases | boolean | ✗ | false | 是否搜索所有知识库。如果为false，则先根据maid或folder找到相关日记本再进行搜索；如果为true，则直接在所有（未被屏蔽的）日记本中搜索 |
+| tag_boost | number | ✗ | 0.5 | TagMemo增强因子，取值范围0-1。设置为0则禁用。该功能通过查询向量关联的标签来增强搜索的相关性 |
+
+**特殊说明**：当在query字段里使用[音乐检索]时，会自动搜索MusicDiary文件夹中的音乐，此时Tagmemo和Rerank参数的开关依旧有效。
+
+四、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
-
-五、排障建议
-- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+五、配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| EXCLUDED_FOLDERS | string | "已整理,夜伽,MusicDiary" | 需要屏蔽、任何时候都不搜索的日记文件夹名称，用逗号分隔 |
+| RerankUrl | string | "" | Rerank服务的URL，如果需要使用Rerank功能则必须提供 |
+| RerankApi | string | "" | Rerank服务的API密钥 |
+| RerankModel | string | "" | Rerank服务的模型名称 |
 
 六、调用示例
+基础搜索：
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」LightMemo「末」,
-command:「始」SearchRAG「末」
+command:「始」SearchRAG「末」,
+query:「始」我昨天学到了什么新知识「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: LightMemo, hybridservice, 混合服务, 检索, 信息获取, 记忆管理, SearchRAG
+高级搜索（指定文件夹+TagMemo+Rerank）：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LightMemo「末」,
+command:「始」SearchRAG「末」,
+folder:「始」小冰的知识「末」,
+query:「始」关于上次项目会议的讨论内容「末」,
+k:「始」3「末」,
+rerank:「始」true「末」,
+search_all_knowledge_bases:「始」false「末」,
+tag_boost:「始」0.6「末」
+<<<[END_TOOL_REQUEST]>>>
+
+七、排障建议
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- Rerank失败：检查RerankUrl、RerankApi、RerankModel是否已正确配置。
+
+八、RAG标签建议（TagMemo V5）
+主体词元：LightMemo, SearchRAG, 轻量回忆, RAG检索, 知识库搜索
+动作词元：query, folder, maid, k, rerank, tag_boost, search_all_knowledge_bases
+故障词元：Rerank配置缺失, 文件夹不存在, 搜索结果为空
+
+Tag: LightMemo, hybridservice, 混合服务, 检索, 信息获取, 记忆管理, SearchRAG, Rerank, TagMemo, 修正版

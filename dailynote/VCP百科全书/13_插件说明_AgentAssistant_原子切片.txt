@@ -8,7 +8,9 @@
 - 通讯协议：`direct`
 - 入口：`AgentAssistant.js`
 - 版本：`2.0.0`
-- 配置项：`AGENT_ASSISTANT_MAX_HISTORY_ROUNDS`、`AGENT_ASSISTANT_CONTEXT_TTL_HOURS`
+- 配置项：
+  * `AGENT_ASSISTANT_MAX_HISTORY_ROUNDS` (integer): 会话历史保留的最大轮次数
+  * `AGENT_ASSISTANT_CONTEXT_TTL_HOURS` (integer): 上下文缓存的有效期（小时）
 
 二、核心能力（按 manifest + README）
 1) Agent 间即时通讯

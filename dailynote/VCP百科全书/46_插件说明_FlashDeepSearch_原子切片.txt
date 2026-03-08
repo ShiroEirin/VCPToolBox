@@ -5,27 +5,101 @@
 - name: FlashDeepSearch
 - displayName: 闪电深度研究插件
 - pluginType: synchronous
-- command: StartResearch
+- protocol: stdio
+- timeout: 600000ms (10分钟)
+- version: 1.0.0
+- author: VCP
+- 主要命令：StartResearch
 
 二、核心能力
 - 一个强大的深度研究插件，能够围绕一个主题进行多维度、跨领域的关键词扩展，并综合搜索结果生成研究报告。
-- 提供可调用命令：StartResearch。
+- 工作流程：主题分析 → 关键词扩展 → 并行搜索 → 结果综合 → 生成报告
 
-三、占位符与注入点
+三、configSchema 配置项
+| 配置项 | 类型 | 描述 | 必填 |
+|--------|------|------|------|
+| DeepSearchKey | string | 用于访问大模型服务的API Key | 是 |
+| DeepSearchUrl | string | 大模型服务的API端点URL | 是 |
+| DeepSearchModel | string | 用于生成研究关键词和最终报告的主模型名称 | 是 |
+| GoogleSearchModel | string | 用于执行联网搜索的辅助模型名称 | 是 |
+| MaxSearchList | integer | 并发执行搜索任务的队列上限 | 是 |
+
+四、StartResearch 命令详解
+
+### 4.1 功能描述
+调用此工具对一个指定主题进行深度研究。系统会自动：
+1. 分析主题核心概念
+2. 生成多个维度的探索性关键词（数量由SearchBroadness控制）
+3. 并行执行网络搜索
+4. 综合所有搜索结果
+5. 生成结构化的研究报告
+
+### 4.2 参数说明
+| 参数 | 类型 | 必需 | 范围 | 描述 |
+|------|------|------|------|------|
+| command | string | 是 | - | 固定为 "StartResearch" |
+| SearchContent | string | 是 | - | 需要进行深度研究的自然语言主题描述 |
+| SearchBroadness | integer | 是 | 5-20 | 定义研究的广度，即需要生成的探索性关键词数量 |
+
+### 4.3 SearchBroadness 取值建议
+| 值 | 适用场景 |
+|----|----------|
+| 5-8 | 主题明确、范围狭窄的研究 |
+| 9-12 | 一般性主题研究（推荐） |
+| 13-16 | 跨学科、综合性研究 |
+| 17-20 | 全景式、探索性研究 |
+
+### 4.4 返回结果
+- 结构化研究报告，包含：
+  - 主题概述
+  - 多维度分析
+  - 关键发现总结
+  - 相关资源链接
+
+五、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
-
-五、排障建议
+六、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 超时问题：研究任务可能耗时较长，确保timeout设置充足（默认10分钟）。
+- API错误：检查DeepSearchKey和DeepSearchUrl配置是否正确。
 
-六、调用示例
+七、调用示例
+
+基础调用:
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」FlashDeepSearch「末」,
-command:「始」StartResearch「末」
+command:「始」StartResearch「末」,
+SearchContent:「始」探讨人工智能在气候变化建模中的应用及其伦理影响「末」,
+SearchBroadness:「始」10「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: FlashDeepSearch, synchronous, 同步调用, 检索, 信息获取, 多媒体, StartResearch
+深度研究:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FlashDeepSearch「末」,
+command:「始」StartResearch「末」,
+SearchContent:「始」量子计算在药物研发领域的最新进展与未来挑战「末」,
+SearchBroadness:「始」15「末」
+<<<[END_TOOL_REQUEST]>>>
+
+聚焦研究:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FlashDeepSearch「末」,
+command:「始」StartResearch「末」,
+SearchContent:「始」Transformer架构中的注意力机制优化方法「末」,
+SearchBroadness:「始」8「末」
+<<<[END_TOOL_REQUEST]>>>
+
+八、使用场景
+1. **学术研究**: 快速了解一个新领域的前沿动态
+2. **市场调研**: 分析行业趋势和竞争格局
+3. **技术调研**: 评估技术方案的可行性和成熟度
+4. **决策支持**: 收集多方信息辅助决策制定
+
+九、注意事项
+- 研究质量取决于SearchContent的描述清晰度
+- SearchBroadness越大，研究越全面但耗时越长
+- 建议配合其他信息源进行交叉验证
+
+Tag: FlashDeepSearch, synchronous, 同步调用, 检索, 信息获取, 多媒体, StartResearch, DeepSearchKey, DeepSearchUrl, DeepSearchModel, GoogleSearchModel, MaxSearchList, configSchema, 深度研究, 关键词扩展, 研究报告

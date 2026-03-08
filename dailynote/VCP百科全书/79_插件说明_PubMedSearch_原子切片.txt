@@ -5,24 +5,266 @@
 - name: PubMedSearch
 - displayName: PubMed 文献检索插件
 - pluginType: synchronous
-- command: search_articles, advanced_search, search_by_author, search_by_journal, search_by_mesh_terms, get_trending_articles, get_article_details, get_abstract, get_full_text, batch_article_lookup, get_cited_by, get_references, get_similar_articles, export_citation, validate_pmid, convert_identifiers
+- protocol: stdio
+- timeout: 60000ms (60秒)
+- version: 1.0.0
+- author: B3000Kcn & DBL1F7E5
 
 二、核心能力
-- 提供基于 NCBI E-utilities 和 PMC 的 PubMed 文献检索、详情获取、引用/相似文献分析与标识符转换等能力。实现参考 PubMed-MCP-Server 原始实现，保持结果结构和语义尽量一致，便于从 MCP 平滑迁移。
-- 提供可调用命令：search_articles、advanced_search、search_by_author、search_by_journal、search_by_mesh_terms、get_trending_articles、get_article_details、get_abstract、get_full_text、batch_article_lookup、get_cited_by、get_references、get_similar_articles、export_citation、validate_pmid、convert_identifiers。
+- 提供基于 NCBI E-utilities 和 PMC 的 PubMed 文献检索、详情获取、引用/相似文献分析与标识符转换等能力。
+- 实现参考 PubMed-MCP-Server 原始实现，保持结果结构和语义尽量一致，便于从 MCP 平滑迁移。
 
-三、占位符与注入点
+三、configSchema 配置项
+| 配置项 | 类型 | 描述 | 必填 |
+|--------|------|------|------|
+| NCBI_API_KEY | string | NCBI E-utilities API Key，用于提升 PubMed 请求速率 | 可选（强烈建议配置） |
+| NCBI_EMAIL | string | 用于标识调用方的电子邮箱地址 | 可选（建议配置） |
+
+四、全部16个commands详解
+
+### 4.1 search_articles - 综合检索
+**功能**: 在 PubMed 中按关键词、作者、期刊、日期范围等进行综合检索，返回 PMID 列表与部分摘要信息。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "search_articles" |
+| query | string | 是 | 检索表达式，如 "cancer treatment"、"Smith J[Author]"、"Nature[Journal]" |
+| max_results | number | 否 | 返回的最大结果数，1–1000，默认 20 |
+| start | number | 否 | 分页起始位置，默认 0 |
+| sort | string | 否 | 排序方式：relevance(相关度)、pub_date(发表日期)、author(作者)、journal(期刊) |
+| date_from | string | 否 | 起始日期，格式 YYYY/MM/DD |
+| date_to | string | 否 | 截止日期，格式 YYYY/MM/DD |
+
+**返回**: totalResults, returnedResults, start, pmids[], articles[], queryTranslation
+
+---
+
+### 4.2 advanced_search - 高级检索
+**功能**: 执行字段级高级检索，将标题、摘要、作者、期刊、MeSH 术语、文献类型等组合成复杂布尔查询。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "advanced_search" |
+| title | string | 否 | 仅在标题中检索的关键词 |
+| abstract | string | 否 | 仅在摘要中检索的关键词 |
+| author | string | 否 | 作者名称 |
+| journal | string | 否 | 期刊名 |
+| mesh_terms | string[] | 否 | MeSH 术语列表 |
+| publication_types | string[] | 否 | 文献类型列表（如 "Clinical Trial", "Review"） |
+| boolean_operator | string | 否 | 各字段间布尔关系，"AND" 或 "OR"，默认 AND |
+| max_results | number | 否 | 最大返回数，默认 20，上限 1000 |
+
+**返回**: query, totalResults, pmids[]
+
+---
+
+### 4.3 search_by_author - 按作者搜索
+**功能**: 按作者及其单位进行检索，返回该作者相关文献的 PMID 列表。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "search_by_author" |
+| author_name | string | 是 | 作者姓名，例如 "Smith J" 或 "John Smith" |
+| affiliation | string | 否 | 作者所在机构/单位信息，用于进一步过滤 |
+| max_results | number | 否 | 最大结果数，默认 50，上限 1000 |
+
+**返回**: author, affiliation, totalResults, pmids[]
+
+---
+
+### 4.4 search_by_journal - 按期刊搜索
+**功能**: 在指定期刊内按关键字和时间范围检索文章。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "search_by_journal" |
+| journal_name | string | 是 | 期刊名称或缩写 |
+| keywords | string | 否 | 期刊内进一步筛选的关键字表达式 |
+| date_from | string | 否 | 起始日期 YYYY/MM/DD |
+| date_to | string | 否 | 截止日期 YYYY/MM/DD |
+| max_results | number | 否 | 最大结果数，默认 50，上限 1000 |
+
+**返回**: journal, keywords, dateRange, totalResults, pmids[]
+
+---
+
+### 4.5 search_by_mesh_terms - MeSH术语检索
+**功能**: 基于 MeSH (Medical Subject Headings) 术语进行检索，可选择仅限于"主要主题"。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "search_by_mesh_terms" |
+| mesh_terms | string[] | 是 | MeSH 术语列表 |
+| major_topic_only | boolean | 否 | 是否仅返回将该术语标记为 Major Topic 的文章，默认 false |
+| max_results | number | 否 | 最大结果数，默认 50，上限 1000 |
+
+**返回**: meshTerms, majorTopicOnly, totalResults, pmids[]
+
+---
+
+### 4.6 get_trending_articles - 趋势文献
+**功能**: 在给定研究领域/主题下，获取最近一段时间内的新发表或"趋势"文献列表。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "get_trending_articles" |
+| field | string | 是 | 研究领域或主题关键字，如 "metagenomics"、"single-cell" |
+| days | number | 否 | 回溯的天数区间，默认 30，范围 1–365 |
+| max_results | number | 否 | 最大结果数，默认 20，上限 100 |
+
+**返回**: field, days, dateRange, totalResults, pmids[]
+
+---
+
+### 4.7 get_article_details - 文章详情
+**功能**: 根据 PMID 获取完整的文章元数据（标题、作者、摘要、期刊、DOI、MeSH、关键字、资助信息等）。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "get_article_details" |
+| pmid | string | 是 | PubMed ID，仅允许数字格式 |
+
+**返回**: 完整PubMedArticle JSON结构
+
+---
+
+### 4.8 get_abstract - 获取摘要
+**功能**: 根据 PMID 获取文章的精简摘要信息（PMID、标题、摘要文本、作者、期刊、发表日期），便于快速概览。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "get_abstract" |
+| pmid | string | 是 | PubMed ID |
+
+**返回**: pmid, title, abstract, authors[], journal, publicationDate
+
+---
+
+### 4.9 get_full_text - 获取全文
+**功能**: 通过 PMC ID 从 PubMed Central 获取开放获取全文，包括结构化的章节、图表、参考文献等。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "get_full_text" |
+| pmcid | string | 是 | PMC ID，可以是 "PMC1234567" 或纯数字 "1234567" |
+
+**返回**: pmcid, pmid, title, abstract, body, authors[], journal, publicationDate, doi, sections[], figures[], tables[], references[]
+
+---
+
+### 4.10 batch_article_lookup - 批量查询
+**功能**: 批量按 PMID 列表获取文章详细信息（单次最多 200 条），内部自动做分块请求与合并。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "batch_article_lookup" |
+| pmids | string[] | 是 | PMID 列表，非空，长度 1–200 |
+
+**返回**: totalRequested, totalRetrieved, articles[]
+
+---
+
+### 4.11 get_cited_by - 被引文献
+**功能**: 查询某篇文章（PMID）被哪些 PubMed 文献引用（cited-in 列表）。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "get_cited_by" |
+| pmid | string | 是 | PubMed ID |
+| max_results | number | 否 | 最大返回的被引文数量，默认 100，上限 1000 |
+
+**返回**: pmid, citationCount, citedBy[]
+
+---
+
+### 4.12 get_references - 参考文献
+**功能**: 获取指定 PMID 对应文章的参考文献列表（其引用了哪些文献）。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "get_references" |
+| pmid | string | 是 | PubMed ID |
+| max_results | number | 否 | 最大返回的参考文献数，默认 100，上限 1000 |
+
+**返回**: pmid, referenceCount, references[]
+
+---
+
+### 4.13 get_similar_articles - 相似文献
+**功能**: 基于 PubMed 提供的 neighbor_score，相似性推荐相关文献列表。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "get_similar_articles" |
+| pmid | string | 是 | PubMed ID |
+| max_results | number | 否 | 最大相似文献数，默认 20，上限 100 |
+
+**返回**: pmid, similarArticles[]
+
+---
+
+### 4.14 export_citation - 导出引用
+**功能**: 将指定 PMID 的文献信息导出为常见引用格式（APA / MLA / Chicago / BibTeX / RIS）。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "export_citation" |
+| pmid | string | 是 | PubMed ID |
+| format | string | 否 | 引用格式：apa、mla、chicago、bibtex、ris，默认 apa |
+
+**返回**: pmid, format, citation
+
+---
+
+### 4.15 validate_pmid - 验证PMID
+**功能**: 校验给定 PMID 的格式是否正确，并检查该 ID 对应文章是否真实存在。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "validate_pmid" |
+| pmid | string | 是 | 待校验的 PubMed ID |
+
+**返回**: valid(boolean), pmid, exists(boolean), message
+
+---
+
+### 4.16 convert_identifiers - 标识符转换
+**功能**: 在 PMID、DOI、PMCID 之间进行互相转换。支持自动识别输入类型（auto）。
+
+**参数**:
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "convert_identifiers" |
+| identifier | string | 是 | 任意一种标识符（PMID、DOI 或 PMC ID） |
+| identifier_type | string | 否 | 标识符类型：pmid、doi、pmcid、auto，默认 auto |
+
+**返回**: inputId, inputType, conversions{pmid?, doi?, pmcid?}, error?
+
+五、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
-
-五、排障建议
+六、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- API限流：建议配置NCBI_API_KEY以提升请求速率限制。
 
-六、调用示例
+七、调用示例
+
 搜索文献:
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」PubMedSearch「末」,
@@ -34,7 +276,7 @@ query:「始」machine learning in medicine「末」
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」PubMedSearch「末」,
 command:「始」search_by_author「末」,
-author:「始」Smith J「末」
+author_name:「始」Smith J「末」
 <<<[END_TOOL_REQUEST]>>>
 
 获取文章详情:
@@ -44,4 +286,31 @@ command:「始」get_article_details「末」,
 pmid:「始」12345678「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: PubMedSearch, synchronous, 同步调用, 检索, 信息获取, 系统工具, search_articles, advanced_search, search_by_author, search_by_journal, search_by_mesh_terms, multi-command
+高级检索:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PubMedSearch「末」,
+command:「始」advanced_search「末」,
+title:「始」single-cell RNA-seq「末」,
+abstract:「始」tumor microenvironment「末」,
+mesh_terms:「始」["Neoplasms", "Single-Cell Analysis"]「末」,
+boolean_operator:「始」AND「末」,
+max_results:「始」100「末」
+<<<[END_TOOL_REQUEST]>>>
+
+导出引用:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PubMedSearch「末」,
+command:「始」export_citation「末」,
+pmid:「始」12345678「末」,
+format:「始」bibtex「末」
+<<<[END_TOOL_REQUEST]>>>
+
+标识符转换:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PubMedSearch「末」,
+command:「始」convert_identifiers「末」,
+identifier:「始」10.1038/s41586-023-XXXX-X「末」,
+identifier_type:「始」doi「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: PubMedSearch, synchronous, 同步调用, 检索, 信息获取, 系统工具, search_articles, advanced_search, search_by_author, search_by_journal, search_by_mesh_terms, get_trending_articles, get_article_details, get_abstract, get_full_text, batch_article_lookup, get_cited_by, get_references, get_similar_articles, export_citation, validate_pmid, convert_identifiers, NCBI_API_KEY, NCBI_EMAIL, configSchema, 16commands

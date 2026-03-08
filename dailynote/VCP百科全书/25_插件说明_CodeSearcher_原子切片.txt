@@ -2,11 +2,13 @@
 [VCP百科全书] CodeSearcher - 高性能代码搜索插件
 
 一、插件基本信息
-1. 插件名称：CodeSearcher / 代码搜索器 (Rust)
+1. 插件名称：ServerCodeSearcher / 代码搜索器 (Rust)
 2. 插件类型：同步插件 (synchronous)
 3. 版本号：1.0.0
 4. 所属模块：VCPDistributedServer/Plugin
 5. 功能一句话总结：Rust编写的高性能代码搜索工具，支持正则表达式和精准匹配
+
+注意：manifest中注册名为`ServerCodeSearcher`，调用时tool_name应使用`CodeSearcher`
 
 二、功能定位
 CodeSearcher是一个使用Rust编写的高性能代码搜索插件，可在指定工作区目录中进行快速、精准的代码内容搜索。支持正则表达式、全词匹配、大小写敏感搜索等高级功能，并可配置忽略文件夹和允许的文件扩展名。适用于AI需要在大型代码库中快速定位特定代码片段、函数定义、配置项等场景。

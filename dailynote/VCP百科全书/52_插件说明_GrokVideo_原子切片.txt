@@ -1,31 +1,107 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件说明——GrokVideoGen（原子切片）
+[2026-03-03] - Nova
+[VCP百科全书] 插件说明——GrokVideoGen（原子切片）修正版
 
 一、插件身份
 - name: GrokVideoGen
 - displayName: Grok 视频生成器
 - pluginType: synchronous
-- command: submit, concat
+- protocol: stdio
+- entryPoint: python video_handler.py
+- timeout: 300000ms (5分钟)
+- commands: submit, concat
 
 二、核心能力
 - 使用 Grok API 进行视频生成（支持文生视频、图生视频、视频续写、视频拼接）。
 - 提供可调用命令：submit、concat。
 
-三、占位符与注入点
+三、参数详解
+
+**submit命令参数：**
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| prompt | string | ✓ | 视频生成的提示词描述 |
+| image_url | string | ✗ | 图片链接，用于图生视频模式 |
+| video_url | string | ✗ | 视频链接.mp4，用于视频续写模式（自动提取最后一帧作为起点） |
+
+**注意**: image_url 和 video_url 二选一。当使用 video_url 时为视频续写模式，会自动从视频中提取最后一帧。
+
+**concat命令参数：**
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| video_url1 | string | ✓ | 第一个视频URL |
+| video_url2 | string | ✓ | 第二个视频URL |
+| video_url3+ | string | ✗ | 可选，可继续添加更多视频URL |
+
+四、配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| GROK_API_KEY | string | Grok API密钥 |
+| GROK_API_BASE | string | Grok API基础URL |
+| GrokVideoModelName | string | 视频生成模型名称 |
+| DebugMode | boolean | 调试模式开关 |
+| PROJECT_BASE_PATH | string | 项目基础路径 |
+| SERVER_PORT | string | 服务器端口 |
+| IMAGESERVER_IMAGE_KEY | string | 图片服务器密钥 |
+| VarHttpUrl | string | HTTP URL变量 |
+
+五、WebSocket推送配置
+- enabled: true
+- messageType: video_generation_status
+- targetClientType: VCPLog
+- usePluginResultAsMessage: true
+
+六、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+七、调用示例
 
-五、排障建议
-- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
-
-六、调用示例
+提交文生视频:
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」GrokVideoGen「末」,
-command:「始」submit「末」
+command:「始」submit「末」,
+prompt:「始」一个赛博朋克风格的城市街道，下着雨，霓虹灯闪烁「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: GrokVideo, GrokVideoGen, synchronous, 同步调用, 多媒体, submit, concat
+图生视频:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GrokVideoGen「末」,
+command:「始」submit「末」,
+image_url:「始」https://example.com/image.jpg「末」,
+prompt:「始」让这张图片动起来，镜头缓缓推进「末」
+<<<[END_TOOL_REQUEST]>>>
+
+视频续写（基于已有视频继续创作）:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GrokVideoGen「末」,
+command:「始」submit「末」,
+video_url:「始」[之前生成的视频URL.mp4]「末」,
+prompt:「始」继续这个场景，镜头缓缓推进，一辆飞行汽车从远处驶来「末」
+<<<[END_TOOL_REQUEST]>>>
+
+视频拼接:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GrokVideoGen「末」,
+command:「始」concat「末」,
+video_url1:「始」[第一个视频URL.mp4]「末」,
+video_url2:「始」[第二个视频URL.mp4]「末」
+<<<[END_TOOL_REQUEST]>>>
+
+八、返回格式
+- 成功：`{"status":"success","result":"..."}` 或 `{"status":"success","result":{"video_url":"拼接后的视频URL"}}`
+- 失败：`{"status":"error","error":"错误信息..."}`
+
+九、重要提示
+- **视频生成需要较长时间（最长5分钟），请在调用成功后告知用户任务已提交，并提醒他们需要耐心等待。**
+- WebSocket会实时推送生成状态到VCPLog客户端。
+
+十、排障建议
+- 插件无响应：检查超时设置（300秒），视频生成可能需要较长时间。
+- 结果异常：核对命令名与参数字段，确保image_url和video_url不会同时使用。
+- API错误：检查GROK_API_KEY和GROK_API_BASE配置。
+
+十一、RAG标签建议（TagMemo V5）
+主体词元：GrokVideoGen, Grok视频, 视频生成, 文生视频, 图生视频
+动作词元：submit, concat, prompt, image_url, video_url, video_url1, video_url2
+故障词元：超时, API密钥无效, 视频处理失败
+
+Tag: GrokVideo, GrokVideoGen, synchronous, 同步调用, 多媒体, submit, concat, WebSocket推送, 视频生成, 修正版

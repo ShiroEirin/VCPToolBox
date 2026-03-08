@@ -5,7 +5,10 @@
 - name: DailyHot
 - displayName: 每日热榜
 - pluginType: static
-- command: 无（自动触发）
+- protocol: stdio
+- timeout: 120000
+- refreshIntervalCron: "0 */4 * * *"（每4小时自动执行）
+- 注意：static类型插件由定时器触发，AI无法直接调用
 
 二、核心能力
 - 在后台周期性地获取所有主流平台的今日热榜信息，并通过占位符 {{VCPDailyHot}} 提供。

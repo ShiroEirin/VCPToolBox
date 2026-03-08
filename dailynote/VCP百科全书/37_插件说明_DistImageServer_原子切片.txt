@@ -5,8 +5,13 @@
 1. 插件名称：DistImageServer / 分布式图床服务器
 2. 插件类型：服务插件 (service)
 3. 版本号：1.0.0
-4. 所属模块：VCPDistributedServer/Plugin
+4. 所属模块：VCPDistributedServer/Plugin（位于VCPChat项目）
 5. 功能一句话总结：在分布式服务器上托管本地目录，通过HTTP访问图片和文件
+
+关键配置：
+- pluginType: service
+- protocol: direct
+- 无invocationCommands（纯服务类插件）
 
 二、功能定位
 DistImageServer是一个服务类插件，可在分布式服务器上启动HTTP服务，将指定的本地目录暴露为可访问的图床。支持通过HTTP URL直接访问目录中的图片、文档等文件，适用于需要共享生成的图片、文档、媒体文件的场景。可与其他插件配合，为生成的内容提供可访问的URL。

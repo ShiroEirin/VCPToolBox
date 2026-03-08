@@ -1,35 +1,124 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——WebUIGen（原子切片）
 
 一、插件身份
-- name: WebUIGen
-- displayName: WebUI云算力生图
-- pluginType: synchronous
-- command: WebUIGenerate
+- name: `WebUIGen`
+- displayName: `WebUI云算力生图`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `120000` (120秒)
+- entryPoint: `node WebUIGen.mjs`
+- author: `Kilo Code`
 
 二、核心能力
-- 调用云算力API生成高质量图像，支持多种模型和自定义参数。
-- 提供可调用命令：WebUIGenerate。
+- 调用云算力API生成高质量图像，支持19种模型和丰富的自定义参数。
+- 提供精细化的图像生成控制：步数、CFG引导强度、分辨率、随机种子等。
 
-三、占位符与注入点
+三、AI可调用的Commands（1个）
+
+WebUIGenerate - 【云算力图像生成】
+参数列表：
+- prompt (string, 必需): 图像生成提示词
+- negative_prompt (string, 可选): 负面提示词，用于排除不想要的元素
+- resolution (string, 可选): 分辨率
+  * 格式: '宽x高' 如 '512x512', '1024x1024'
+  * 预设值: 'landscape'(横屏), 'portrait'(竖屏)
+  * 默认: 512x512
+- steps (integer, 可选): 生成步数 (1-50)
+  * 默认: 20
+  * ⚠️ 注意: 模型5(Z-Image)请使用8步
+- cfg (float, 可选): CFG引导强度 (1-10)
+  * 默认: 7.0
+  * 控制提示词遵循程度，越高越严格但可能过曝
+- model_index (integer, 可选): 模型索引 (0-18)
+  * 默认: 0
+- seed (integer, 可选): 随机种子
+  * 默认: -1 (随机)
+  * 固定值可复现相同结果
+- showbase64 (boolean, 可选): 是否在返回结果中包含base64图片数据
+  * 默认: false
+
+四、完整模型列表（19个模型索引）
+
+| 索引 | 模型名称 | 备注 |
+|------|---------|------|
+| 0 | Miaomiao Harem vPred Dogma 1.1 | 默认模型 |
+| 1 | MiaoMiao Pixel 像素 1.0 | 像素风格 |
+| 2 | NoobAIXL V1.1 | 通用模型 |
+| 3 | NoobAIXL V1.0 | 通用模型 |
+| 4 | illustrious_pencil 融合 | 铅笔/素描风格 |
+| 5 | Z-Image | 自然语言文生图，⚠️步数请改成8步 |
+| 6 | MiaoMiao RealSkin EPS 1.3 | 真实皮肤质感 |
+| 7 | Newbie exp 0.1 | 实验模型 |
+| 8 | Newbie exp 0.1 (服务器2) | 实验模型备用节点 |
+| 9 | MiaoMiao RealSkin vPred 1.1 | 真实皮肤vPred版 |
+| 10 | MiaoMiao RealSkin vPred 1.0 | 真实皮肤vPred版 |
+| 11 | Wainsfw illustrious v16 | NSFW专用v16 |
+| 12 | Wainsfw illustrious v15 | NSFW专用v15 |
+| 13 | MiaoMiao Harem 1.75 | 后宫风格1.75 |
+| 14 | MiaoMiao Harem 1.6G | 后宫风格1.6G |
+| 15 | Wainsfw Illustrious v13 (服务器1) | NSFW专用v13节点1 |
+| 16 | Wainsfw Illustrious v13 (服务器2) | NSFW专用v13节点2 |
+| 17 | Wainsfw Illustrious v11 | NSFW专用v11 |
+| 18 | 真人模型 Nsfw-Real | 真人/写实风格 |
+
+五、配置Schema
+- WEBUI_API_KEY (string): 云算力API密钥
+  * 默认: ""
+  * 描述: 用于认证云算力服务
+- HTTPS_PROXY (string): HTTPS代理地址
+  * 默认: ""
+  * 描述: 用于翻墙访问API，如 http://127.0.0.1:7897
+
+六、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+七、调用示例
 
-五、排障建议
-- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
-
-六、调用示例
-生成图像:
+【基础调用】
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」WebUIGen「末」,
-command:「始」WebUIGenerate「末」,
-prompt:「始」a beautiful landscape with mountains and rivers「末」,
-model:「始」default「末」,
-steps:「始」20「末」
+tool_name:「始»WebUIGen「末»,
+command:「始»WebUIGenerate「末»,
+prompt:「始»a beautiful anime girl「末»,
+resolution:「始»512x512「末»
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: WebUIGen, synchronous, 同步调用, 多媒体, WebUIGenerate
+【高级参数调用】
+<<<[TOOL_REQUEST]>>>
+tool_name:「始»WebUIGen「末»,
+command:「始»WebUIGenerate「末»,
+prompt:「始»a beautiful anime girl, detailed face, high quality, masterpiece「末»,
+negative_prompt:「始»blurry, low quality, distorted, bad anatomy「末»,
+resolution:「始»1024x1024「末»,
+model_index:「始»0「末»,
+steps:「始»25「末»,
+cfg:「始»7.5「末»,
+seed:「始»42「末»
+<<<[END_TOOL_REQUEST]>>>
+
+【Z-Image模型专用（8步）】
+<<<[TOOL_REQUEST]>>>
+tool_name:「始»WebUIGen「末»,
+command:「始»WebUIGenerate「末»,
+prompt:「始»自然语言描述的场景...「末»,
+model_index:「始»5「末»,
+steps:「始»8「末»
+<<<[END_TOOL_REQUEST]>>>
+
+八、调用规则与使用情形
+- 动漫/插画生成: 推荐使用模型0(Miaomiao Harem)或模型1(Pixel像素)
+- 真实人像生成: 推荐使用模型6/9/10(RealSkin系列)或模型18(真人模型)
+- 自然语言理解: 必须使用模型5(Z-Image)，并将steps设为8
+- NSFW内容: 使用模型11-17(Wainsfw系列)
+- 追求一致性: 固定seed值可复现相似结果
+- 网络受限环境: 配置HTTPS_PROXY代理
+
+九、排障建议
+- 优先检查WEBUI_API_KEY是否正确配置
+- 超时时间为120秒，复杂生成可能需要等待
+- 如遇网络问题，检查HTTPS_PROXY设置
+- 模型5(Z-Image)必须使用8步，其他模型推荐20-30步
+- 分辨率过高可能导致内存不足或超时
+
+Tag: WebUIGen, synchronous, 同步调用, 多媒体, WebUIGenerate, 云算力, 图像生成, AI绘画, StableDiffusion, 模型选择, 超参数调优, Miaomiao, NoobAI, Z-Image

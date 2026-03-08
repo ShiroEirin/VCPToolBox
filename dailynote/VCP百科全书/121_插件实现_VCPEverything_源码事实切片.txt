@@ -1,5 +1,10 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件实现——VCPEverything（源码事实切片）
+[2026-03-06] - Nova (Updated)
+[VCP百科全书] 插件实现——ServerSearchController（源码事实切片）v1.1
+
+⚠️ 命名统一说明：
+- manifest注册名: ServerSearchController（唯一正式名称）
+- 历史别名: VCPEverything, LocalSearchController（已废弃，不再使用）
+- entry文件: local-search-controller.js
 
 一、源码锚点
 - manifest: Plugin/VCPEverything/plugin-manifest.json
@@ -11,15 +16,16 @@
 - 插件通过 HTTP 访问 Everything 服务，不走本地 SDK；端口来自 EVERYTHING_PORT（默认 8025）。
 - 请求路径固定拼接 `/?s=...&json=1&path_column=1&n=...`，结果来自 `parsedData.results`。
 - 输出会将 `item.path + item.name` 拼成完整路径数组，并返回 totalResults。
-- 若 query 缺失，直接返回 `Missing required parameter: query`。
+- 若 query 缺失，直接返回 `{ status: 'error', error: 'Missing required parameter: query' }`。
 - 连接被拒绝时会给出明确提示：需在 Everything 里开启 HTTP Server。
 
 三、边界与错误模式
 - HTTP 非 200 直接报错，不做降级重试。
-- JSON 解析失败会返回 `Failed to parse JSON response from Everything`。
-- stdin 输入为空时返回 `No input received.`，无业务执行。
+- JSON 解析失败会返回 `{ status: 'error', error: 'Failed to parse JSON response from Everything' }`。
+- stdin 输入为空时返回 `{ status: 'error', error: 'No input received.' }`，无业务执行。
 
 四、调用示例（源码对齐）
+⚠️ 注意：tool_name 必须使用 manifest 中的注册名 "LocalSearchController"
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」LocalSearchController「末」,
 command:「始」search「末」,
@@ -27,5 +33,33 @@ query:「始」path:D:\github\VCP *.md「末」,
 maxResults:「始」80「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: VCPEverything, ServerSearchController, LocalSearchController, local-search-controller.js, EverythingHTTP, EVERYTHING_PORT, query必填, path_column, totalResults, 本地检索
+五、manifest 关键配置
+```json
+{
+  "name": "ServerSearchController",
+  "displayName": "本地文件秒搜 (Everything)",
+  "pluginType": "synchronous",
+  "version": "1.2.0",
+  "entryPoint": {
+    "command": "node local-search-controller.js"
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "command": "search",
+        "description": "功能: 在整台计算机上快速搜索文件..."
+      }
+    ]
+  }
+}
+```
+
+六、版本变更记录
+- v1.0 (2026-03-03): 初始版本
+- v1.1 (2026-03-06):
+  - 标题和文档统一使用 ServerSearchController（manifest注册名）
+  - 明确标注历史别名 VCPEverything/LocalSearchController 已废弃
+  - 修正 tool_name 必须为 LocalSearchController（AI调用时使用）
+
+Tag: ServerSearchController, VCPEverything, LocalSearchController, local-search-controller.js, EverythingHTTP, EVERYTHING_PORT, query必填, path_column, totalResults, 本地检索, 命名统一
 

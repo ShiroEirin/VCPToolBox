@@ -1,5 +1,5 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件说明——ImageProcessor（原子切片）
+[2026-03-05] - Nova
+[VCP百科全书] 插件说明——ImageProcessor（原子切片）修正版
 
 一、插件身份
 - name: `ImageProcessor`
@@ -12,10 +12,20 @@
 - 命中缓存则直接复用，未命中才调用多模态API。
 - 把图像替换为可读文本片段，降低主模型处理负担。
 
-三、关键配置
-- `API_URL`、`API_Key`、`ImageModel`、`ImagePrompt`
-- 并发限制：`ImageModelAsynchronousLimit`
-- 注入前缀：`ImageInsertPrompt`
+三、关键配置（configSchema）
+| 参数名 | 类型 | 说明 |
+|--------|------|------|
+| `API_URL` | string | 多模态模型API端点 |
+| `API_Key` | string | API密钥 |
+| `MultiModalModel` | string | 多模态模型名称 |
+| `MultiModalPrompt` | string | 图像描述生成提示词 |
+| `MultiModalModelOutputMaxTokens` | integer | 输出最大Token数 |
+| `MultiModalModelThinkingBudget` | integer | 思考预算 |
+| `MultiModalModelAsynchronousLimit` | integer | 异步并发限制 |
+| `MediaInsertPrompt` | string | 媒体插入前缀提示 |
+| `DebugMode` | boolean | 调试模式开关 |
+
+⚠️ 注意：配置参数名必须是 `MultiModalModel`、`MultiModalPrompt`、`MultiModalModelAsynchronousLimit` 等，不是 `ImageModel`、`ImagePrompt`、`ImageModelAsynchronousLimit`。
 
 四、缓存机制
 - 文件：`Plugin/ImageProcessor/image_cache.json`
@@ -26,11 +36,12 @@
 - 缓存膨胀会拖慢读取，需周期清理。
 - 误配API参数会导致预处理链失败，影响后续对话。
 
-六、触发示例
-该插件为消息预处理器，通常在用户消息包含 Base64 图片时自动触发。
+六、触发方式
+该插件为 **messagePreprocessor** 类型，通常在用户消息包含 Base64 图片时自动触发。
+
 示例消息片段：
 `data:image/png;base64,iVBORw0KGgoAAA...`
 
 说明：无需手动 TOOL_REQUEST，进入对话链后由预处理流程自动执行。
 
-Tag: ImageProcessor, messagePreprocessor, 图像预处理, Base64识别, 图像描述缓存, image_cache.json, 多模态API, ImagePrompt, 上下文压缩
+Tag: ImageProcessor, messagePreprocessor, 图像预处理, Base64识别, 图像描述缓存, image_cache.json, 多模态API, MultiModalPrompt, MultiModalModel, 上下文压缩, 修正版

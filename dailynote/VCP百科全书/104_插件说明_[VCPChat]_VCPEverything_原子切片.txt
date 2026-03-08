@@ -1,0 +1,138 @@
+[2026-03-05] - Nova
+[VCP百科全书] VCPEverything / 本地文件秒搜 (Everything) - VCPChat分布式插件
+
+一、插件基本信息
+1. 插件名称：LocalSearchController / 本地文件秒搜 (Everything)
+2. 插件类型：同步插件 (synchronous)
+3. 版本号：1.1.0
+4. 所属模块：VCPChat/VCPDistributedServer/Plugin (分布式插件)
+5. 功能一句话总结：通过调用 Everything 命令行工具 (es.exe) 在本地计算机上实现毫秒级文件搜索
+
+二、功能定位
+VCPEverything是一个基于Voidtools Everything搜索引擎的本地文件快速查找插件。它通过调用Everything的命令行工具(es.exe)实现对本地文件系统的毫秒级全文检索。
+
+核心能力：
+- 利用Everything索引实现毫秒级全文检索
+- 支持Everything高级搜索语法（路径过滤、大小过滤、日期过滤等）
+- 自动提取搜索结果中的完整文件路径
+- 返回结构化的JSON结果，包含查询词、结果数量、文件路径列表
+- 无额外依赖，直接调用系统安装的es.exe
+
+适用场景：快速定位本地文件、批量查找特定类型文件、配合FileOperator进行文件操作前的路径获取。
+
+三、配置参数
+配置文件路径：Plugin/VCPEverything/config.env
+
+| 参数名 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| EVERYTHING_ES_PATH | string | "C:\Program Files (x86)\Everything\es.exe" | Everything命令行工具(es.exe)的绝对路径 |
+| DEBUG_MODE | boolean | false | 是否开启调试日志 |
+
+前置条件：
+1. 必须安装Voidtools Everything软件
+2. 必须确保es.exe路径正确
+
+四、调用规则与使用情形
+
+【调用规则】
+- 工具名称：LocalSearchController（注意：不是VCPEverything）
+- 命令名称：search
+- 通信协议：stdio
+- 超时时间：30000毫秒（30秒）
+
+【使用情形】
+1. 当需要快速查找本地文件时
+2. 当需要获取文件的完整绝对路径以进行后续操作时
+3. 当需要根据文件名、路径、大小、修改日期等条件筛选文件时
+
+五、调用命令列表
+
+1. search - 搜索本地文件
+   功能描述：在整台计算机上快速搜索文件，返回匹配的文件路径列表。搜索结果可直接作为FileOperator等插件的输入参数。
+   
+   参数列表：
+   | 参数名 | 类型 | 是否必需 | 默认值 | 说明 |
+   |--------|------|----------|--------|------|
+   | query | string | 是 | 无 | 搜索关键词，支持Everything高级搜索语法。例如："path:D:\videos\ *.mp4 size:>1gb" |
+   | maxResults | integer | 否 | 100 | 返回的最大结果数量限制 |
+   
+   完整调用格式：
+   <<<[TOOL_REQUEST]>>>
+   tool_name:「始」LocalSearchController「末",
+   command:「始」search「末",
+   query:「始」*.txt「末",
+   maxResults:「始」50「末」
+   <<<[END_TOOL_REQUEST]>>>
+   
+   返回值说明：
+   成功返回格式：
+   {
+     "status": "success",
+     "result": {
+       "searchQuery": "*.txt",
+       "resultCount": 150,
+       "results": [
+         "C:\Users\Name\Documents\file1.txt",
+         "D:\Projects\notes.txt"
+       ]
+     }
+   }
+
+六、使用示例
+
+示例1：搜索特定文件名
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LocalSearchController「末",
+command:「始」search「末",
+query:「始」VCP a.txt「末",
+maxResults:「始」50「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例2：搜索特定目录下的MP4视频文件（大于1GB）
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LocalSearchController「末",
+command:「始」search「末",
+query:「始」path:D:\videos\ *.mp4 size:>1gb「末",
+maxResults:「始」20「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例3：搜索最近修改的文档
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LocalSearchController「末",
+command:「始」search「末",
+query:「始」*.docx dm:today「末",
+maxResults:「始」30「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例4：配合FileOperator读取找到的文件（两步操作）
+步骤1：搜索文件
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LocalSearchController「末",
+command:「始」search「末",
+query:「始」config.json「末",
+maxResults:「始」10「末」
+<<<[END_TOOL_REQUEST]>>>
+
+步骤2：使用返回的路径读取文件
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末",
+command:「始」read「末",
+file_path:「始」C:\Users\Name\AppData\Roaming\MyApp\config.json「末」
+<<<[END_TOOL_REQUEST]>>>
+
+七、注意事项与限制
+1. 必须预先安装并运行Voidtools Everything软件
+2. 必须正确配置EVERYTHING_ES_PATH指向es.exe
+3. 默认只支持本地访问
+4. 搜索速度取决于Everything索引构建状态，首次使用建议等待索引完成
+5. 超时时间为30000毫秒（30秒）
+6. 返回结果为完整绝对路径，可直接用于其他文件操作插件
+7. 不支持正则表达式搜索（受限于Everything CLI接口）
+8. 大小写不敏感搜索由Everything控制，不在插件层处理
+
+八、关联插件
+- FileOperator：可使用VCPEverything返回的路径进行文件读写操作
+- CodeSearcher：可配合使用进行代码搜索
+
+九、浪潮算法标签
+Tag: 文件搜索, Everything, 本地索引, 毫秒级搜索, 命令行工具, 文件定位, 同步插件, VCPChat分布式, es.exe, LocalSearchController

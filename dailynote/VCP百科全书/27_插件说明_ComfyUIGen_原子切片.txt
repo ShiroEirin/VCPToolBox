@@ -5,6 +5,10 @@
 - name: `ComfyUIGen`
 - displayName: `ComfyUI 图像生成器`
 - pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `300000` (5分钟)
+- version: `0.3.0`
+- author: `niuniu`
 - 主要命令：`ComfyUIGenerateImage`
 
 二、工作流机制
@@ -12,21 +16,107 @@
 - 读取 `workflows/*.json` 模板并做占位符替换。
 - 将生成后的prompt图提交到ComfyUI `/prompt` 接口执行。
 
-三、常用占位符
+三、configSchema 配置项
+| 配置项 | 类型 | 描述 | 默认值 |
+|--------|------|------|--------|
+| COMFYUI_BASE_URL | string | ComfyUI服务器地址 | http://localhost:8188 |
+| COMFYUI_API_KEY | string | ComfyUI API密钥（可选，本地部署通常不需要） | "" |
+| DEBUG_MODE | boolean | 是否启用调试模式，显示详细执行日志 | false |
+
+四、常用占位符
 - `{{MODEL}}` `{{WIDTH}}` `{{HEIGHT}}` `{{SEED}}`
 - `{{STEPS}}` `{{CFG}}` `{{SAMPLER}}` `{{SCHEDULER}}`
 - `{{POSITIVE_PROMPT}}` `{{NEGATIVE_PROMPT}}`
 
-四、关键细节
+五、关键细节
 - `defaultSeed = -1` 时需自动生成合法随机种子，避免KSampler拒绝。
 - LoRA可走文本token注入或节点法注入。
 - 新字段扩展要同步模板处理器映射规则。
+- 支持LoRA模型自动管理和质量增强词配置（通过comfyui-settings.json）。
 
-五、落地建议
+六、features 功能特性
+
+### 6.1 LoRA管理 (loraManagement)
+- 自动从ComfyUI服务器加载可用LoRA模型，支持多LoRA组合
+- 能力列表：
+  - 自动扫描ComfyUI服务器上的LoRA模型库
+  - 可视化LoRA选择和配置界面
+  - 独立设置每个LoRA的模型强度和CLIP强度
+  - 启用/禁用LoRA功能，支持LoRA组合预设
+  - 防重复添加机制，智能冲突检测
+
+### 6.2 质量增强 (qualityEnhancement)
+- 质量增强词系统，自动提升生成图像质量
+- 能力列表：
+  - 预设质量增强关键词库
+  - 自动与用户提示词和LoRA标签智能组合
+  - 支持自定义质量标签和风格词
+  - 避免提示词冲突和重复的智能过滤
+
+### 6.3 工作流管理 (workflowManagement)
+- 工作流模板管理系统
+- 能力列表：
+  - 支持多种预设工作流模板
+  - 可视化工作流选择和预览
+  - 支持自定义工作流导入和验证
+  - 工作流参数自动映射和占位符替换
+
+### 6.4 参数控制 (parameterControl)
+- 全面的生成参数控制系统
+- 能力列表：
+  - 采样器和调度器选择（20+选项）
+  - 图像尺寸和批次大小设置
+  - CFG强度和去噪程度调节
+  - 种子控制和随机性管理
+  - 负面提示词管理
+
+七、systemIntegration 系统集成
+
+### 7.1 VCP ToolBox集成
+- 深度集成VCP ToolBox配置系统
+- 配置文件: comfyui-settings.json
+- 自动同步: true
+- 特性：
+  - 实时配置同步和验证
+  - 可视化参数调节界面
+  - 连接状态实时监控
+  - 错误诊断和智能提示
+
+### 7.2 ComfyUI服务器集成
+- ComfyUI服务器自动发现和配置
+- 特性：
+  - 自动检测可用模型和LoRA列表
+  - 实时连接状态检查
+  - API兼容性验证
+  - 工作流有效性检测
+
+八、changelog 版本历史
+
+### v0.3.0 (2025-08-04)
+- 新增：LoRA模型自动扫描和管理系统
+- 新增：质量增强词智能配置功能
+- 新增：多LoRA组合支持，独立强度控制
+- 新增：可视化LoRA选择界面
+- 优化：配置加载系统，支持复杂参数结构
+- 优化：提示词智能组合机制，避免冲突
+- 修复：配置同步和事件绑定问题
+- 符合：VCP插件开发规范v1.0.0
+
+### v0.2.0 (2024-12-XX)
+- 集成到VCP ToolBox配置系统
+- 添加可视化配置面板
+- 支持工作流模板管理
+
+九、compatibility 兼容性
+- VCP版本: >=1.0.0
+- Node.js版本: >=14.0.0
+- ComfyUI版本: >=0.3.0
+
+十、落地建议
 - 先固定一套稳定workflow再扩展参数。
 - 出图异常优先排查：节点连线、占位符替换、ComfyUI服务状态。
 
-六、调用示例
+十一、调用示例
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」ComfyUIGen「末」,
 command:「始」ComfyUIGenerateImage「末」,
@@ -35,4 +125,4 @@ width:「始」1024「末」,
 height:「始」1024「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: ComfyUIGen, ComfyUIGenerateImage, comfyui-settings, workflow模板, 占位符替换, LoRA注入, seed策略, 图像生成, prompt管线
+Tag: ComfyUIGen, ComfyUIGenerateImage, comfyui-settings, workflow模板, 占位符替换, LoRA注入, seed策略, 图像生成, prompt管线, configSchema, features, systemIntegration, changelog

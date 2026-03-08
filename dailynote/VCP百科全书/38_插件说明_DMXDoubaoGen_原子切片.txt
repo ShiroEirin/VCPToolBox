@@ -1,33 +1,92 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——DMXDoubaoGen（原子切片）
 
+⚠️ 重要区分：本插件(DMXDoubaoGen)与39号DoubaoGen是不同的插件！
+
 一、插件身份
-- name: DoubaoGen
-- displayName: Doubao 风格图片生成器
-- pluginType: synchronous
-- command: DoubaoGenerateImage, DoubaoEditImage, DoubaoComposeImage
+- name: `DoubaoGen` （注意：name与DoubaoGen相同，但manifest路径不同）
+- displayName: `Doubao 风格图片生成器`
+- version: `0.2.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- entryPoint: `node DoubaoGen.js`
+- author: `B3000Kcn`
 
 二、核心能力
 - 通过 DMXAPI 使用其提供的模型（如 doubao-seedream-4-0-250828）生成和编辑图片。
-- 提供可调用命令：DoubaoGenerateImage、DoubaoEditImage、DoubaoComposeImage。
+- 支持文生图、图生图/修图、多图融合三种工作模式。
 
-三、占位符与注入点
+三、AI可调用的Commands（3个）
+
+1. DoubaoGenerateImage - 【文生图】
+   - prompt (必需): 用于图片生成的详细提示词
+   - resolution (必需): 图片分辨率，格式为"宽x高"
+     * 推荐值: 1024x1024(1:1)、864x1152(3:4)、1152x864(4:3)、1280x720(16:9)、720x1280(9:16)
+     * 像素值范围: [512, 2048]
+   - seed (可选): 整数种子，通常省略以使用随机种子
+
+2. DoubaoEditImage - 【图生图/修图】
+   - prompt (必需): 用于指导图片修改的详细提示词
+   - image (必需): 图片来源，可以是公网https URL或本地file:///路径
+   - resolution (必需): 图片分辨率，可设为"adaptive"自适应原图尺寸
+   - seed (可选): 整数种子
+   - guidance_scale (可选): 范围0-10，控制与原图相似度，值越小越相似
+
+3. DoubaoComposeImage - 【多图融合/对话】
+   - prompt (必需): 用于指导图片融合或对话的详细提示词
+   - image_1 (必需): 第1张图片来源(https URL或file:///路径)
+   - image_2 (可选): 第2张图片来源
+   - image_N (可选): 第N张图片来源，以此类推
+   - resolution (必需): 图片分辨率，可设为"adaptive"自适应
+   - seed (可选): 整数种子
+   - guidance_scale (可选): 范围0-10，控制与原图相似度
+
+四、配置Schema
+- VOLCENGINE_API_KEY: string - 火山引擎API密钥（必填）
+
+五、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
-
-五、排障建议
-- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
-
 六、调用示例
+
+【文生图示例】
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」DoubaoGen「末」,
-command:「始」DoubaoGenerateImage「末」,
-prompt:「始」科技感的店铺门口，店铺名称是DMXAPI「末」,
-resolution:「始」1024x1024「末」
+tool_name:「始»DoubaoGen「末»,
+command:「始»DoubaoGenerateImage「末»,
+prompt:「始»科技感的店铺门口，店铺名称是DMXAPI「末»,
+resolution:「始»1024x1024「末»
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: DMXDoubaoGen, DoubaoGen, synchronous, 同步调用, 多媒体, DoubaoGenerateImage, DoubaoEditImage, DoubaoComposeImage
+【图生图示例】
+<<<[TOOL_REQUEST]>>>
+tool_name:「始»DoubaoGen「末»,
+command:「始»DoubaoEditImage「末»,
+prompt:「始»给这个女孩戴上墨镜「末»,
+image:「始»https://www.dmxapi.cn/images/i2i_demo.png「末»,
+resolution:「始»adaptive「末»,
+guidance_scale:「始»5.5「末»
+<<<[END_TOOL_REQUEST]>>>
+
+【多图融合示例】
+<<<[TOOL_REQUEST]>>>
+tool_name:「始»DoubaoGen「末»,
+command:「始»DoubaoComposeImage「末»,
+prompt:「始»把第一张图的女孩和第二张图的猫融合在一起「末»,
+image_1:「始»https://example.com/girl.png「末»,
+image_2:「始»file:///path/to/cat.jpg「末»,
+resolution:「始»adaptive「末»
+<<<[END_TOOL_REQUEST]>>>
+
+七、调用规则与使用情形
+- 文生图：从零开始生成创意图片，适合概念设计、插画创作
+- 图生图：基于现有图片进行修改/优化，适合图像编辑、风格迁移
+- 多图融合：合并多张图片元素或进行视觉对话，适合创意合成、对比分析
+- AI收到结果后应使用<img>标签直接展示图片URL给用户
+
+八、排障建议
+- 优先检查VOLCENGINE_API_KEY是否正确配置
+- 外部API类插件重点检查：网络连通性、代理设置、速率限制
+- image参数支持公网URL和本地file:///路径两种格式
+- 分辨率参数必须符合"宽x高"格式或使用"adaptive"
+
+Tag: DMXDoubaoGen, DoubaoGen, synchronous, 同步调用, 多媒体, 文生图, 图生图, 多图融合, DoubaoGenerateImage, DoubaoEditImage, DoubaoComposeImage, DMXAPI, 火山引擎, 图片生成

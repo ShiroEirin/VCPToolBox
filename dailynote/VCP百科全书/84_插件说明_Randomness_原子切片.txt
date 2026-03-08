@@ -1,56 +1,181 @@
-[2026-03-03] - Codex
+[2026-03-06] - Nova
 [VCP百科全书] 插件说明——Randomness（原子切片）
+✅ 已修正：切片参数名已从下划线格式更新为驼峰格式以匹配manifest
 
 一、插件身份
 - name: Randomness
 - displayName: 随机事件生成器
+- manifestVersion: 1.0.0
+- version: 5.2.0
 - pluginType: synchronous
-- command: createDeck, createCustomDeck, drawFromDeck, resetDeck, destroyDeck, queryDeck, getCards, rollDice, drawTarot, castRunes, selectFromList, getRandomDateTime
+- author: VincentHDLee & Gemini
+- description: 一个多功能后端插件，用于生成各种可信的随机事件。支持无状态的单次随机事件（如抽牌、掷骰）和有状态的、可持久化的牌堆管理（创建、抽取、重置、销毁），适用于需要连续操作的场景。
 
 二、核心能力
-- 一个多功能后端插件，用于生成各种可信的随机事件。支持无状态的单次随机事件（如抽牌、掷骰）和有状态的、可持久化的牌堆管理（创建、抽取、重置、销毁），适用于需要连续操作的场景。
-- 提供可调用命令：createDeck、createCustomDeck、drawFromDeck、resetDeck、destroyDeck、queryDeck、getCards、rollDice、drawTarot、castRunes、selectFromList、getRandomDateTime。
+- 无状态随机事件：单次抽牌、掷骰、塔罗占卜、符文抽取、列表选择、随机时间生成
+- 有状态牌堆管理：创建牌堆、自定义牌堆、抽牌、重置、销毁、查询状态
+- 支持复杂TRPG风格掷骰表达式
 
 三、占位符与注入点
 - systemPromptPlaceholders: 无
 
 四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+- TAROT_DECK_PATH: 塔罗牌数据文件路径，默认 "Plugin/Randomness/data/tarot_deck.json"
+- RUNE_SET_PATH: 符文集数据文件路径，默认 "Plugin/Randomness/data/rune_set.json"
+- POKER_DECK_PATH: 扑克牌数据文件路径，默认 "Plugin/Randomness/data/poker_deck.json"
+- TAROT_SPREADS_PATH: 塔罗牌阵数据文件路径，默认 "Plugin/Randomness/data/tarot_spreads.json"
 
 五、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
+- 牌堆操作失败：确认deckId正确且牌堆未被销毁。
+- 掷骰表达式错误：检查diceString格式是否符合TRPG规范。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
 
-六、调用示例
-创建牌堆:
+六、调用规则与使用情形
+【有状态牌堆管理】
+1. createDeck - 创建牌堆
+   使用情形：需要创建一个可重复抽取的有状态牌堆时调用
+   - deckName (string, 必需): 牌堆类型，可选 'poker', 'tarot'
+   - deckCount (integer, 可选, 默认1): 混合的牌堆数量
+
+2. createCustomDeck - 创建自定义牌堆
+   使用情形：需要使用自定义卡牌列表创建牌堆时调用
+   - cards (array, 必需): JSON数组字符串，如 '["攻击", "防御", "闪避"]'
+   - deckName (string, 可选, 默认'custom'): 为这个自定义牌堆指定的名称
+
+3. drawFromDeck - 从牌堆抽牌
+   使用情形：需要从已创建的牌堆中抽取卡牌时调用
+   - deckId (string, 必需): 由createDeck或createCustomDeck返回的牌堆唯一ID
+   - count (integer, 可选, 默认1): 要抽取的牌的数量
+
+4. resetDeck - 重置牌堆
+   使用情形：需要将已抽出的牌放回并重新洗牌时调用
+   - deckId (string, 必需): 要重置的牌堆的唯一ID
+
+5. destroyDeck - 销毁牌堆
+   使用情形：需要释放牌堆占用的内存资源时调用
+   - deckId (string, 必需): 要销毁的牌堆的唯一ID
+
+6. queryDeck - 查询牌堆状态
+   使用情形：需要了解牌堆剩余数量、已抽数量等信息时调用
+   - deckId (string, 必需): 要查询的牌堆的唯一ID
+
+【无状态随机事件】
+7. getCards - 一次性抽牌
+   使用情形：只需要单次抽牌而不需要维护牌堆状态时调用
+   - deckName (string, 必需): 'poker' 或 'tarot'
+   - count (integer, 可选, 默认1): 要抽取的牌的数量
+
+8. rollDice - 掷骰子
+   使用情形：需要执行TRPG风格掷骰时调用
+   - diceString (string, 必需): 掷骰表达式，如 '2d6+5', '(4d6kh3+2)*10', '1d20adv', '1d100bp2'
+   - format (string, 可选, 默认'text'): 输出格式，'text' 或 'ascii'(仅d6)
+
+9. drawTarot - 塔罗占卜
+   使用情形：需要进行塔罗牌占卜时调用
+   - spread (string, 可选): 牌阵名称，提供时忽略count
+   - count (integer, 可选, 默认3): 在不使用预设牌阵时，要抽取的牌的数量
+   - allowReversed (boolean, 可选, 默认true): 是否允许出现逆位牌
+
+10. castRunes - 符文抽取
+    使用情形：需要抽取卢恩符文时调用
+    - count (integer, 可选, 默认1): 要抽取的卢恩符文数量
+
+11. selectFromList - 列表随机选择
+    使用情形：需要从给定列表中随机选择项目时调用
+    - items (array, 必需): JSON数组字符串，如 '["苹果", "香蕉", "橙子"]'
+    - count (integer, 可选, 默认1): 要选择的项目的数量
+    - withReplacement (boolean, 可选, 默认false): 是否允许重复抽取（有放回的抽取）
+
+12. getRandomDateTime - 随机时间生成
+    使用情形：需要在指定时间范围内生成随机时间点时调用
+    - start (string, 可选): ISO 8601起始时间，默认1970年
+    - end (string, 可选): ISO 8601结束时间，默认当前时间
+    - format (string, 可选): 输出的日期时间格式，默认 '%Y-%m-%d %H:%M:%S'
+
+七、调用示例
+
+1. 创建扑克牌堆:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」Randomness「末」,
-command:「始」createDeck「末」,
-deck_name:「始」my_deck「末」,
-deck_type:「始」standard_52「末」
+tool_name:「始」Randomness「末",
+command:「始」createDeck「末",
+deckName:「始」poker「末",
+deckCount:「始」2「末」
 <<<[END_TOOL_REQUEST]>>>
 
-从牌堆抽牌:
+2. 创建自定义牌堆:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」Randomness「末」,
-command:「始」drawFromDeck「末」,
-deck_id:「始」deck_123「末」,
+tool_name:「始」Randomness「末",
+command:「始」createCustomDeck「末",
+cards:「始」["攻击", "防御", "闪避"]「末",
+deckName:「始」战斗卡牌「末」
+<<<[END_TOOL_REQUEST]>>>
+
+3. 从牌堆抽牌:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Randomness「末",
+command:「始」drawFromDeck「末",
+deckId:「始」deck_abc123「末",
 count:「始」5「末」
 <<<[END_TOOL_REQUEST]>>>
 
-掷骰子:
+4. 重置牌堆:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」Randomness「末」,
-command:「始」rollDice「末」,
-dice_spec:「始」2d6+3「末」
+tool_name:「始」Randomness「末",
+command:「始」resetDeck「末",
+deckId:「始」deck_abc123「末」
 <<<[END_TOOL_REQUEST]>>>
 
-抽塔罗牌:
+5. 查询牌堆状态:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」Randomness「末」,
-command:「始」drawTarot「末」,
+tool_name:「始」Randomness「末",
+command:「始」queryDeck「末",
+deckId:「始」deck_abc123「末」
+<<<[END_TOOL_REQUEST]>>>
+
+6. 一次性抽塔罗牌:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Randomness「末",
+command:「始」getCards「末",
+deckName:「始」tarot「末",
+count:「始」1「末」
+<<<[END_TOOL_REQUEST]>>>
+
+7. 复杂掷骰:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Randomness「末",
+command:「始」rollDice「末",
+diceString:「始」(2d8+1d6)kh2+5「末」
+<<<[END_TOOL_REQUEST]>>>
+
+8. 塔罗牌阵占卜:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Randomness「末",
+command:「始」drawTarot「末",
+spread:「始」three_card「末」
+<<<[END_TOOL_REQUEST]>>>
+
+9. 抽取卢恩符文:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Randomness「末",
+command:「始」castRunes「末",
 count:「始」3「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: Randomness, synchronous, 同步调用, 多媒体, createDeck, createCustomDeck, drawFromDeck, resetDeck, destroyDeck, multi-command
+10. 列表随机选择:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Randomness「末",
+command:「始」selectFromList「末",
+items:「始」["选项A", "选项B", "选项C"]「末",
+count:「始」2「末」
+<<<[END_TOOL_REQUEST]>>>
+
+11. 随机时间生成:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Randomness「末",
+command:「始」getRandomDateTime「末",
+start:「始」2024-01-01T00:00:00Z「末",
+end:「始」2024-12-31T23:59:59Z「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: Randomness, synchronous, 同步调用, 随机事件, 牌堆管理, 掷骰, 塔罗, 符文, multi-command

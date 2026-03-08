@@ -1,42 +1,80 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——ThoughtClusterManager（原子切片）
 
 一、插件身份
 - name: ThoughtClusterManager
 - displayName: 思维簇管理器
+- version: 1.0.0
 - pluginType: synchronous
-- command: CreateClusterFile, EditClusterFile
+- protocol: stdio
+- timeout: 10000ms
+- author: Roo
+- 定位：用于创建和编辑AI自身思维链文件的插件，实现元自学习能力
 
 二、核心能力
-- 一个用于创建和编辑AI自身思维链文件的插件，实现元自学习能力。
-- 提供可调用命令：CreateClusterFile、EditClusterFile。
+提供2个可调用命令，用于管理以"簇"结尾的文件夹中的思维模块文件：
+1. CreateClusterFile - 创建新的思维簇文件
+2. EditClusterFile - 编辑已存在的思维簇文件内容
 
-三、占位符与注入点
+三、命令详解
+
+【CreateClusterFile】创建思维簇文件
+参数:
+- clusterName (字符串, 必需): 目标簇文件夹的名称，必须以'簇'结尾。如果文件夹不存在，将自动创建。名称中的空格会被自动移除。
+- content (字符串, 必需): 要写入新文件的内容，建议遵循标准格式。
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ThoughtClusterManager「末",
+command:「始」CreateClusterFile「末",
+clusterName:「始」前思维簇「末",
+content:「始」【思考模块：模块名】
+【触发条件】：
+【核心功能】：
+【执行流程】：「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【EditClusterFile】编辑思维簇文件
+参数:
+- clusterName (字符串, 可选): 指定在哪个簇文件夹中进行搜索。如果未提供，将在所有'簇'结尾的文件夹中搜索。
+- targetText (字符串, 必需): 需要被替换的目标文本，长度不能少于15个字符。
+- replacementText (字符串, 必需): 用于替换目标文本的新内容。
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ThoughtClusterManager「末",
+command:「始」EditClusterFile「末",
+clusterName:「始」前思维簇「末",
+targetText:「始」这是需要被替换的旧的思考内容，确保它不少于15字。「末",
+replacementText:「始」这是更新后的新的思考内容。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+四、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+五、配置重点
+- 本插件无configSchema配置项
+- 优先核对插件目录内的 plugin-manifest.json 启用状态
 
-五、排障建议
-- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+六、排障建议
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段（注意是clusterName不是filename，是targetText/replacementText不是updates）
+- 编辑失败：确认targetText长度≥15字符，且文本内容完全匹配
 
-六、调用示例
-创建思维簇文件:
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」ThoughtClusterManager「末」,
-command:「始」CreateClusterFile「末」,
-filename:「始」learning_strategy.md「末」,
-content:「始」# 学习策略\n## 核心原则\n1. 循序渐进\n2. 实践为主「末」
-<<<[END_TOOL_REQUEST]>>>
+七、调用规则与使用情形
+【何时使用CreateClusterFile】
+- 需要建立新的思维模块时
+- 发现现有思维簇缺少某类处理逻辑时
+- 进行元学习总结，固化新的思考模式时
 
-编辑思维簇文件:
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」ThoughtClusterManager「末」,
-command:「始」EditClusterFile「末」,
-filename:「始」learning_strategy.md「末」,
-updates:「始」## 新增内容\n3. 反思总结「末」
-<<<[END_TOOL_REQUEST]>>>
+【何时使用EditClusterFile】
+- 需要修正或优化已有思维模块内容时
+- 发现某模块的逻辑有缺陷需要更新时
+- 合并或拆分思维模块内容时
 
-Tag: ThoughtClusterManager, synchronous, 同步调用, CreateClusterFile, EditClusterFile
+【命名规范】
+- 簇文件夹名必须以"簇"结尾（如：前思维簇、逻辑推理簇、反思簇）
+- 文件名由系统自动生成，基于clusterName和时间戳
+
+八、浪潮算法Tag标签
+Tag: ThoughtClusterManager, synchronous, 同步调用, CreateClusterFile, EditClusterFile, clusterName, targetText, replacementText, 元自学习, 思维链管理, 思维簇

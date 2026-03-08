@@ -1,33 +1,48 @@
-[2026-03-03] - Codex
+[2026-03-06] - Nova
 [VCP百科全书] 插件说明——UserAuth（原子切片）
+⚠️ 格式警告：此插件manifest缺少多个关键字段
+  - 缺失: manifestVersion (应设置为 "1.0.0")
+  - 缺失: version (插件版本号)
+  - 缺失: author (作者信息)
 
 一、插件身份
 - name: UserAuth
 - displayName: 用户认证插件
 - pluginType: static
-- command: 无（自动触发）
+- description: 每小时生成一个6位数的认证码，用于用户权限验证。
+- ⚠️ 缺失字段: manifestVersion, version, author
 
 二、核心能力
 - 每小时生成一个6位数的认证码，用于用户权限验证。
 - 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- 每小时整点自动刷新（refreshIntervalCron: 0 * * * *）
 
 三、占位符与注入点
 - systemPromptPlaceholders: {{USER_AUTH_CODE}}
+  - 描述：提供一个每小时更新的6位数认证码，用于验证用户权限
+  - 动态性：true（每小时更新）
 
 四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+- 本插件无需额外配置
+- 认证码通过占位符自动注入系统提示词
 
 五、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 认证码未更新：检查cron表达式配置，确认插件正常运行。
+- 结果异常：查看插件目录日志文件排查生成逻辑问题。
 
-六、调用示例
+六、调用规则与使用情形
+- 本插件为static类型，无invocationCommands，不可被AI主动调用
+- 使用情形：需要在系统提示词中提供时效性认证码时使用{{USER_AUTH_CODE}}占位符
+- 典型场景：管理员权限验证、敏感操作二次确认、临时访问授权
+- 安全提示：认证码每小时自动更换，请勿硬编码或缓存
+
+七、调用示例
 触发示例：在系统提示词中引用该插件占位符，等待周期刷新后自动注入。
 
 示例系统提示词：
-"用户认证码：{{USER_AUTH_CODE}}（每小时更新一次）"
+"用户认证码：{{USER_AUTH_CODE}}（每小时更新一次）\n如需执行管理员操作，请告知用户当前认证码。"
 
 该占位符会自动注入一个6位数的认证码，用于用户权限验证。
 
-Tag: UserAuth, static, 静态注入, 多媒体, 平台功能, USER_AUTH_CODE
+Tag: UserAuth, static, 静态注入, 平台功能, USER_AUTH_CODE, 字段缺失

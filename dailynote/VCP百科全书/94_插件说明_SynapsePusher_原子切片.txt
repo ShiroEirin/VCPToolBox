@@ -1,28 +1,47 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——SynapsePusher（原子切片）
+
+⚠️ **状态声明**：manifest文件缺失，以下内容基于历史记录整理，待验证。
 
 一、插件身份
 - name: SynapsePusher
 - displayName: VCP 日志 Synapse 推送器
-- pluginType: service
-- command: 无（自动触发）
+- pluginType: service（推测）
+- protocol: direct（推测，进程内服务）
 
 二、核心能力
 - 将 VCP 工具调用日志实时推送到指定的 Synapse (Matrix) 房间。
 - 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- 支持 Matrix 协议的消息推送与房间管理。
 
 三、占位符与注入点
 - systemPromptPlaceholders: 无
+- 该插件为被动触发式服务，不直接向AI暴露可调用的命令。
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+四、配置重点（待验证）
+- 需核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
+- 预期配置项可能包括：
+  - `SYNAPSE_HOMESERVER_URL`: Matrix 服务器地址
+  - `SYNAPSE_ACCESS_TOKEN`: 访问令牌
+  - `SYNAPSE_ROOM_ID`: 目标房间ID
+  - `VCP_LOG_FILTER`: 日志过滤规则
 
 五、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- Synapse连接失败：检查 homeserver URL 和网络连通性。
+- 认证失败：验证 access token 是否过期或被撤销。
+- 消息未送达：确认 room ID 正确且 bot 有发送权限。
 
 六、调用示例
 触发示例：启动服务后由路由或事件系统被动触发，无需手动命令。
 
-Tag: SynapsePusher, service, 后台服务, 记忆管理
+七、使用情形
+1. **团队监控**：将VCP工具调用日志推送到团队Matrix频道，实现协作透明化。
+2. **审计追踪**：关键操作实时同步到Synapse房间，便于事后审计。
+3. **告警通知**：配合错误日志过滤，实现异常事件的即时群聊通知。
+
+八、关联知识
+- Synapse是Matrix协议的参考实现，支持联邦聊天网络。
+- 与VCPLogs插件可能存在功能重叠或互补关系。
+
+Tag: SynapsePusher, service, 后台服务, Matrix, Synapse, 日志推送, 消息通知, manifest缺失, 内容待验证

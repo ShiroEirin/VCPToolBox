@@ -1,43 +1,91 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件说明——PyCameraCapture（原子切片）
+[2026-03-05] - Nova
+[VCP百科全书] 插件说明——PyCameraCapture（原子切片）【第四批修正版】
 
 一、插件身份
 - name: PyCameraCapture
 - displayName: Python摄像头插件
+- version: 1.0.0
+- author: Cline
 - pluginType: synchronous
-- command: CaptureImage
+- protocol: stdio
+- timeout: 90000ms (90秒)
+- entryPoint: python capture.py
 
 二、核心能力
 - 一个使用Python和OpenCV从摄像头捕获图像的同步插件。
+- 支持多种处理模式，可根据配置决定如何处理捕获的图片。
 - 提供可调用命令：CaptureImage。
 
-三、占位符与注入点
-- systemPromptPlaceholders: 无
+三、配置重点
+| 配置键 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| PROCESSING_MODE | string | full_analysis | 处理模式：full_analysis(完整分析)、direct_to_ai(直接发送给对话AI)、capture_only(仅拍摄) |
+| SAVE_PATH | string | "" | 照片存储路径。支持相对路径(如 ../../image/captures/)或绝对路径(如 D:/MyCaptures/) |
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+### 处理模式说明
+- **full_analysis**: 完整分析模式（默认）。捕获图片后进行完整分析和处理
+- **direct_to_ai**: 直接发送到AI。捕获的图片直接传递给当前对话的AI进行分析
+- **capture_only**: 仅拍摄模式。只捕获并保存图片，不进行额外处理
 
-五、排障建议
+四、可用命令详情
+
+### CaptureImage - 捕获摄像头图像
+从你的电脑摄像头捕获一张图片。
+
+**调用格式**：
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PyCameraCapture「末」,
+camera_index:「始」0「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+**参数说明**：
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| camera_index | ❌ | 0 | 摄像头的索引号。多摄像头环境下可尝试 0, 1, 2... |
+
+**简化调用**（使用默认camera_index=0）：
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PyCameraCapture「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+⚠️ 【修正说明】原切片写了`output_path`/`resolution`/`camera_id`参数，但manifest中只有`camera_index`参数。已按manifest实际定义修正，只保留`camera_index`参数。
+
+五、调用规则与使用情形
+
+### 何时调用
+1. **拍照需求**：用户要求"拍张照片"、"打开摄像头"、"给我看看"等
+2. **视觉分析**：需要获取当前环境画面让AI分析时
+3. **身份验证**：需要进行人脸识别或身份确认时
+4. **远程监控**：查看摄像头覆盖区域状态时
+
+### 多摄像头环境
+- 默认使用索引0（通常是内置摄像头或第一个连接的摄像头）
+- 如需切换摄像头，尝试camera_index: 1、2等值
+- 常见配置：0=内置摄像头，1=外接USB摄像头
+
+### 与预处理插件的区别
+- **PyCameraCapture**: 主动调用型插件，AI通过工具调用触发拍照
+- **CapturePreprocessor**: 消息预处理插件，自动替换占位符为截图
+- 两者可配合使用：占位符用于自动捕获，本插件用于主动请求
+
+### 最佳实践
+- **简单调用**：大多数情况下无需指定camera_index，使用默认即可
+- **SAVE_PATH配置**：建议配置专门的图片存储目录，便于管理
+- **PROCESSING_MODE选择**：
+  - 需要AI分析图片内容 → `full_analysis` 或 `direct_to_ai`
+  - 仅需保存照片 → `capture_only`
+
+六、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 常见问题排查：
+  - 无法找到摄像头：尝试更换camera_index值（0, 1, 2）
+  - 权限被拒绝：检查操作系统摄像头权限设置
+  - 摄像头被占用：关闭其他使用摄像头的应用程序
+  - 图片未保存：检查SAVE_PATH路径是否存在且有写入权限
 
-六、调用示例
-捕获图像:
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」PyCameraCapture「末」,
-command:「始」CaptureImage「末」,
-camera_id:「始」0「末」,
-output_path:「始」/path/to/image.jpg「末」
-<<<[END_TOOL_REQUEST]>>>
-
-使用特定分辨率:
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」PyCameraCapture「末」,
-command:「始」CaptureImage「末」,
-camera_id:「始」0「末」,
-output_path:「始」/path/to/image.jpg「末」,
-resolution:「始」1920x1080「末」
-<<<[END_TOOL_REQUEST]>>>
-
-Tag: PyCameraCapture, synchronous, 同步调用, 多媒体, CaptureImage
+Tag: PyCameraCapture, synchronous, 同步调用, 多媒体, CaptureImage, 摄像头, OpenCV, Python, 图像捕获, 计算机视觉, 硬件交互, 浪潮算法

@@ -1,43 +1,173 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——PaperReader（原子切片）
 
 一、插件身份
-- name: `PaperReader`
-- displayName: `超文本递归阅读器`
-- pluginType: `synchronous`
-- 目标：把超长PDF/技术文档转成可递归阅读与问答流程
+- name: PaperReader
+- displayName: 超文本递归阅读器
+- version: 0.4.0
+- pluginType: synchronous
+- protocol: stdio
+- timeout: 1800000ms (30分钟)
+- author: VCP
+- 定位：统一自适应阅读引擎，将超长PDF/文档转为目标驱动的多分辨率阅读流程
 
-二、核心命令
-- `IngestPDF`：PDF解析、转Markdown、分块
-- `ReadSkeleton`：生成文档骨架与全局地图
-- `ReadDeep`：滚动上下文递归摘要
-- `Query`：检索式问答
+二、核心能力
+提供5个可调用命令，覆盖完整阅读工作流：
+1. IngestPDF - 解析PDF并生成可递归阅读的分块工件
+2. Read - v0.4统一自适应阅读命令（推荐）
+3. ReadSkeleton - 生成文档骨架与全局地图
+4. ReadDeep - 全量Rolling Context深度阅读（v0.3兼容模式）
+5. Query - 对已导入的文档做检索式问答
 
-三、分层流程（L0~L3）
-- L0 解析：优先MinerU，失败降级pdf-parse
-- L1 切分：章节感知 + overlap
-- L2 阅读：骨架抽取 + 递归深读 + 汇总
-- L3 存储：按paperId生成结构化工件目录
+三、命令详解
 
-四、配置与依赖
-- 关键配置：`MINERU_API_TOKEN`、`PaperReaderModel`
-- 依赖：`axios`、`pdf-parse`、`adm-zip`、`@dqbd/tiktoken`
+【IngestPDF】PDF解析与分块
+说明: 解析PDF并生成可递归阅读的分块工件。支持学术论文、技术报告、书籍、法律文书等各类PDF。使用MinerU云端API高保真解析（保留公式/表格/图片/多栏排版），失败自动降级到pdf-parse。输出章节感知的chunk文件。
 
-五、典型场景
-- 论文精读、法律文书梳理、技术白皮书拆解、长文档问答。
+参数:
+- command: 固定为IngestPDF
+- filePath (字符串, 必需): PDF绝对路径
+- paperId (字符串, 可选): 自定义ID（不传则自动生成）
 
-六、调用示例
+调用格式:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」PaperReader「末」,
-command:「始」IngestPDF「末」,
-file_path:「始」D:\papers\transformer.pdf「末」
+tool_name:「始」PaperReader「末",
+command:「始」IngestPDF「末",
+filePath:「始」D:\\books\\paper.pdf「末」
 <<<[END_TOOL_REQUEST]>>>
 
+【Read】v0.4统一自适应阅读（推荐）
+说明: 自动执行完整流程：Survey（骨架提取）→ Triage（分诊注意力分配）→ DeepDive/Skim（精读/扫读）→ Audit（去偏见审核）→ Synthesize（合成报告）。这是推荐的阅读方式，自动决定哪些章节精读、哪些扫读、哪些跳过。注意：处理大文档（100+ chunks）可能需要数分钟。
+
+参数:
+- command: 固定为Read
+- paperId (字符串, 必需): 文档ID
+- goal (字符串, 可选): 阅读目标（影响Triage分诊策略）
+- forceReread (布尔值, 可选): 强制重新阅读（忽略缓存）
+
+调用格式:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」PaperReader「末」,
-command:「始」Query「末」,
-paper_id:「始」transformer「末」,
-question:「始」这篇论文的核心创新点是什么？「末」
+tool_name:「始」PaperReader「末",
+command:「始」Read「末",
+paperId:「始」xray-20260208-xxx「末",
+goal:「始」理解核心方法和实验设计「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: PaperReader, IngestPDF, ReadSkeleton, ReadDeep, Query, 递归阅读, 长文档解析, MinerU, pdf-parse, 章节切分, RollingContext
+【ReadSkeleton】生成文档骨架
+说明: 基于已导入的文档工件生成骨架地图（Global Map）+ 层级树索引。Read命令会自动调用此步骤，通常不需要单独使用。
+
+参数:
+- command: 固定为ReadSkeleton
+- paperId (字符串, 必需)
+- focus (字符串, 可选): 本次阅读关注点
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PaperReader「末",
+command:「始」ReadSkeleton「末",
+paperId:「始」xray-xxx「末",
+focus:「始」方法学与实验设计「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【ReadDeep】全量深度阅读（v0.3兼容模式）
+说明: 全量Rolling Context深度阅读（无Triage/Audit的v0.3兼容模式）。对所有chunk无差别精读。推荐使用Read命令替代。
+
+参数:
+- command: 固定为ReadDeep
+- paperId (字符串, 必需)
+- goal (字符串, 可选): 主任务目标
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PaperReader「末",
+command:「始」ReadDeep「末",
+paperId:「始」xray-xxx「末",
+goal:「始」快速理解核心贡献「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【Query】检索式问答
+说明: 对已导入的文档做检索式问答（树索引推理式检索，降级到关键词匹配）。返回答案、推理过程及引用来源。
+
+参数:
+- command: 固定为Query
+- paperId (字符串, 必需)
+- question (字符串, 必需)
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PaperReader「末",
+command:「始」Query「末",
+paperId:「始」xray-xxx「末",
+question:「始」这份文档的核心结论是什么？「末」
+<<<[END_TOOL_REQUEST]>>>
+
+四、分层流程（L0~L3）
+- L0 解析: 优先MinerU，失败降级pdf-parse
+- L1 切分: 章节感知 + overlap
+- L2 阅读: 骨架抽取 + 递归深读 + 汇总
+- L3 存储: 按paperId生成结构化工件目录
+
+五、配置与依赖
+关键配置项:
+- MINERU_API_TOKEN: MinerU云端API Token（从mineru.net获取），不填则自动降级到pdf-parse
+- MINERU_API_TIMEOUT: MinerU轮询超时（ms），默认300000（5分钟）
+- MINERU_POLL_INTERVAL: MinerU轮询间隔（ms），默认5000
+- PaperReaderChunkSize: 目标chunk大小（tokens），默认2000
+- PaperReaderOverlap: chunk重叠比例，默认0.15
+- PaperReaderModel: 用于阅读/总结的模型名称
+- PaperReaderMaxOutputTokens: 单次模型输出上限，默认12000
+- PaperReaderBatchSize: Deep阅读分批处理的chunk数，默认5
+- PaperReaderMaxConcurrentLLM: 进程级LLM最大并发请求数，默认5
+- PaperReaderMaxChunks: 单次阅读最多处理的chunk数，默认120
+- PaperReaderMaxAuditChunks: Auditor审核抽样最大chunk数，默认8
+
+依赖: axios, pdf-parse, adm-zip, @dqbd/tiktoken
+
+六、典型场景
+- 论文精读: 使用Read命令自动分诊精读
+- 法律文书梳理: IngestPDF后Query检索关键条款
+- 技术白皮书拆解: ReadSkeleton生成大纲后针对性阅读
+- 长文档问答: Query进行树索引推理式检索
+
+七、v0.4新增特性
+- 统一Read命令: Survey→Triage→DeepDive/Skim→Audit→Synthesize完整流程
+- Triage分诊: 智能分配注意力，区分精读/扫读/跳过
+- Skim轻量扫读: 对次要章节快速浏览
+- Auditor去偏见: 审核并消除阅读过程中的偏见
+- ReadingState持久化: 保存阅读状态支持断点续读
+
+八、调用规则与使用情形
+【何时使用IngestPDF】
+- 首次处理PDF文档时必须调用
+- 生成结构化工件供后续所有阅读命令使用
+- 支持学术论文、技术报告、书籍、法律文书等
+
+【何时使用Read（推荐）】
+- 需要全面理解文档内容时
+- 不确定哪些章节重要时（自动分诊）
+- 需要高质量摘要和报告时
+- 处理大文档（自动处理100+ chunks）
+
+【何时使用ReadSkeleton】
+- 只需要了解文档结构大纲时
+- Read命令会自动调用，通常无需单独使用
+- 需要针对特定关注点生成骨架时
+
+【何时使用ReadDeep】
+- 需要对每个chunk无差别精读时
+- v0.3兼容场景
+- 一般推荐使用Read替代
+
+【何时使用Query】
+- 针对已导入文档的具体问题检索答案时
+- 需要引用来源的问答场景
+- 快速查找特定信息而不需要全文阅读
+
+【最佳实践】
+- 首先调用IngestPDF生成工件
+- 常规阅读使用Read命令（最智能）
+- 大文档预留足够时间（可能需数分钟）
+- 配置MINERU_API_TOKEN获得最佳解析效果
+
+九、浪潮算法Tag标签
+Tag: PaperReader, synchronous, 同步调用, IngestPDF, Read, ReadSkeleton, ReadDeep, Query, 递归阅读, 长文档解析, MinerU, pdf-parse, 章节切分, RollingContext, Triage分诊, Auditor审核, v0.4.0

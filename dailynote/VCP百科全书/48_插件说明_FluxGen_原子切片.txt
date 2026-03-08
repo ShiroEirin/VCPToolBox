@@ -5,27 +5,106 @@
 - name: FluxGen
 - displayName: Flux 风格图片生成器
 - pluginType: synchronous
-- command: FluxGenerateImage
+- protocol: stdio
+- timeout: 60000ms (默认60秒)
+- version: 0.1.0
+- author: UserProvided & Roo
+- 主要命令：FluxGenerateImage
 
 二、核心能力
 - 通过 SiliconFlow API 使用 FLUX.1-schnell 模型生成具有特定风格的图片。
-- 提供可调用命令：FluxGenerateImage。
+- FLUX.1-schnell 是 Black Forest Labs 开发的高质量文本到图像生成模型，以生成速度快、图像质量高著称。
 
-三、占位符与注入点
+三、configSchema 配置项
+| 配置项 | 类型 | 描述 | 必填 |
+|--------|------|------|------|
+| SILICONFLOW_API_KEY | string | SiliconFlow API密钥，用于访问FLUX.1-schnell模型 | 是 |
+
+四、FluxGenerateImage 命令详解
+
+### 4.1 功能描述
+调用此工具通过SiliconFlow API的FLUX.1-schnell模型生成图片。
+
+### 4.2 参数说明
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| command | string | 是 | 固定为 "FluxGenerateImage" |
+| prompt | string | 是 | 用于图片生成的详细【英文】提示词 |
+| resolution | string | 是 | 图片分辨率，见下方支持列表 |
+| seed | integer | 否 | 随机种子，通常省略以使用随机种子 |
+
+### 4.3 支持的resolution分辨率列表
+| 分辨率 | 宽高比 | 适用场景 |
+|--------|--------|----------|
+| 1024x1024 | 1:1 | 方形头像、社交媒体帖子 |
+| 960x1280 | 3:4 | 竖版海报、手机壁纸 |
+| 768x1024 | 3:4 | 竖版插画、书籍封面 |
+| 720x1440 | 1:2 | 长图、故事板 |
+| 720x1280 | 9:16 | 短视频封面、手机全屏 |
+
+### 4.4 Prompt编写建议
+- 使用英文描述，详细具体
+- 包含：主体、场景、风格、光线、色彩等要素
+- 示例：`A majestic cat warrior in futuristic armor, standing on a neon-lit city rooftop at night, cyberpunk style, dramatic lighting, highly detailed`
+
+五、返回格式说明
+
+工具执行完毕后，返回包含以下信息：
+1. **图片URL**: 生成图片的公开访问URL
+2. **存储路径**: 图片在服务器上的存储相对路径 (例如：image/fluxgen/图片名.png)
+3. **文件名**: 图片的文件名
+
+AI应使用返回的【图片URL】为用户生成HTML的 `<img>` 标签来直接展示图片：
+```html
+<img src="[图片URL]" alt="[prompt描述]" width="300">
+```
+
+六、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
-
-五、排障建议
+七、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- API错误：检查SILICONFLOW_API_KEY配置是否正确。
+- 生成失败：检查prompt是否为英文，分辨率是否在支持列表中。
 
-六、调用示例
+八、调用示例
+
+基础调用:
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」FluxGen「末」,
-command:「始」FluxGenerateImage「末」
+command:「始」FluxGenerateImage「末」,
+prompt:「始」A majestic cat warrior in futuristic armor, standing on a neon-lit city rooftop at night, cyberpunk style.「末」,
+resolution:「始」1024x1024「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: FluxGen, synchronous, 同步调用, 多媒体, FluxGenerateImage
+带seed参数:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FluxGen「末」,
+command:「始」FluxGenerateImage「末」,
+prompt:「始」A serene Japanese garden with cherry blossoms, watercolor painting style, soft pastel colors.「末」,
+resolution:「始」960x1280「末」,
+seed:「始」42「末」
+<<<[END_TOOL_REQUEST]>>>
+
+竖版海报:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FluxGen「末」,
+command:「始」FluxGenerateImage「末」,
+prompt:「始」Epic fantasy dragon soaring over medieval castle, golden hour lighting, cinematic composition, highly detailed scales.「末」,
+resolution:「始」768x1024「末」
+<<<[END_TOOL_REQUEST]>>>
+
+九、使用场景
+1. **艺术创作**: 快速生成概念图、插画素材
+2. **设计辅助**: 生成海报、封面设计灵感
+3. **内容创作**: 为文章、社交媒体配图
+4. **原型设计**: 产品概念可视化
+
+十、注意事项
+- 必须使用英文prompt以获得最佳效果
+- 分辨率必须严格匹配支持列表中的值
+- 生成的图片受SiliconFlow服务条款约束
+- 建议保存重要生成结果，URL可能有有效期限制
+
+Tag: FluxGen, synchronous, 同步调用, 多媒体, FluxGenerateImage, SILICONFLOW_API_KEY, configSchema, FLUX.1-schnell, SiliconFlow, 图像生成, 1024x1024, 960x1280, 768x1024, 720x1440, 720x1280

@@ -1,24 +1,151 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件实现——LinuxShellExecutor（源码事实切片）
+[2026-03-06] - Nova (Updated)
+[VCP百科全书] 插件实现——LinuxShellExecutor（源码事实切片）v1.1
 
 一、源码锚点
 - manifest: Plugin/LinuxShellExecutor/plugin-manifest.json
 - entry: Plugin/LinuxShellExecutor/LinuxShellExecutor.js
 - 核心类: LinuxShellExecutor
-- 核心校验层: BlacklistFilter / WhitelistValidator / ASTAnalyzer / SandboxManager / AuditLogger
+- 安全层架构: 7层防护（v0.4.0 从5层扩展至7层）
 
-二、行为事实（代码级）
+二、七层安全防护架构（v0.4.0 更新）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1: BlacklistFilter      黑名单过滤 - 快速拦截已知危险命令    │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 2: WhitelistValidator   白名单验证 - 允许列表校验           │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 2.5: GraylistValidator  灰名单验证(v0.4.0新增) - 需管理员确认 │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 2.6: SecurityLevelValidator 安全分级(v0.4.0新增)          │
+│            read/safe/write/danger 四级分类 + 管道链验证          │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 3: ASTAnalyzer          AST语义分析 - 检测复杂攻击模式       │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 4: SandboxManager       沙箱隔离 - Docker/Firejail/Bwrap   │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 5: RlimitManager        资源限制 - CPU/内存/文件/进程数      │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 6: AuditLogger          审计日志 - 记录所有操作             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+三、v0.4.0 新增组件详解
+
+### 3.1 GraylistValidator（第2.5层：灰名单验证器）
+```javascript
+class GraylistValidator {
+    constructor(graylist) {
+        this.commands = graylist.commands || {};
+        this.globalRestrictions = graylist.globalRestrictions || {};
+        this.riskLevels = graylist.riskLevels || {};
+    }
+    
+    // 检查命令是否在灰名单中
+    check(command) {
+        const parsed = this.parseCommand(command);
+        const cmdConfig = this.commands[parsed.command];
+        if (!cmdConfig) return { inGraylist: false };
+        return {
+            inGraylist: true,
+            cmdConfig,
+            riskLevel: cmdConfig.riskLevel || 'medium',
+            parsedCommand: parsed
+        };
+    }
+}
+```
+
+### 3.2 SecurityLevelValidator（第2.6层：安全分级验证器）
+```javascript
+class SecurityLevelValidator {
+    constructor(config) {
+        this.levels = config.securityLevels || {};  // read/safe/write/danger
+        this.pipeRules = config.pipeRules || {};
+        this.redirectRules = config.redirectRules || {};
+        this.specialOperators = config.specialOperators || {};
+    }
+    
+    // 获取命令的安全级别
+    getCommandLevel(command) {
+        const parsed = this.parseCommand(command);
+        for (const levelName of ['danger', 'write', 'safe', 'read']) {
+            // 匹配逻辑...
+        }
+    }
+    
+    // 验证完整命令（包括管道和重定向）
+    validate(command) {
+        // 验证特殊操作符(; & $()等)
+        // 验证管道链安全性
+        // 验证重定向目标
+    }
+}
+```
+
+### 3.3 PresetExecutor（v0.4.0新增：预设命令执行器）
+```javascript
+class PresetExecutor {
+    constructor(config) {
+        this.presets = config.presets || {};
+        this.categories = config.categories || {};
+    }
+    
+    isPresetCommand(command) { return command.startsWith('preset:'); }
+    
+    // 解析预设命令格式: preset:name?param1=value1&param2=value2
+    parsePresetCommand(command) {
+        const match = command.match(/^preset:(\w+)(?:\?(.+))?$/);
+        // 返回解析结果...
+    }
+    
+    // 展开预设为实际命令列表
+    expandPreset(presetName, params = {}) {
+        // Shell参数转义，防止注入
+        // 替换占位符 ${key} 和 ${key:-default}
+    }
+    
+    listPresets() { /* 返回所有可用预设 */ }
+}
+```
+
+### 3.4 OutputFormatter（v0.4.0新增：输出格式化器）
+```javascript
+class OutputFormatter {
+    constructor(options = {}) {
+        this.maxOutputLines = options.maxOutputLines || 100;
+        this.maxOutputSize = options.maxOutputSize || 1048576;
+        this.tableCommands = ['ps', 'df', 'docker', 'ls', 'netstat', 'ss', 'lsof'];
+    }
+    
+    async format(output, options = {}) {
+        // outputFormat: 'raw' | 'formatted' | 'json'
+        // 自动截断超长输出
+        // 美化表格输出（对齐列）
+        // JSON格式化特定命令(df等)
+    }
+    
+    beautifyTable(output) { /* 对齐列宽 */ }
+    toJSON(output, command) { /* df等命令转为结构化JSON */ }
+}
+```
+
+四、行为事实（代码级）
 - execute() 中 hostId 为必填；缺失时返回 discovery 资产列表引导。
 - hostId 不存在时不抛硬错，返回 status=discovery + 可用资产。
 - isLongRunning=true 时转后台任务：启动 monitorManager，返回 taskId/pid/logPath。
 - 对 tail -f / journalctl -f 提示改用 LinuxLogMonitor 进行流式监控。
+- v0.4.0: 支持 preset:xxx 格式预设命令，自动展开为多条命令序列。
+- v0.4.0: 输出自动格式化，支持 table/json/raw 三种格式。
 
-三、安全与放行机制
-- 安全层按等级启停（standard/high/maximum）。
-- 默认走白名单校验；提供授权码时可触发 bypassWhitelist 逃逸路径。
-- 远程执行依赖共享 SSHManager，本地执行走 sandbox/直接执行分支。
+五、权限模型（v0.4.0 四级分级）
+- read: 只读命令，自动放行，允许管道
+- safe: 低风险命令，自动放行
+- write: 写操作，需要确认（requireAdmin验证码）
+- danger: 高危命令，二次确认（doubleConfirm=true）
+- authCode: 授权码逃逸层，允许执行未知命令（需AST扫描通过）
 
-四、调用示例（源码对齐）
+六、调用示例（源码对齐）
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」LinuxShellExecutor「末」,
 command:「始」apt update「末」,
@@ -26,4 +153,18 @@ hostId:「始」local「末」,
 isLongRunning:「始」true「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: LinuxShellExecutor, LinuxShellExecutor.js, hostId必填, discovery, isLongRunning, taskId, whitelist, ASTAnalyzer, sandbox, 同步调用
+# v0.4.0 预设命令示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」preset:systemCheck?host=localhost「末」,
+hostId:「始」local「末」
+<<<[END_TOOL_REQUEST]>>>
+
+七、版本变更记录
+- v1.0 (2026-03-03): 初始版本（5层安全架构）
+- v1.1 (2026-03-06):
+  - 安全层从5层扩展到7层（新增灰名单、安全分级）
+  - 补充 v0.4.0 新增组件：PresetExecutor、OutputFormatter
+  - 更新权限模型为四级分级（read/safe/write/danger）
+
+Tag: LinuxShellExecutor, LinuxShellExecutor.js, 7层安全架构, GraylistValidator, SecurityLevelValidator, PresetExecutor, OutputFormatter, hostId必填, discovery, isLongRunning, taskId, whitelist, ASTAnalyzer, sandbox, 同步调用

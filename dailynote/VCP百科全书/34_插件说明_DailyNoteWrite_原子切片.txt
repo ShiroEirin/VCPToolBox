@@ -1,36 +1,46 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——DailyNoteWrite（原子切片）
 
 一、插件身份
 - name: `DailyNoteWrite`
 - displayName: `日记写入器 (同步)`
+- version: `1.0.0`
 - pluginType: `synchronous`
 - protocol: `stdio`
+- timeout: `5000` (5秒)
+- entryPoint: `node daily-note-write.js`
+- author: `System`
 
 二、核心能力
-- 写入日记文件并做Tag标准化，保障RAG召回一致性。
-- 自动修复Tag标点/空格格式，统一为 `Tag: a, b, c` 规范。
-- 缺失Tag时可调用Tag生成模型自动补全。
+- 接收日记数据作为标准输入，将其写入对应的日记文件。
+- 通过标准输出返回操作结果（成功/失败状态）。
+- 无AI可调用的invocationCommands，由系统内部调用。
 
-三、关键机制
-- Tag格式自动检测与修复（中英文标点归一）。
-- AI打Tag失败时具备退避重试与降级保存策略。
-- 目标是“先保证可写入，再提升Tag质量”。
+三、输入参数（stdin JSON格式）
+- maidName: 日记本名称/女仆名
+- dateString: 日期字符串（格式如 YYYY-MM-DD）
+- contentText: 日记内容文本
 
-四、配置重点
-- `DAILY_NOTE_EXTENSION`
-- `TagModel` / `TagModelMaxOutPutTokens` / `TagModelMaxTokens`
-- `TagModelPrompt`（如 `TagMaster.txt`）
+四、配置Schema
+- DebugMode: boolean - 是否开启调试模式
 
-五、RAG实践建议
-- 日记末行强制保留Tag，避免后处理漏标。
-- Tag尽量覆盖“主体词元 + 动作词元 + 问题词元”。
+五、返回值结构
+```json
+{
+  "success": true|false,
+  "message": "操作结果描述",
+  "filePath": "写入的文件路径"
+}
+```
 
-六、调用示例
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」DailyNoteWrite「末」,
-title:「始」VCP开发复盘_标签规范「末」,
-content:「始」今天统一了插件切片Tag格式，提升了召回稳定性。Tag: 标签规范, 切片治理, RAG优化「末」
-<<<[END_TOOL_REQUEST]>>>
+六、调用规则与使用情形
+- 该插件为系统级同步插件，不暴露给AI直接调用。
+- 通常由VCP核心系统在保存日记时内部触发。
+- 适用于需要程序化写入日记内容的场景。
 
-Tag: DailyNoteWrite, 日记写入, Tag标准化, Tag自动修复, Tag生成, TagMaster, RAG召回, 词元规范, 同步插件
+七、排障建议
+- 检查DebugMode配置以获取详细日志。
+- 确认maidName对应的日记目录存在且可写。
+- 超时时间为5秒，大量内容写入可能触发超时。
+
+Tag: DailyNoteWrite, 日记写入, 同步插件, stdio协议, 系统内部调用, 日记持久化, VCP核心, synchronous

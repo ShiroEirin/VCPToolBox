@@ -15,7 +15,7 @@
 三、配置重点
 - 根配置：`VarCity`、`WeatherKey`、`WeatherUrl`
 - 插件配置：`forecastDays`、`hourlyForecastInterval`、`hourlyForecastCount`
-- 刷新频率由manifest cron控制（README说明默认8小时）
+- 刷新频率由manifest cron控制（默认每6小时刷新一次，cron表达式：`0 */6 * * *`）
 
 四、工程注意
 - 城市缓存与天气缓存要保持同步，避免脏数据回放。

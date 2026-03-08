@@ -1,42 +1,88 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件说明——ZImageGen2（原子切片）
+[2026-03-05] - Nova
+[VCP百科全书] 插件说明——ZImageGen2（原子切片）【第四批修正版】
 
 一、插件身份
 - name: ZImageGen2
 - displayName: Z-Image Base 文生图
+- version: 1.1.0
+- author: VCP Team
 - pluginType: synchronous
-- command: ZImageGenerate
+- protocol: stdio
+- timeout: 45000ms (45秒)
+- entryPoint: node ZImageGen.mjs
+
+⚠️ 【EntryPoint问题标注】entryPoint.command为`node ZImageGen.mjs`，与ZImageGen插件相同。这可能是复制粘贴错误，建议检查是否为`node ZImageGen2.mjs`。
 
 二、核心能力
 - 通过 Hugging Face Spaces API 使用 Z-Image-Base 模型生成高质量图片。支持中英文提示词，28步推理，支持负向提示词和CFG调节。
 - 提供可调用命令：ZImageGenerate。
 
-三、占位符与注入点
-- systemPromptPlaceholders: 无
+三、配置重点
+| 配置键 | 类型 | 说明 |
+|--------|------|------|
+| HF_TOKEN | string (可选) | Hugging Face Token，用于私有Space或更高速率限制 |
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+四、可用命令详情
 
-五、排障建议
+### ZImageGenerate - 生成图片
+通过 Z-Image-Base 模型生成高质量图片。支持中英文提示词。
+
+**调用格式**：
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ZImageGen「末」,
+prompt:「始」(必需) 用于图片生成的详细提示词，支持中文或英文。「末」,
+negative_prompt:「始」(可选) 负向提示词，描述不想在图片中出现的内容。「末」,
+resolution:「始」(可选) 图片分辨率，默认1024x1024。可选值：「1024x1024」「1280x720」「720x1280」「1152x864」「864x1152」等，或使用比例如「16:9」「9:16」「square」「landscape」「portrait」。「末」,
+steps:「始」(可选) 推理步数，默认28。「末」,
+cfg:「始」(可选) 引导比例(CFG)，默认4。「末」,
+cfg_normalization:「始」(可选) 是否开启CFG归一化，默认false。「末」,
+showbase64:「始」(可选) 是否在返回结果中包含base64图片数据供AI查看，默认false。设置为true时AI可以看到生成的图片，但会消耗更多token。「末」
+(可选参数：seed:「始」整数种子「末」 - 省略使用随机种子)
+<<<[END_TOOL_REQUEST]>>>
+```
+
+**参数说明**：
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| prompt | ✅ | - | 图片生成提示词，支持中英文 |
+| negative_prompt | ❌ | "" | 负向提示词，排除不想要的元素 |
+| resolution | ❌ | 1024x1024 | 输出分辨率，支持具体尺寸或比例描述 |
+| steps | ❌ | 28 | 推理步数，影响生成质量和速度 |
+| cfg | ❌ | 4 | Classifier-Free Guidance比例，控制提示词遵循程度 |
+| cfg_normalization | ❌ | false | 是否启用CFG归一化 |
+| showbase64 | ❌ | false | 是否在结果中包含base64图片数据 |
+| seed | ❌ | 随机 | 随机种子，固定值可复现结果 |
+
+**分辨率可选值**：
+- 具体尺寸：`1024x1024`、`1280x720`、`720x1280`、`1152x864`、`864x1152`
+- 比例描述：`16:9`、`9:16`、`square`、`landscape`、`portrait`
+
+五、调用规则与使用情形
+
+### 何时调用
+1. **高质量文生图**：需要生成艺术风格图片时
+2. **精细控制需求**：需要调整CFG、步数、分辨率等参数时
+3. **负向提示需求**：需要明确排除某些元素时
+4. **中英双语支持**：用户使用中文提示词时
+
+### 工具执行后处理
+当此工具执行完毕后，AI将收到包含以下信息的结果：
+1. 生成图片的公开访问URL
+2. 图片在服务器上的存储相对路径 (例如：image/zimage/图片名.png)
+3. 图片的文件名和使用的Seed
+4. 如果showbase64设置为true，还会包含base64格式的图片数据供AI查看
+
+**展示图片**：请在最终回复中使用返回的【图片URL】为用户生成HTML的 `<img>` 标签：
+```html
+<img src="[图片URL]" alt="[prompt描述]" width="300">
+```
+建议width属性设置为200-500像素。
+
+六、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- ⚠️ entryPoint.command可能与ZImageGen冲突，使用时请确认插件加载的是ZImageGen2
+- 超时时间为45秒，复杂生成可能接近上限
 
-六、调用示例
-基础生成:
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」ZImageGen2「末」,
-command:「始」ZImageGenerate「末」,
-prompt:「始」a beautiful landscape painting「末」
-<<<[END_TOOL_REQUEST]>>>
-
-高级参数（包含负向提示词和 CFG 调节）:
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」ZImageGen2「末」,
-command:「始」ZImageGenerate「末」,
-prompt:「始」a beautiful landscape painting with mountains and rivers「末」,
-negative_prompt:「始」blurry, low quality「末」,
-cfg_scale:「始」7.5「末」
-<<<[END_TOOL_REQUEST]>>>
-
-Tag: ZImageGen2, synchronous, 同步调用, 多媒体, ZImageGenerate
+Tag: ZImageGen2, synchronous, 同步调用, 多媒体, ZImageGenerate, HuggingFace, Z-Image, 文生图, CFG调节, 负向提示词, 浪潮算法

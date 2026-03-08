@@ -26,7 +26,7 @@ command: `generate_song`
 
 可选参数：
 - `mv`（字符串）：模型版本，可选 'chirp-v3-0', 'chirp-v3-5', 'chirp-v4'，默认 'chirp-v4'
-- `make_instrumental`（布尔）：是否生成纯音乐
+- `make_instrumental`（布尔）：是否生成纯音乐（无歌词）
 
 调用示例：
 <<<[TOOL_REQUEST]>>>

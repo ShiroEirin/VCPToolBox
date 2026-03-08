@@ -2,9 +2,10 @@
 [VCP百科全书] 插件说明——DailyNotePanel（原子切片）
 
 一、插件身份
-- name: DailyNotePanelRouter
+- name: DailyNotePanelRouter（manifest注册名）
 - displayName: DailyNotePanel 路由胶水插件
 - pluginType: service
+- protocol: direct
 - command: 无（自动触发）
 
 二、核心能力

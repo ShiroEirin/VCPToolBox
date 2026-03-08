@@ -1,39 +1,193 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——LinuxLogMonitor（原子切片）
 
 一、插件身份
-- name: `LinuxLogMonitor`
-- displayName: `Linux 日志监控器`
-- pluginType: `asynchronous`
-- 定位：事件驱动日志监控 + 异常检测 + Agent回调
+- name: LinuxLogMonitor
+- displayName: Linux 日志监控器
+- version: 1.3.0
+- pluginType: asynchronous
+- protocol: stdio + HTTP回调
+- timeout: 3600000ms (1小时)
+- encoding: utf-8
+- author: VCP Team
+- 定位：事件驱动的 Linux 日志监控系统，支持实时监控和主动查询
 
-二、核心命令
-- `start` / `stop` / `status`
-- `add_rule` / `list_rules`
-- `searchLog` / `lastErrors` / `logStats`
+二、核心能力
+提供8个可调用命令，覆盖完整生命周期：
+1. start - 启动日志监控任务
+2. stop - 停止指定的监控任务
+3. status - 查询所有活跃监控任务状态
+4. list_rules - 列出所有可用的异常检测规则
+5. add_rule - 添加自定义异常检测规则
+6. searchLog - 主动搜索日志内容(v1.3.0)
+7. lastErrors - 获取最近的错误日志(v1.3.0)
+8. logStats - 日志统计分析(v1.3.0)
 
-三、核心机制
+三、命令详解
+
+【start】启动日志监控任务
+说明: 这是一个异步操作，会立即返回taskId，后台持续监控日志并在检测到异常时通过回调通知Agent。
+参数:
+- hostId (字符串, 必需): 目标主机ID，需在LinuxShellExecutor的hosts.json中配置
+- logPath (字符串, 必需): 要监控的日志文件路径，如/var/log/syslog
+- rules (数组, 可选): 自定义检测规则，默认使用预置规则
+- contextLines (数字, 可选, 默认10): before上下文行数
+- afterContextLines (数字, 可选, 默认等于contextLines): after上下文行数
+- dedupeMode (字符串, 可选, 默认'time-window'): 去重模式，可选'permanent'(永久)、'time-window'(时间窗口)、'disabled'(禁用)
+- dedupeWindow (数字, 可选, 默认60): 时间窗口秒数（仅time-window模式有效）
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxLogMonitor「末",
+command:「始」start「末",
+hostId:「始」prod-server「末",
+logPath:「始」/var/log/nginx/error.log「末",
+contextLines:「始」20「末",
+dedupeMode:「始」time-window「末",
+dedupeWindow:「始」30「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【stop】停止指定的监控任务
+参数:
+- taskId (字符串, 必需): 启动监控时返回的任务ID
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxLogMonitor「末",
+command:「始」stop「末",
+taskId:「始」monitor-task-abc123「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【status】查询所有活跃的监控任务状态
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxLogMonitor「末",
+command:「始」status「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【list_rules】列出所有可用的异常检测规则
+说明: 包括预置规则和自定义规则
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxLogMonitor「末",
+command:「始」list_rules「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【add_rule】添加自定义异常检测规则
+参数:
+- name (字符串, 必需): 规则名称，如'high_cpu'
+- type (字符串, 必需): 规则类型，可选'regex'(正则匹配)、'keyword'(关键词匹配)、'threshold'(阈值检测)
+- pattern (字符串, 必需): 匹配模式。regex类型使用正则表达式，keyword类型使用关键词，threshold类型使用带捕获组的正则
+- severity (字符串, 可选, 默认'warning'): 严重级别，可选'info'、'warning'、'critical'
+- cooldown (数字, 可选, 默认60000): 冷却时间（毫秒），同一规则触发后的静默期
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxLogMonitor「末",
+command:「始」add_rule「末",
+name:「始」oom_killer「末",
+type:「始」keyword「末",
+pattern:「始」Out of memory「末",
+severity:「始」critical「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【searchLog】主动搜索日志内容(v1.3.0)
+说明: 使用grep在指定日志文件中搜索匹配的内容
+参数:
+- hostId (字符串, 必需): 目标主机ID
+- logPath (字符串, 必需): 日志文件路径
+- pattern (字符串, 必需): grep正则表达式，如'error|failed|timeout'
+- lines (数字, 可选, 默认100): 最多返回行数
+- since (字符串, 可选): 时间范围，如'1h'(1小时)、'30m'(30分钟)、'1d'(1天)
+- context (数字, 可选, 默认0): 上下文行数（grep -C参数）
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxLogMonitor「末",
+command:「始」searchLog「末",
+hostId:「始」DB1「末",
+logPath:「始」/var/log/mysql/error.log「末",
+pattern:「始」ERROR|Warning「末",
+lines:「始」100「末",
+context:「始」3「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【lastErrors】获取最近的错误日志(v1.3.0)
+说明: 快速查看指定日志文件中最近的错误记录
+参数:
+- hostId (字符串, 必需): 目标主机ID
+- logPath (字符串, 必需): 日志文件路径
+- count (数字, 可选, 默认20): 返回的错误条数
+- levels (数组, 可选, 默认['ERROR','FATAL','CRIT']): 要匹配的错误级别
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxLogMonitor「末",
+command:「始」lastErrors「末",
+hostId:「始」web-server「末",
+logPath:「始」/var/log/nginx/error.log「末",
+count:「始」50「末",
+levels:「始」["error","crit","alert"]「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【logStats】日志统计分析(v1.3.0)
+说明: 对日志进行分组统计，如按状态码、IP、路径等分组
+参数:
+- hostId (字符串, 必需): 目标主机ID
+- logPath (字符串, 必需): 日志文件路径
+- since (字符串, 可选, 默认'1h'): 时间范围
+- groupBy (字符串, 可选, 默认'level'): 分组字段，可选'level'(日志级别)、'status_code'(HTTP状态码)、'ip'(IP地址)、'hour'(按小时)
+- top (数字, 可选, 默认10): 返回前N条统计结果
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxLogMonitor「末",
+command:「始」logStats「末",
+hostId:「始」web-server「末",
+logPath:「始」/var/log/nginx/access.log「末",
+since:「始」24h「末",
+groupBy:「始」ip「末",
+top:「始」20「末」
+<<<[END_TOOL_REQUEST]>>>
+
+四、核心机制
 - SSH tail实时流监控
 - 规则引擎（regex/keyword/threshold）
 - 回调触发与失败重试
 - 状态持久化与任务恢复
 - 去重策略（permanent/time-window/disabled）
+- webSocketPush实时推送异常通知
 
-四、协作关系
-- 与 `LinuxShellExecutor` 共享 `SSHManager`，构成“执行-监控”联动闭环。
-- 适合安装部署、服务变更、异常追踪等持续观测场景。
+五、WebSocket推送配置
+- enabled: true
+- targetClientType: VCPLog
+- messageType: log_monitor_anomaly
+- 异常检测到时自动推送通知到VCPLog客户端
 
-五、排障抓手
-- 先看task状态文件与规则命中日志。
-- 再看回调通道可达性与重试堆积。
-- 最后看SSH连接稳定性与日志源路径准确性。
+六、协作关系
+- 与LinuxShellExecutor共享SSHManager，构成"执行-监控"联动闭环
+- 适合安装部署、服务变更、异常追踪等持续观测场景
 
-六、调用示例
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」LinuxLogMonitor「末」,
-command:「始」start「末」,
-hostId:「始」DE-server「末」,
-logPath:「始」/var/log/syslog「末」
-<<<[END_TOOL_REQUEST]>>>
+七、排障抓手
+- 先看task状态文件与规则命中日志
+- 再看回调通道可达性与重试堆积
+- 最后看SSH连接稳定性与日志源路径准确性
 
-Tag: LinuxLogMonitor, 日志监控, 异常检测, add_rule, searchLog, lastErrors, logStats, SSH tail, 回调通知, 去重策略, 运维观测
+八、调用规则与使用情形
+【何时使用start/stop】
+- 需要持续监控某个日志文件时使用start
+- 监控任务完成或不再需要时调用stop释放资源
+- 配合长任务执行（如yum install）进行实时日志跟踪
+
+【何时使用searchLog/lastErrors/logStats】
+- 排查问题时先用lastErrors快速查看最新错误
+- 需要深入分析时用searchLog按模式搜索
+- 需要统计概览时用logStats查看分布情况
+
+【何时使用add_rule】
+- 业务系统有特定的错误模式需要监控时
+- 预置规则无法覆盖特定场景时
+- 需要降低误报率或提高检测精度时
+
+九、浪潮算法Tag标签
+Tag: LinuxLogMonitor, asynchronous, 异步调用, 日志监控, 异常检测, start, stop, status, add_rule, list_rules, searchLog, lastErrors, logStats, SSH tail, webSocketPush, 回调通知, 去重策略, 运维观测, v1.3.0

@@ -1,41 +1,90 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——SemanticGroupEditor（原子切片）
 
 一、插件身份
 - name: SemanticGroupEditor
 - displayName: 语义组编辑器
 - pluginType: synchronous
-- command: QueryGroups, UpdateGroups
+- protocol: stdio
+- entryPoint: node SemanticGroupEditor.js
+- timeout: 10000ms
 
 二、核心能力
 - 一个用于查询和更新RAG知识库中语义词元组的插件。
-- 提供可调用命令：QueryGroups、UpdateGroups。
+- 支持批量操作，可一次性更新多个语义组。
+- 语义词元组用于TagMemo浪潮算法的语义分段和检索优化。
 
-三、占位符与注入点
+三、可用命令
+
+### 1. QueryGroups - 查询语义组
+**功能**：查询当前系统中所有的语义词元组，返回组名和对应的词元列表。
+
+**参数**：无
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」SemanticGroupEditor「末",
+command:「始」QueryGroups「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 2. UpdateGroups - 更新语义组
+**功能**：更新或创建语义词元组。如果组名已存在，则覆盖更新；如果不存在，则新建。支持批量操作。
+
+**参数**：
+- `groupname` (字符串, 必需): 要更新或创建的组名。
+- `groupwords` (字符串, 必需): 词元列表，用英文逗号分隔。
+
+**单次更新调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」SemanticGroupEditor「末",
+command:「始」UpdateGroups「末",
+groupname:「始」科幻概念「末",
+groupwords:「始」戴森球,曲率引擎,赛博朋克「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+**批量更新调用格式**（使用数字后缀）：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」SemanticGroupEditor「末",
+command1:「始」UpdateGroups「末",
+groupname1:「始」编程语言「末",
+groupwords1:「始」Python,JavaScript,Rust,Go「末",
+command2:「始」UpdateGroups「末",
+groupname2:「始」前端框架「末",
+groupwords2:「始」React,Vue,Angular,Svelte「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+四、占位符与注入点
 - systemPromptPlaceholders: 无
 
-四、配置重点
+五、配置重点
 - 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+- 该插件通常不需要额外配置，直接与RAG知识库交互。
 
-五、排障建议
+六、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 更新失败：检查组名是否包含特殊字符，词元列表格式是否正确（英文逗号分隔）。
+- 查询为空：确认RAG知识库已正确初始化且有语义组数据。
 
-六、调用示例
-查询语义组:
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」SemanticGroupEditor「末」,
-command:「始」QueryGroups「末」,
-query:「始」authentication「末」
-<<<[END_TOOL_REQUEST]>>>
+七、使用情形
+1. **语义组初始化**：新建知识库时，批量导入预设的语义词元组。
+2. **动态调优**：根据检索效果反馈，动态调整语义组的词元组成。
+3. **领域适配**：针对特定领域（医疗、法律、编程），建立专业术语组。
+4. **A/B测试**：创建多组语义配置，对比不同词元组合对检索质量的影响。
 
-更新语义组:
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」SemanticGroupEditor「末」,
-command:「始」UpdateGroups「末」,
-group_id:「始」group_123「末」,
-updates:「始」{"keywords": ["login", "signin"]}「末」
-<<<[END_TOOL_REQUEST]>>>
+八、关联知识
+- 语义词元组是TagMemo浪潮算法的核心组件，影响EPA模块的语义分段逻辑。
+- 语义组与日记本的Group功能不同：前者用于RAG检索优化，后者用于记忆分类组织。
+- 修改语义组后，新写入的日记会自动应用新的分组策略，但已有日记不会自动重新分段。
 
-Tag: SemanticGroupEditor, synchronous, 同步调用, QueryGroups, UpdateGroups
+九、注意事项
+- 组名建议使用简洁的英文或中文标识，避免空格和特殊符号。
+- 词元数量建议控制在10-50个，过多会导致语义发散，过少则覆盖面不足。
+- 批量更新时，数字后缀必须从1开始连续编号（1,2,3...），不能跳号。
+
+Tag: SemanticGroupEditor, synchronous, 同步调用, 语义组, 词元组, RAG优化, TagMemo, EPA模块, QueryGroups, UpdateGroups, 批量操作

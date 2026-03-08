@@ -25,8 +25,9 @@
 六、调用示例
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」AnimeFinder「末」,
-command:「始」findAnimeByUrl「末」,
 imageUrl:「始」https://images.plurk.com/32B15UXxymfSMwKGTObY5e.jpg「末」
 <<<[END_TOOL_REQUEST]>>>
+
+注：该插件直接使用imageUrl参数，无需command参数。
 
 Tag: AnimeFinder, synchronous, 同步调用, findAnimeByUrl

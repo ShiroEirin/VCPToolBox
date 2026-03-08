@@ -1,21 +1,34 @@
 [2026-03-02] - Nova
-[VCP百科全书] 插件说明——VSearch联网搜索（使用规范）
+[VCP百科全书] 插件说明——VSearch联网搜索（使用规范）修正版
 
 一、插件定位
-VSearch 是语义并发联网搜索插件，用于“主题+多关键词”检索与信息聚合。
+VSearch 是语义并发联网搜索插件，用于"主题+多关键词"检索与信息聚合。
 
 二、manifest关键信息
 - name: `VSearch`
+- displayName: `VSearch 语义并发搜索器`
 - pluginType: `synchronous`
 - protocol: `stdio`
+- timeout: `300000ms` (5分钟)
+- entryPoint: `node VSearch.js`
 - commandIdentifier: `VSearch`
 
-三、参数说明
-- `SearchTopic`（必需，字符串）：检索主题背景
-- `Keywords`（必需，字符串）：关键词（逗号/换行分隔）
-- `ShowURL`（可选，布尔，默认false）：是否返回来源URL
+三、参数说明（VSearch命令）
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| SearchTopic | string | ✓ | - | 检索的目标主题或研究背景，帮助AI理解搜索意图 |
+| Keywords | string | ✓ | - | 具体的检索关键词，多个关键词请用逗号或换行分隔 |
+| ShowURL | boolean | ✗ | false | 是否在结果中显示参考来源的完整URL。如果不需要溯源，建议设为false以节省Token |
 
-四、调用示例
+四、配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| VSearchKey | string | 用于访问大模型服务的API Key |
+| VSearchUrl | string | 大模型服务的API端点URL |
+| VSearchModel | string | 用于执行联网搜索的辅助模型名称（建议使用 gemini-2.5-flash-lite-preview-06-17-thinking） |
+| MaxConcurrent | integer | 并发执行搜索任务的队列上限 |
+
+五、调用示例
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」VSearch「末」,
 SearchTopic:「始」AI在医疗诊断中的最新应用「末」,
@@ -23,15 +36,15 @@ Keywords:「始」medical imaging, transformer healthcare, clinical AI benchmark
 ShowURL:「始」true「末」
 <<<[END_TOOL_REQUEST]>>>
 
-五、常见错误
+六、常见错误
 - Invalid URL：后端搜索入口配置异常或URL构造失败
 - Key缺失：未配置 `VSearchKey`
 - 模型不可用：`VSearchModel` 无效或无权限
-- 超时：关键词过多，建议拆批检索
+- 超时：关键词过多，建议拆批检索（timeout为300秒）
 
-六、RAG标签建议（TagMemo V5）
-主体词元：VSearch, 语义搜索, 联网搜索  
-动作词元：SearchTopic, Keywords, ShowURL, 并发检索  
+七、RAG标签建议（TagMemo V5）
+主体词元：VSearch, 语义搜索, 联网搜索, 并发检索
+动作词元：SearchTopic, Keywords, ShowURL, MaxConcurrent
 故障词元：Invalid URL, 配置缺失, 超时, 模型不可用
 
-Tag: VSearch, 联网搜索, 语义并发检索, SearchTopic, Keywords, ShowURL, 信息聚合, URL溯源, Invalid URL, 插件配置, 检索超时
+Tag: VSearch, 联网搜索, 语义并发检索, SearchTopic, Keywords, ShowURL, 信息聚合, URL溯源, Invalid URL, 插件配置, 检索超时, 修正版

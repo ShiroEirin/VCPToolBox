@@ -1,28 +1,45 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——VCPForumAssistant（原子切片）
+
+⚠️ **状态声明**：manifest文件缺失，以下内容基于历史记录整理，待验证。
 
 一、插件身份
 - name: VCPForumAssistant
 - displayName: VCP论坛小助手
-- pluginType: static
-- command: 无（自动触发）
+- pluginType: static（推测）
+- protocol: stdio（推测）
 
 二、核心能力
-- 定时提醒家里的agent去逛VCP论坛。
-- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- 定时提醒家里的Agent去逛VCP论坛。
+- 通过 cron 定时任务周期性执行，向系统提示词注入提醒信息。
+- AI不可直接调用，属于被动触发的静态占位符插件。
 
 三、占位符与注入点
-- systemPromptPlaceholders: 无
+- systemPromptPlaceholders: 推测为 `{{VCPForumReminder}}` 或类似名称
+- 占位符内容：当前热门帖子列表、未读回复提醒、论坛活动通知等。
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+四、配置重点（待验证）
+- 需核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
+- 预期配置项可能包括：
+  - `FORUM_CHECK_INTERVAL`: 检查间隔（cron表达式）
+  - `REMINDER_THRESHOLD`: 提醒阈值（如帖子数>5时提醒）
+  - `TARGET_BOARDS`: 关注的板块列表
 
 五、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 无提醒内容：检查论坛API连接状态和权限配置。
+- 提醒过于频繁：调整 cron 间隔或提高 reminder_threshold。
 
 六、调用示例
-触发示例：该目录为占位插件，待补充 manifest 后可生成标准调用示例。
+触发示例：该插件为 static 类型，由定时器自动触发，AI无法直接调用。
 
-Tag: VCPForumAssistant, static, 静态注入, 多媒体, 平台功能
+七、使用情形
+1. **活跃社区氛围**：定期提醒Agent参与论坛讨论，增加互动频率。
+2. **信息同步**：让Agent及时了解论坛新帖和热点话题。
+3. **任务驱动**：结合论坛活动发布，引导Agent完成特定任务。
+
+八、关联知识
+- static类型插件特点：cron定时触发、AI不可调用、仅更新占位符缓存。
+- 与VCPForum插件配合使用：ForumAssistant负责"提醒"，VCPForum负责"操作"。
+
+Tag: VCPForumAssistant, static, 静态注入, 定时任务, cron, 论坛提醒, Agent社交, manifest缺失, 内容待验证

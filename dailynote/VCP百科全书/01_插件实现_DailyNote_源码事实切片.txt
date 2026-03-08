@@ -1,24 +1,84 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件实现——DailyNote（源码事实切片）
+[2026-03-06] - Nova (Updated)
+[VCP百科全书] 插件实现——DailyNote（源码事实切片）v1.1
 
 一、源码锚点
 - manifest: Plugin/DailyNote/plugin-manifest.json
-- entry: Plugin/DailyNote/dailynote.js
+- entry: Plugin/DailyNote/index.js （⚠️ 修正：实际主入口是 index.js，非 dailynote.js）
 - 主分发: main() -> switch(command) -> create/update
 - 关键函数: processTags(), handleCreateCommand(), handleUpdateCommand()
 
 二、行为事实（代码级）
 - create 支持参数兼容：maid/maidName/Maid/MAID、Date/dateString、Content/contentText。
-- Tag 处理优先级：独立 Tag 字段优先；否则检测 Content 末行 Tag:；两者都无则抛错。
+  - maid 参数兼容大小写：maid/maidName/Maid/MAID 四种形式
+- Tag 处理优先级：
+  1. 独立 Tag 字段（externalTag）优先使用
+  2. 否则检测 Content 末行 Tag: 格式
+  3. 两者都无则抛出错误（带详细提示信息）
 - maid 支持 [文件夹]名字 语法，创建时会拆分 folder 与 actualMaidName。
 - update 有安全门槛：target 长度必须 >= 15，否则直接拒绝。
 
-三、边界与错误模式
-- create 缺参数返回 Invalid input for create。
-- update 非字符串参数返回 Invalid arguments for update。
-- 未知命令返回 Unknown command，仅允许 create/update。
+三、新增 Tag 处理函数（v1.1 增强）
 
-四、调用示例（源码对齐）
+```javascript
+// 检测 Content 最后一行是否为 Tag 行
+function detectTagLine(content) {
+    const lines = content.split('\n');
+    if (lines.length === 0) {
+        return { hasTag: false, lastLine: '', contentWithoutLastLine: content };
+    }
+    const lastLine = lines[lines.length - 1].trim();
+    const tagPattern = /^Tag:\s*.+/i;
+    const hasTag = tagPattern.test(lastLine);
+    const contentWithoutLastLine = hasTag ? lines.slice(0, -1).join('\n') : content;
+    return { hasTag, lastLine, contentWithoutLastLine };
+}
+
+// 修复 Tag 格式（统一为 "Tag: 关键词1, 关键词2" 标准格式）
+function fixTagFormat(tagLine) {
+    let fixed = tagLine.trim();
+    fixed = fixed.replace(/^tag:\s*/i, 'Tag: ');
+    if (!fixed.startsWith('Tag: ')) {
+        fixed = 'Tag: ' + fixed;
+    }
+    const tagContent = fixed.substring(5).trim();
+    let normalizedContent = tagContent
+        .replace(/[\uff1a]/g, '')           // 移除中文冒号
+        .replace(/[\uff0c]/g, ', ')         // 中文逗号转英文
+        .replace(/[\u3001]/g, ', ')         // 顿号转英文逗号
+        .replace(/[。.]+$/g, '');           // 移除末尾句号
+    normalizedContent = normalizedContent
+        .replace(/,\s*/g, ', ')
+        .replace(/,\s{2,}/g, ', ')
+        .replace(/\s+,/g, ',');
+    normalizedContent = normalizedContent.replace(/\s{2,}/g, ' ').trim();
+    return 'Tag: ' + normalizedContent;
+}
+
+// Tag 处理主函数（整合外部 Tag 和内容内 Tag）
+async function processTags(contentText, externalTag) {
+    // 优先使用外部传入的 Tag 参数
+    if (externalTag && typeof externalTag === 'string' && externalTag.trim() !== '') {
+        const fixedTag = fixTagFormat(externalTag);
+        return contentText.trimEnd() + '\n' + fixedTag;
+    }
+    // 回退到检测内容中的 Tag 行
+    const detection = detectTagLine(contentText);
+    if (detection.hasTag) {
+        const fixedTag = fixTagFormat(detection.lastLine);
+        return detection.contentWithoutLastLine.trimEnd() + '\n' + fixedTag;
+    } else {
+        throw new Error("Tag is missing. Please provide a 'Tag' argument or add a 'Tag:' line at the end of the 'Content'.");
+    }
+}
+```
+
+四、边界与错误模式（JSON 格式返回）
+- create 缺参数返回: `{ status: "error", error: "Invalid input for create: Missing maid/maidName, dateString/Date, or contentText/Content." }`
+- update 非字符串参数返回: `{ status: "error", error: "Invalid arguments for update: 'target' and 'replace' must be strings." }`
+- 未知命令返回: `{ status: "error", error: "Unknown command: 'xxx'. Use 'create' or 'update'." }`
+- Tag 缺失返回: `{ status: "error", error: "Tag is missing. Please provide..." }`
+
+五、调用示例（源码对齐）
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」DailyNote「末」,
 command:「始」create「末」,
@@ -28,4 +88,12 @@ Content:「始」记录一次源码切片审计。
 Tag: DailyNote, create, 源码事实「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: DailyNote, dailynote.js, create, update, processTags, Tag优先级, target最小长度15, 参数兼容, 同步调用, 记忆写入
+六、版本变更记录
+- v1.0 (2026-03-03): 初始版本
+- v1.1 (2026-03-06): 
+  - 修正 entry 路径：dailynote.js → index.js
+  - 补充 Maid/MAID 大写参数兼容
+  - 新增 fixTagFormat(), detectTagLine() 函数说明
+  - 更新错误消息为 JSON 格式
+
+Tag: DailyNote, index.js, create, update, processTags, fixTagFormat, detectTagLine, Tag优先级, target最小长度15, 参数兼容, 同步调用, 记忆写入

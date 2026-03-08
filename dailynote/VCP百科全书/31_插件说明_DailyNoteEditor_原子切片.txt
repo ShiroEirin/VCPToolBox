@@ -1,28 +1,43 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——DailyNoteEditor（原子切片）
 
 一、插件身份
-- name: DailyNoteEditor
-- displayName: DailyNoteEditor
-- pluginType: placeholder
-- command: 无（自动触发）
+- name: `DailyNoteEditor`
+- displayName: `DailyNoteEditor`
+- version: `1.0.0`
+- pluginType: `placeholder`
+- entry: `main.py`
+- runtime: `python`
+- author: `VCP Team`
+- enabled: `false` （当前未启用）
 
-二、核心能力
-- 目录占位插件：当前缺少可用 manifest，仅保留索引条目。
-- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+二、核心状态
+- 该插件当前为占位插件(placeholder类型)，尚未开发完成。
+- enabled=false表示插件处于禁用状态，不会被系统加载。
+- 保留此条目用于未来日记编辑器功能的扩展规划。
 
-三、占位符与注入点
+三、技术规格
+- 运行时: Python
+- 入口文件: main.py
+- 配置: {} (空对象，暂无配置项)
+
+四、占位符与注入点
 - systemPromptPlaceholders: 无
+- invocationCommands: 无 (placeholder类型插件无AI可调用的命令)
 
-四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+五、调用规则与使用情形
+- 当前不可调用，待开发完成后将更新为hybridservice或其他活跃类型。
+- 预期功能方向：提供日记内容的编辑、格式化、批量处理等能力。
+- 与DailyNoteWrite的区别：Write负责写入，Editor负责编辑修改。
 
-五、排障建议
-- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+六、排障建议
+- 如需使用日记编辑功能，目前请直接使用文件系统操作或等待本插件开发完成。
+- 检查enabled字段确认插件状态。
+- 关注VCP更新日志获取本插件的开发进度。
 
-六、调用示例
-触发示例：该目录为占位插件，待补充 manifest 后可生成标准调用示例。
+七、相关插件
+- DailyNoteWrite (34): 已实现的日记写入功能
+- TagMemo: 日记标签管理与RAG检索
+- RAGDiaryPlugin: 日记内容检索
 
-Tag: DailyNoteEditor, placeholder, 目录占位, 记忆管理
+Tag: DailyNoteEditor, placeholder, 占位插件, 日记编辑, 待开发, python运行时, 记忆管理, VCP规划

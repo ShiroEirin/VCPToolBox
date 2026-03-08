@@ -5,8 +5,12 @@
 1. 插件名称：DeepMemo / 深度回忆插件
 2. 插件类型：同步插件 (synchronous)
 3. 版本号：1.0.0
-4. 所属模块：VCPDistributedServer/Plugin
+4. 所属模块：VCPDistributedServer/Plugin（位于VCPChat项目）
 5. 功能一句话总结：从Vchat聊天记录中检索相关上下文，实现AI的深度回忆功能
+
+关键配置：
+- protocol: stdio
+- timeout: 180000 (180秒/3分钟)
 
 二、功能定位
 DeepMemo是一个基于Rust编写的高性能记忆检索插件，可根据关键词从Vchat聊天记录中检索相关上下文。通过高级搜索语法支持精确短语、权重调整、逻辑组合等功能，帮助AI快速回忆历史对话内容。适用于需要长期记忆、上下文感知的AI Agent场景，如个性化对话、历史参考、知识积累等。

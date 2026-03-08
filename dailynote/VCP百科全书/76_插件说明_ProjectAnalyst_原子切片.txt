@@ -1,47 +1,105 @@
-[2026-03-03] - Codex
+[2026-03-06] - Nova
 [VCP百科全书] 插件说明——ProjectAnalyst（原子切片）
+✅ 已修正：切片参数名已从下划线格式更新为驼峰格式以匹配manifest
 
 一、插件身份
 - name: ProjectAnalyst
 - displayName: 项目分析器
+- manifestVersion: 1.0.0
+- version: 1.0.0
 - pluginType: synchronous
-- command: AnalyzeProject, QueryAnalysis, QueryProgress
+- author: Roo
+- description: 分析指定的项目文件夹，生成详细的分析报告，并支持后续查询分析结果。
 
 二、核心能力
 - 分析指定的项目文件夹，生成详细的分析报告，并支持后续查询分析结果。
-- 提供可调用命令：AnalyzeProject、QueryAnalysis、QueryProgress。
+- 支持快速分析和完整逐文件分析两种模式
+- 提供进度查询功能，可追踪后台分析任务状态
 
 三、占位符与注入点
 - systemPromptPlaceholders: 无
 
 四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+- 本插件configSchema为空对象，无需额外配置
 
 五、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
+- 分析失败：检查directoryPath是否为有效的绝对路径，路径是否存在。
+- 查询无结果：确认analysisId正确，分析任务是否已完成。
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
 
-六、调用示例
-分析项目:
+六、调用规则与使用情形
+1. AnalyzeProject - 启动项目分析
+   使用情形：需要分析新项目或重新分析已有项目时调用
+   参数说明：
+   - directoryPath (string, 必需): 需要分析的项目的本地绝对路径
+   - fullAnalyze / full (boolean, 可选, 默认false): 是否执行完整的逐文件分析
+
+2. QueryAnalysis - 查询分析结果
+   使用情形：需要获取已完成的分析结果时调用
+   查询模式（按优先级）：
+   - 文件检索模式：提供filePath参数，搜索匹配的文件分析
+   - 关键词检索模式：提供keyword参数，进行全文关键词搜索
+   - 完整查询模式：设置full=true，返回完整报告
+   - 简单查询模式（默认）：仅返回项目简介和文件树
+
+3. QueryProgress - 查询分析进度
+   使用情形：需要了解后台分析任务的当前状态时调用
+   返回：最近的日志条目以及任务的当前状态（进行中/已完成）
+
+七、调用示例
+
+1. 快速分析项目:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」ProjectAnalyst「末」,
-command:「始」AnalyzeProject「末」,
-project_path:「始」/path/to/project「末」
+tool_name:「始」ProjectAnalyst「末",
+command:「始」AnalyzeProject「末",
+directoryPath:「始」C:\Path\To\Project「末」
 <<<[END_TOOL_REQUEST]>>>
 
-查询分析结果:
+2. 完整分析项目:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」ProjectAnalyst「末」,
-command:「始」QueryAnalysis「末」,
-analysis_id:「始」analysis-123「末」
+tool_name:「始」ProjectAnalyst「末",
+command:「始」AnalyzeProject「末",
+directoryPath:「始」H:\VCP\VCPToolBox「末",
+full:「始」true「末」
 <<<[END_TOOL_REQUEST]>>>
 
-查询分析进度:
+3. 简单查询分析结果:
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」ProjectAnalyst「末」,
-command:「始」QueryProgress「末」,
-analysis_id:「始」analysis-123「末」
+tool_name:「始」ProjectAnalyst「末",
+command:「始」QueryAnalysis「末",
+analysisId:「始」MyProject-2025-10-05.17.52「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: ProjectAnalyst, synchronous, 同步调用, 多媒体, AnalyzeProject, QueryAnalysis, QueryProgress
+4. 完整查询分析结果:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ProjectAnalyst「末",
+command:「始」QueryAnalysis「末",
+analysisId:「始」MyProject-2025-10-05.17.52「末",
+full:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+5. 文件检索:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ProjectAnalyst「末",
+command:「始」QueryAnalysis「末",
+analysisId:「始」VCPToolBox-2025-11-10.12.55「末",
+filePath:「始」src/main.js「末」
+<<<[END_TOOL_REQUEST]>>>
+
+6. 关键词检索:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ProjectAnalyst「末",
+command:「始」QueryAnalysis「末",
+analysisId:「始」MyProject-2025-10-05.17.52「末",
+keyword:「始」database「末」
+<<<[END_TOOL_REQUEST]>>>
+
+7. 查询分析进度:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ProjectAnalyst「末",
+command:「始」QueryProgress「末",
+analysisId:「始」VCPToolBox-2025-11-10.12.55「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: ProjectAnalyst, synchronous, 同步调用, AnalyzeProject, QueryAnalysis, QueryProgress, 项目分析

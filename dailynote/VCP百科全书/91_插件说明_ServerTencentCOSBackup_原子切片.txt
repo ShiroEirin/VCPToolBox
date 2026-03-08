@@ -1,37 +1,237 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——ServerTencentCOSBackup（原子切片）
 
 一、插件身份
-- name: `ServerTencentCOSBackup`
-- displayName: `腾讯云COS备份插件`
-- pluginType: `synchronous`
-- protocol: `stdio`
+- name: ServerTencentCOSBackup
+- displayName: 腾讯云COS备份插件
+- version: 1.1.1
+- pluginType: synchronous
+- protocol: stdio
+- entryPoint: python cos_handler.py
+- timeout: 30000ms
 
-二、核心命令
-- 文件操作：`upload_file` `download_file` `copy_file` `move_file` `delete_file` `list_files`
-- 权限查看：`get_permissions`
-- 安全检测：`submit_virus_detection_by_key/url` `query_virus_detection`
-
-三、核心能力
+二、核心能力
 - COS对象存储读写与目录策略化管理。
 - 按 `AGENT_FOLDERS_CONFIG` 执行细粒度权限控制。
 - 大文件/目录支持压缩与传输优化。
+- 集成腾讯云病毒检测服务，保障上传文件安全。
 
-四、配置重点
-- `TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY`
-- `COS_BUCKET_NAME` / `COS_REGION`
-- `AGENT_FOLDERS_CONFIG`（权限矩阵）
+三、可用命令
 
-五、安全注意
+### 1. get_permissions - 获取权限信息
+**功能**：获取腾讯云COS插件的权限信息和配置。动态读取config.env中的AGENT_FOLDERS_CONFIG，返回详细的文件夹权限描述。
+
+**参数**：无
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」get_permissions「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 2. upload_file - 上传文件
+**功能**：上传文件到腾讯云COS。支持自动压缩大文件和文件夹。
+
+**参数**：
+- `local_path` (字符串, 必需): 本地文件路径。
+- `cos_folder` (字符串, 必需): 目标COS文件夹。
+- `remote_filename` (字符串, 可选): 远程文件名，不指定则使用原文件名。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」upload_file「末",
+local_path:「始」D:\github\VCP\backup\data.json「末",
+cos_folder:「始」agent-data「末",
+remote_filename:「始」backup_20240305.json「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 3. download_file - 下载文件
+**功能**：从腾讯云COS下载文件。
+
+**参数**：
+- `cos_key` (字符串, 必需): COS文件键（完整路径，如 `VCPAgentAI/agent-data/file.txt`）。
+- `local_path` (字符串, 可选): 本地保存路径，不指定则保存到默认位置。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」download_file「末",
+cos_key:「始」VCPAgentAI/agent-data/backup_20240305.json「末",
+local_path:「始」D:\downloads\backup.json「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 4. copy_file - 复制文件
+**功能**：在腾讯云COS中复制文件。
+
+**参数**：
+- `source_cos_key` (字符串, 必需): 源文件COS键。
+- `target_cos_folder` (字符串, 必需): 目标文件夹。
+- `target_filename` (字符串, 可选): 目标文件名。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」copy_file「末",
+source_cos_key:「始」VCPAgentAI/agent-data/source.txt「末",
+target_cos_folder:「始」agent-temp「末",
+target_filename:「始」copied.txt「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 5. move_file - 移动文件
+**功能**：在腾讯云COS中移动文件。
+
+**参数**：
+- `source_cos_key` (字符串, 必需): 源文件COS键。
+- `target_cos_folder` (字符串, 必需): 目标文件夹。
+- `target_filename` (字符串, 可选): 目标文件名。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」move_file「末",
+source_cos_key:「始」VCPAgentAI/agent-temp/temp.txt「末",
+target_cos_folder:「始」agent-data「末",
+target_filename:「始」archived.txt「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 6. delete_file - 删除文件
+**功能**：删除腾讯云COS中的文件。**注意：不能删除目录，只能删除文件。**
+
+**参数**：
+- `cos_key` (字符串, 必需): 要删除的文件COS键。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」delete_file「末",
+cos_key:「始」VCPAgentAI/agent-temp/old_file.txt「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 7. list_files - 列出文件
+**功能**：列出腾讯云COS中的文件。
+
+**参数**：
+- `cos_folder` (字符串, 可选): 指定文件夹名称，不指定则列出所有文件夹。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」list_files「末",
+cos_folder:「始」agent-data「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 8. submit_virus_detection_by_key - 提交病毒检测（COS文件）
+**功能**：提交病毒检测任务（通过COS文件键）。**无需任何权限检查。**
+
+**参数**：
+- `key` (字符串, 必需): COS文件键。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」submit_virus_detection_by_key「末",
+key:「始」VCPAgentAI/agent-data/suspicious.exe「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 9. submit_virus_detection_by_url - 提交病毒检测（URL）
+**功能**：提交病毒检测任务（通过公网文件URL）。**无需任何权限检查。**
+
+**参数**：
+- `url` (字符串, 必需): 公网文件URL。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」submit_virus_detection_by_url「末",
+url:「始」http://example.com/download/file.exe「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 10. query_virus_detection - 查询病毒检测结果
+**功能**：查询病毒检测任务结果。
+
+**参数**：
+- `job_id` (字符串, 必需): 任务ID，由提交检测命令返回。
+
+**调用格式**：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerTencentCOSBackup「末",
+command:「始」query_virus_detection「末",
+job_id:「始」av1234567890abcdef「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+四、占位符与注入点
+- systemPromptPlaceholders: 无
+
+五、配置Schema（config.env）
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `TENCENTCLOUD_SECRET_ID` | string | - | 腾讯云密钥ID，建议使用环境变量配置 |
+| `TENCENTCLOUD_SECRET_KEY` | string | - | 腾讯云密钥Key，建议使用环境变量配置 |
+| `COS_BUCKET_NAME` | string | test-1111143652 | 腾讯云COS存储桶名称 |
+| `COS_REGION` | string | ap-hongkong | 腾讯云COS存储桶所在地域 |
+| `AGENT_PARENT_DIR` | string | VCPAgentAI | Agent操作文件夹的父目录名称 |
+| `AGENT_FOLDERS_CONFIG` | string | 见下方 | Agent操作文件夹权限配置 |
+| `CALLBACK_BASE_URL` | string | http://localhost:6005/plugin-callback | 异步回调配置 |
+| `DEBUG_MODE` | boolean | false | 是否启用调试模式 |
+| `COMPRESS_THRESHOLD_MB` | number | 100 | 文件大小超过此值（MB）时自动压缩为zip上传 |
+
+**AGENT_FOLDERS_CONFIG格式**：
+```
+文件夹名:上传权限:列出权限:下载权限:删除权限:复制和移动权限
+```
+
+**默认配置示例**：
+```
+agent-data:true:true:true:true:false,
+agent-temp:true:true:true:true:true,
+agent-readonly:false:true:false:false:false
+```
+
+六、排障建议
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
+- 认证失败：检查 TENCENTCLOUD_SECRET_ID 和 SECRET_KEY 是否正确。
+- 权限拒绝：核对 AGENT_FOLDERS_CONFIG 中对应文件夹的操作权限。
+- 上传失败：检查文件大小是否超过限制，网络连接是否正常。
+- 病毒检测失败：确认文件已存在于COS或URL可访问。
+
+七、安全注意
 - 当前定位是VCPToolBox主机本地备份，不等同全网任意主机备份。
 - 云存储操作必须开启最小权限与审计日志。
+- 密钥信息强烈建议通过环境变量注入，不要硬编码在配置文件中。
+- 病毒检测功能可识别恶意软件，但不应作为唯一的安全防线。
 
-六、调用示例
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」ServerTencentCOSBackup「末」,
-command:「始」upload_file「末」,
-local_path:「始」D:\github\VCP\VCPToolBox-fork\dailynote\VCP百科全书\49_插件说明_BilibiliFetch_原子切片.txt「末」,
-target_folder:「始」agent-data「末」
-<<<[END_TOOL_REQUEST]>>>
+八、使用情形
+1. **配置文件备份**：定期将VCP配置文件备份到云端，防止本地丢失。
+2. **跨机同步**：多台Agent主机间共享数据文件。
+3. **大文件归档**：将超过100MB的日志/数据文件压缩后上传。
+4. **安全扫描**：对外来文件进行病毒检测后再使用。
+5. **临时交换**：使用agent-temp文件夹进行Agent间的文件中转。
 
-Tag: ServerTencentCOSBackup, 腾讯云COS, 云备份, upload_file, download_file, 权限矩阵, AGENT_FOLDERS_CONFIG, 病毒检测, 对象存储
+九、关联知识
+- 腾讯云COS（Cloud Object Storage）是一种海量、安全、低成本的对象存储服务。
+- 该插件与FileOperator插件形成互补：FileOperator操作本地文件，COSBackup操作云端文件。
+- 权限矩阵设计遵循最小权限原则，不同Agent可被限制在各自的文件夹内。
+
+Tag: ServerTencentCOSBackup, 腾讯云COS, 云备份, 对象存储, 权限矩阵, AGENT_FOLDERS_CONFIG, 病毒检测, 文件上传, 文件下载, 安全扫描, 同步调用

@@ -1,11 +1,11 @@
-[2026-03-03] - Codex
-[VCP百科全书] 插件说明——ScheduleManager（原子切片）
+[2026-03-05] - Nova
+[VCP百科全书] 插件说明——ScheduleManager（原子切片）修正版
 
 一、插件身份
 - name: ScheduleManager
 - displayName: 用户日程管理器
 - pluginType: synchronous
-- command: AddSchedule, DeleteSchedule, ListSchedules
+- invocationCommands: AddSchedule, DeleteSchedule, ListSchedules
 
 二、核心能力
 - 用于维护用户的日程，允许AI查看、添加和删除用户日程。
@@ -23,26 +23,41 @@
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
 
 六、调用示例
+
 添加日程:
+```
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」ScheduleManager「末」,
 command:「始」AddSchedule「末」,
-title:「始」会议「末」,
-time:「始」2026-03-03 14:00「末」,
-description:「始」项目讨论会议「末」
+time:「始」2025-12-31 10:00「末」,
+content:「始」准备跨年晚会「末」
 <<<[END_TOOL_REQUEST]>>>
+```
+⚠️ 参数名必须是 `time` 和 `content`，不是 `title` + `description`。
 
 列出日程:
+```
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」ScheduleManager「末」,
 command:「始」ListSchedules「末」
 <<<[END_TOOL_REQUEST]>>>
+```
 
 删除日程:
+```
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」ScheduleManager「末」,
 command:「始」DeleteSchedule「末」,
-schedule_id:「始」schedule_123「末」
+id:「始」1735564800000「末」
 <<<[END_TOOL_REQUEST]>>>
+```
+⚠️ 参数名必须是 `id`，不是 `schedule_id`。
 
-Tag: ScheduleManager, synchronous, 同步调用, 记忆管理, AddSchedule, DeleteSchedule, ListSchedules
+七、参数对照表
+| 命令 | 正确参数 | 错误参数（已修正） |
+|------|----------|-------------------|
+| AddSchedule | time, content | title, description |
+| DeleteSchedule | id | schedule_id |
+| ListSchedules | 无参数 | - |
+
+Tag: ScheduleManager, synchronous, 同步调用, 日程管理, AddSchedule, DeleteSchedule, ListSchedules, 修正版

@@ -1,28 +1,47 @@
-[2026-03-03] - Codex
+[2026-03-06] - Nova
 [VCP百科全书] 插件说明——FileTreeGenerator（原子切片）
+⚠️ 格式警告：此插件configSchema使用数组格式而非标准对象格式
+  - 当前: configSchema: [{key, type, description, defaultValue}]
+  - 标准: configSchema: {KEY: {type, description, default}}
 
 一、插件身份
 - name: FileTreeGenerator
 - displayName: 文件树生成器
+- version: 1.0.0
 - pluginType: static
-- command: 无（自动触发）
+- description: 扫描指定目录的文件夹结构，并通过占位符提供给AI。
 
 二、核心能力
 - 扫描指定目录的文件夹结构，并通过占位符提供给AI。
 - 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- 每5分钟自动刷新一次（refreshIntervalCron: */5 * * * *）
 
 三、占位符与注入点
 - systemPromptPlaceholders: {{VCPFilestructureInfo}}
+  - 描述：获取由config.env中TARGET_DIRECTORY指定目录的文件夹结构树
+  - 动态性：true（周期性更新）
 
 四、配置重点
-- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项。
-- 外部API类插件重点检查：密钥、端点、超时、代理与速率限制。
+- TARGET_DIRECTORY (string): 需要扫描的目标文件夹的绝对路径
+- EXCLUDE_DIRS (string): 扫描时需要排除的文件夹名称列表，用逗号分隔。例如：.git,node_modules
+⚠️ 注意：configSchema使用非标准数组格式，配置时需特别注意
 
 五、排障建议
 - 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖。
-- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 占位符未注入：检查TARGET_DIRECTORY是否正确设置，目录是否存在且有读取权限。
+- 结果异常：核对排除目录配置，查看插件目录日志文件。
 
-六、调用示例
+六、调用规则与使用情形
+- 本插件为static类型，无invocationCommands，不可被AI主动调用
+- 使用情形：需要在系统提示词中自动注入项目文件结构时使用{{VCPFilestructureInfo}}占位符
+- 典型场景：代码分析、项目审查、文件导航辅助
+
+七、调用示例
 触发示例：在系统提示词中引用该插件占位符，等待周期刷新后自动注入。
 
-Tag: FileTreeGenerator, static, 静态注入, 多媒体, VCPFilestructureInfo
+示例系统提示词：
+"当前项目文件结构如下：\n{{VCPFilestructureInfo}}\n请根据以上结构分析项目架构。"
+
+该占位符会自动注入由TARGET_DIRECTORY指定的目录的文件树结构。
+
+Tag: FileTreeGenerator, static, 静态注入, VCPFilestructureInfo, 格式警告

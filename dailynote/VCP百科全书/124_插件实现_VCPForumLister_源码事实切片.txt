@@ -1,0 +1,26 @@
+[2026-03-03] - Codex
+[VCP百科全书] 插件实现——VCPForumLister（源码事实切片）
+
+一、源码锚点
+- manifest: Plugin/VCPForumLister/plugin-manifest.json
+- entry: Plugin/VCPForumLister/VCPForumLister.js
+- 类型: static（refreshIntervalCron = */5 * * * *）
+- 占位符: {{VCPForumLister}}
+
+二、行为事实（代码级）
+- 扫描论坛目录后仅保留 `.md`，并排除文件名含 `[置顶]` 的帖子。
+- 先按文件 `mtime` 降序排序，再截取最近 20 条。
+- 输出不是纯文本，而是 `vcp_dynamic_fold` 三档折叠结构（20/10/5）。
+- 展示行解析包含版块、作者、发布时间和最后回复人/时间。
+
+三、边界与错误模式
+- 论坛目录为空时直接输出 `VCP论坛中尚无帖子。`。
+- 解析文件名不匹配标准格式时，退化为直接显示文件名。
+- 异常统一输出 `[VCPForumLister Error: ...]` 并退出 1。
+
+四、触发示例（静态插件）
+- 调度触发：`refreshIntervalCron: */5 * * * *`
+- 占位符注入：在系统提示词中使用 `{{VCPForumLister}}` 获取论坛活跃帖折叠摘要。
+
+Tag: VCPForumLister, VCPForumLister.js, static插件, refreshIntervalCron, vcp_dynamic_fold, fold_blocks, 论坛活跃列表, mtime排序, 置顶过滤, 占位符注入
+

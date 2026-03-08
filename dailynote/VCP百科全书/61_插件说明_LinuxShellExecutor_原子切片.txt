@@ -1,41 +1,128 @@
-[2026-03-03] - Codex
+[2026-03-05] - Nova
 [VCP百科全书] 插件说明——LinuxShellExecutor（原子切片）
 
 一、插件身份
-- name: `LinuxShellExecutor`
-- displayName: `Linux Shell 安全执行器`
-- pluginType: `synchronous`
-- 定位：高风险系统操作执行器，强调多层安全防护
+- name: LinuxShellExecutor
+- displayName: Linux Shell 安全执行器
+- version: 1.2.0
+- pluginType: synchronous
+- protocol: stdio
+- timeout: 60000ms
+- requiresAdmin: true
+- author: VCP Team
+- 定位：六层安全防护的Linux Shell命令执行器，支持多发行版静默安装、异步任务托管、交互阻塞探测及跨插件联动监控
 
-二、关键能力
-- 主机资产发现与选择（hostId导向）
-- 分级安全策略（读/写/危险命令边界）
-- 长任务托管（返回taskId，配合日志监控）
-- 与共享 `SSHManager` 协作，支撑跨插件连接管理
+二、核心能力
+提供1个主命令，支持丰富的执行选项：
+- LinuxShellExecutor - 在安全沙箱中执行Linux Shell命令
 
-三、核心参数说明
-- `hostId`（必需，字符串）：目标主机标识符（如 DE-server、prod-node-01）
-- `shellCommand`（必需，字符串）：要执行的Shell命令（如 `uname -a`、`ps aux`）
-- `timeout`（可选，整数）：命令超时时间（毫秒，默认30000）
-- `taskId`（可选，字符串）：长任务标识，用于异步追踪和日志关联
+三、命令详解
 
-四、版本演进重点（README）
-- 强化异步闭环，避免长任务同步阻塞。
-- 优化SSH连接策略（即用即连、完工即断/临时复用）。
-- 主机级串行化认证，降低PAM锁定风险。
-- 输出长度与资源控制，降低OOM风险。
+【LinuxShellExecutor】执行Shell命令
+说明: 在安全沙箱中执行Linux Shell命令，支持本地和远程SSH执行。v1.1.7审计加固版新增异步闭环、资产引导修复、安全逃逸支持、鲁棒性增强。
 
-五、调用注意
-- 管理类命令必须明确授权与安全等级。
-- 批量安装/日志追踪任务建议联动 `LinuxLogMonitor`。
-- 失败排查优先看：权限、认证、命令级别、交互阻塞提示。
+参数:
+- command (字符串, 必需): 要执行的Shell命令，或preset:预设名?参数格式
+- hostId (字符串, 可选): 目标主机ID，默认'local'
+- isLongRunning (布尔, 可选): 是否为长待机指令，设为true时任务将转入后台并返回taskId
+- requireAdmin (字符串, 可选): 管理员验证码/授权码。用于write/danger级别确认，或强制执行不在白名单内的命令
+- timeout (数字, 可选): 超时时间（毫秒）
+- outputFormat (字符串, 可选): 输出格式'raw'|'formatted'|'json'
 
-六、调用示例
+附加动作:
+- action: listHosts - 列出已配置的主机列表
+
+调用格式示例:
+
+【基本执行】
 <<<[TOOL_REQUEST]>>>
-tool_name:「始」LinuxShellExecutor「末」,
-command:「始」LinuxShellExecutor「末」,
-hostId:「始」DE-server「末」,
-shellCommand:「始」uname -a && uptime「末」
+tool_name:「始」LinuxShellExecutor「末",
+command:「始」uname -a && uptime「末",
+hostId:「始」DE-server「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: LinuxShellExecutor, Shell安全执行, SSHManager, 主机资产, 长任务托管, taskId, PAM防护, 安全分级, 命令审计, Linux运维
+【长待机指令（异步托管）】
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末",
+command:「始」yum install -y nginx「末",
+isLongRunning:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【授权码执行（绕过白名单限制）】
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末",
+command:「始」unknown-tool --args「末",
+requireAdmin:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+
+【列出主机列表】
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末",
+action:「始」listHosts「末」
+<<<[END_TOOL_REQUEST]>>>
+
+四、关键特性详解
+
+【isLongRunning - 长任务托管】
+- 适用于yum/apt安装、大文件传输、长时间日志追踪等耗时操作
+- 设置为true后，任务转入后台执行，立即返回taskId
+- 可配合LinuxLogMonitor监控任务日志输出
+- 避免同步等待导致的超时或阻塞
+
+【requireAdmin - 安全授权】
+- 用于write/danger级别命令的二次确认
+- 可强制执行不在白名单内的命令（安全逃逸）
+- 需要正确的授权码才能通过安全校验
+
+【outputFormat - 输出格式】
+- raw: 原始输出，不做任何处理
+- formatted: 格式化输出，便于阅读
+- json: JSON结构化输出，便于程序解析
+
+【hostId - 主机资产】
+- 需在hosts.json中预先配置主机连接信息
+- 支持SSH密钥和密码两种认证方式
+- 首次使用时会自动发现并缓存主机信息
+
+五、版本演进重点（v1.1.7+）
+- 异步闭环：修复isLongRunning逻辑，确保yum/apt/tail等指令真实托管
+- 资产引导修复：修正Discovery状态透传，引导hostId自动发现
+- 安全逃逸支持：授权码(authCode)可绕过白名单及安全层级限制
+- 鲁棒性增强：新增特殊操作符(; && |)校验及全局1MB/5MB输出截断防护
+
+六、协作关系
+- 与LinuxLogMonitor共享SSHManager模块
+- 长任务执行后可联动LinuxLogMonitor进行日志监控
+- 构成"执行-监控"完整运维闭环
+
+七、排障建议
+- 失败排查优先看：权限、认证、命令级别、交互阻塞提示
+- 管理类命令必须明确授权与安全等级
+- 批量安装/日志追踪任务建议联动LinuxLogMonitor
+- SSH连接问题检查：主机配置、网络连通性、认证凭据
+
+八、调用规则与使用情形
+【何时使用普通执行】
+- 简单的查询类命令（ps aux, df -h, uname -a等）
+- 预计执行时间较短（<30秒）的操作
+- 需要立即获得结果的场景
+
+【何时使用isLongRunning】
+- 软件包安装（yum/apt/npm/pip等）
+- 大文件下载或传输
+- 长时间运行的诊断命令
+- 需要持续观察输出的任务
+
+【何时使用requireAdmin】
+- 执行危险级别命令（rm, fdisk等）
+- 执行不在白名单中的命令
+- 修改系统配置的写操作
+
+【最佳实践】
+- 先使用listHosts确认目标主机可用
+- 复杂操作先测试再正式执行
+- 生产环境重要操作配合requireAdmin授权
+- 长任务务必设置isLongRunning=true避免超时
+
+九、浪潮算法Tag标签
+Tag: LinuxShellExecutor, synchronous, 同步调用, LinuxShellExecutor, command, hostId, isLongRunning, requireAdmin, timeout, outputFormat, SSH执行, 长任务托管, taskId, 安全分级, 命令审计, Linux运维, v1.2.0

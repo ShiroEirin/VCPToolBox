@@ -5,11 +5,11 @@
 - name: GeminiImageGen
 - displayName: Gemini 图像生成与编辑
 - pluginType: synchronous
-- command: GeminiGenerateImage, GeminiEditImage
+- command: generate, edit
 
 二、核心能力
 - 使用 Google Gemini Flash Preview 模型进行高级的图像生成和编辑。
-- 提供可调用命令：GeminiGenerateImage、GeminiEditImage。
+- 提供可调用命令：generate（文生图）、edit（图生图/编辑）。
 
 三、占位符与注入点
 - systemPromptPlaceholders: 无
@@ -23,9 +23,19 @@
 - 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
 
 六、调用示例
+文生图：
 <<<[TOOL_REQUEST]>>>
 tool_name:「始」GeminiImageGen「末」,
-command:「始」GeminiGenerateImage「末」
+command:「始」generate「末」,
+prompt:「始」A 3d rendered image of a pig with wings and a top hat flying over a happy futuristic scifi city with lots of greenery「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: GeminiImageGen, synchronous, 同步调用, 多媒体, GeminiGenerateImage, GeminiEditImage
+图生图/编辑：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GeminiImageGen「末」,
+command:「始」edit「末」,
+prompt:「始」This is a picture of me. Can you add a llama next to me?「末」,
+image_url:「始」https://example.com/my-photo.png「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: GeminiImageGen, synchronous, 同步调用, 多媒体, generate, edit

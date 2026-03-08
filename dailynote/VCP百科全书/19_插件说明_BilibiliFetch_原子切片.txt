@@ -7,9 +7,27 @@
 - pluginType: `synchronous`
 
 二、核心命令
-- `BilibiliFetch`：视频信息/字幕/弹幕/评论/快照
-- `BilibiliSearch`：关键词搜索视频或UP主
-- `GetUpVideos`：获取UP主投稿列表
+1. `BilibiliFetch`：视频信息/字幕/弹幕/评论/快照/高能进度条
+   - url (必需): B站视频URL，支持BV号、b23短链、多P(?p=N)
+   - lang (可选): 字幕语言代码(ai-zh/zh-CN等)
+   - danmaku_num (可选): 热门弹幕数量
+   - comment_num (可选): 热门评论数量
+   - snapshots (可选): 截图时间点(秒)，如"10,60,120"
+   - hd_snapshot (可选): 是否启用HD高清截图(需ffmpeg)
+   - need_subs (可选): 是否获取字幕(默认true)
+   - need_pbp (可选): 是否获取高能进度条(默认true)
+
+2. `BilibiliSearch`：关键词搜索视频或UP主
+   - action (必需): 固定为'search'
+   - keyword (必需): 搜索关键词
+   - search_type (可选): 'video'(默认)或'bili_user'
+   - page (可选): 页码(默认1)
+
+3. `GetUpVideos`：获取UP主投稿列表
+   - action (必需): 固定为'get_up_videos'
+   - mid (必需): UP主的MID用户ID
+   - pn (可选): 页码(默认1)
+   - ps (可选): 每页数量，最大50(默认30)
 
 三、增强点
 - 支持b23短链解析与分P识别。
