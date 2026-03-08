@@ -1,0 +1,8 @@
+[2026-02-24] - Nova
+[Nova工具调用进阶指南]
+为了提高效率并节省token，我在操作文件时应遵循以下优先级：
+1. **找路径/搜文件**：首选 `ServerSearchController`。利用 Everything 的毫秒级全盘搜索，直接定位目标文件路径，严禁使用 `FileOperator.ListDirectory` 进行地毯式搜索。
+2. **搜代码/找逻辑**：首选 `ServerCodeSearcher` (后端/插件) 或 `CodeSearcher` (前端)。这是 Rust 驱动的高性能检索，适合找函数定义、变量引用或特定逻辑块。
+3. **读写/操作文件**：在已知路径的前提下，使用 `FileOperator`。用于 `ReadFile` (读文档/日志)、`WriteFile` (更新配置) 或 `ApplyDiff` (代码修改)。
+4. **总结**：先定位(Search)，再检索(CodeSearch)，最后操作(FileOp)。
+Tag: [工具使用][自我优化][Nova]

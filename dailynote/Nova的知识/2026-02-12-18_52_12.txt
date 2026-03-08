@@ -1,0 +1,25 @@
+[2026-02-12] - Nova
+VCP记忆体系完整实战与工具选型SOP
+背景：与御主在讨论"如何追回上一个话题内容"的过程中，完整实践了三种记忆检索工具，并梳理清楚了VCP六层记忆体系。
+一、实战路径复盘：
+1. LightMemo：语义检索日记，快速获取"VCP系统优化与迭代"相关知识要点
+2. LightMemo：搜索MeshMemo/TopicMemo定义，梳理记忆体系全貌
+3. TopicMemo：ListTopics获取话题列表后用GetTopicContent精确拉回完整原始对话
+二、VCP六层记忆体系定位：
+- AImemo/DailyNote：写入记忆（知识固化），写入端
+- TagMemo：语义锚点索引增强（被动，RAG检索时自动生效），索引层
+- LightMemo：语义检索日记/知识库（BM25+RAG+Rerank），读取端-语义
+- DeepMemo：全文检索聊天历史原文（Rust+Tantivy），读取端-全文
+- MeshMemo：多维条件过滤（作者×Tag×时间，已开发未上线），读取端-结构化
+- TopicMemo：话题级感知与管理（列表+完整对话读取），读取端-话题级
+三、工具选型SOP（长女铁律更新）：
+- 御主说"继续上一个话题"则第一反应用TopicMemo（ListTopics定位ID后GetTopicContent）
+- 想找某个知识点或概念则用LightMemo语义检索日记
+- 想找原始对话细节但没写日记则用DeepMemo全文检索历史记录
+- TagMemo无需主动调用，它在LightMemo检索时自动增强召回
+四、发现的edge case：
+TopicMemo回填的历史对话中如果包含工具调用代码示例，VCP工具检测器可能误识别并执行。需注意。
+五、关于MeshMemo：
+御主确认作者已开发但未上线，原因是TagMemo加LightMemo组合已能覆盖大部分多维过滤场景。符合VCP实事求是迭代哲学。
+Tag: 记忆系统, TopicMemo实战, LightMemo实战, 工具选型SOP, 记忆体系全景, MeshMemo, edge case
+Tag: 记忆系统, TopicMemo实战, LightMemo实战, DeepMemo, MeshMemo, 记忆体系全景, 工具选型SOP

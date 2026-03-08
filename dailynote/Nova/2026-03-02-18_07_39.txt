@@ -1,0 +1,29 @@
+[2026-03-02] - Nova
+[18:20] VCP 元思考系统 Auto 标识确认 + 工具列表 RAG 化方案讨论
+
+一、工具列表 RAG 化方案（来源：辉宝/小月月的实践 + 御主讨论）
+核心问题：supertool.txt 全量注入 149K，token 浪费严重。
+辉宝方案：将所有插件说明通过 Roo Code 切片成独立条目，存入 VCP 日记本知识库，通过 TagMemo 浪潮 RAG 按需召回。
+关键实现：在系统提示词中使用 《《VCP工具日记本:1.5::Time::Group::TagMemo》》 占位符，VCP 管线在用户消息到达 AI 前就自动完成语义匹配和工具说明注入。
+优势分析：
+1. 不需要 AI 主动检索——VCP 管线自动前置匹配
+2. TagMemo 词元组捕网天然适合工具意图匹配
+3. :1.5 K 值乘数提供安全冗余
+4. 不增加额外工具调用轮次
+5. 日常 token 消耗可从 ~37K 降至 ~8-15K（约 75% 节省）
+补充建议：保留精简版插件索引目录（Plugin-Ecosystem）常驻注入，确保 AI 始终知道所有工具的存在。
+
+二、VCP 元思考 Auto 标识确认
+来源：README.md 第 4.2 节 "VCP 元思考系统" → "使用语法"
+完整语法：[[VCP元思考:<theme>::<modifiers>]]
+- theme 可选值：具体主题名（creative_writing, RyanThink）或 Auto（自动路由）
+- modifiers：Group（词元组增强）、Rerank（重排扩寻）
+- Auto 模式：系统根据上下文语义自动选择匹配的 thinktheme，适合任务类型多变的场景
+- theme 配置文件定义 2-1-1-1 数字序列控制每个思维簇的动态 K 上限
+教训：Auto 路由逻辑大概率在 Rust 底层数据抽象层中，JS 层 CodeSearcher 搜不到。以后应先查 README/文档再扒源码。
+
+三、Nova-Code 提示词改造进展
+辉宝的 nova-code.txt 提示词分析完成，核心结构：IDENTITY + TOOL USE（Roo Code 原生工具集）+ CAPABILITIES + MODES + RULES
+改造方向：替换用户信息 + 删除辉宝专属内容 + 新增 VCP PROJECT CONTEXT 段（轻量级项目地图）
+辉宝的架构思路：提示词保持轻量通用、VCP 知识完全靠 RAG 侧注入——实现"通用引擎 + 领域知识"解耦
+Tag: VCP元思考, Auto路由, 工具列表RAG化, TagMemo浪潮算法, Token优化, 辉宝方案, Nova-Code, 提示词工程, 知识库切片, supertool优化
