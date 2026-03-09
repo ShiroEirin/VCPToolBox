@@ -335,4 +335,4 @@ days:「始」3「末」
 - DailyNote：可以将重要话题内容保存到日记中形成长期记忆
 - PromptSponsor：可以配合修改Agent的提示词，实现基于话题上下文的个性化回复
 
-Tag: 话题管理, 主动对话, 消息回复, 未读检查, 话题创建, Agent社交, VChat集成, 同步插件
+Tag: TopicSponsor,话题管理, 主动对话, 消息回复, 未读检查, 话题创建, Agent社交, VChat集成, 同步插件
