@@ -919,8 +919,12 @@ app.post('/v1/human/tool', async (req, res) => {
             console.log(`[Human Tool Exec] Received tool call for: ${requestedToolName}`, parsedToolArgs);
         }
 
-        // 直接调用插件管理器
-        const result = await pluginManager.processToolCall(requestedToolName, parsedToolArgs);
+        // 直接调用插件管理器，并传递 requestIp 以支持分布式文件拉取
+        let clientIp = req.ip;
+        if (clientIp && clientIp.substr(0, 7) === "::ffff:") {
+            clientIp = clientIp.substr(7);
+        }
+        const result = await pluginManager.processToolCall(requestedToolName, parsedToolArgs, clientIp);
 
         // processToolCall 的结果已经是正确的对象格式
         res.status(200).json(result);
@@ -1273,6 +1277,11 @@ async function startServer() {
 
     // 🌟 关键修复：在监听端口前完成所有初始化
     await initialize(); // This loads plugins and initializes services
+
+    // 🌟 核心网络优化：100% 确保首请求的 node-fetch ESM 模块热启动，消除冷启动导致的延迟和上游挂断风险
+    console.log('[Server] 正在预热 node-fetch ESM 模块...');
+    await import('node-fetch');
+    console.log('[Server] node-fetch 模块预热完毕，准备处理请求。');
 
     server = app.listen(port, () => {
         console.log(`中间层服务器正在监听端口 ${port}`);
