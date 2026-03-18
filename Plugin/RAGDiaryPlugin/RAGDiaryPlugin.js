@@ -212,11 +212,14 @@ class RAGDiaryPlugin {
     }
 
     async _buildAndSaveCache(configHash, cachePath) {
-        console.log('[RAGDiaryPlugin] 正在为所有日记本请求 Embedding API...');
+        console.log('[RAGDiaryPlugin] 正在为所有日记本请求 Embedding API (Batch Mode)...');
         this.enhancedVectorCache = {}; // 清空旧的内存缓存
 
-        for (const dbName in this.ragConfig) {
-            // ... (这里的逻辑和之前 _buildEnhancedVectorCache 内部的 for 循环完全一样)
+        const dbNames = Object.keys(this.ragConfig);
+        const enhancedTexts = [];
+        const validDbNames = [];
+
+        for (const dbName of dbNames) {
             const diaryConfig = this.ragConfig[dbName];
             const tagsConfig = diaryConfig.tags;
 
@@ -236,16 +239,22 @@ class RAGDiaryPlugin {
                     }
                 });
 
-                const enhancedText = `${dbName} 的相关主题：${weightedTags.join(', ')}`;
-                const enhancedVector = await this.getSingleEmbedding(enhancedText);
+                enhancedTexts.push(`${dbName} 的相关主题：${weightedTags.join(', ')}`);
+                validDbNames.push(dbName);
+            }
+        }
 
-                if (enhancedVector) {
-                    this.enhancedVectorCache[dbName] = enhancedVector;
+        if (enhancedTexts.length > 0) {
+            const vectors = await this.getBatchEmbeddings(enhancedTexts);
+            vectors.forEach((vec, i) => {
+                const dbName = validDbNames[i];
+                if (vec) {
+                    this.enhancedVectorCache[dbName] = vec;
                     console.log(`[RAGDiaryPlugin] -> 已为 "${dbName}" 成功获取向量。`);
                 } else {
                     console.error(`[RAGDiaryPlugin] -> 为 "${dbName}" 获取向量失败。`);
                 }
-            }
+            });
         }
 
         // 构建新的缓存对象并保存到磁盘
@@ -308,6 +317,7 @@ class RAGDiaryPlugin {
 
     /**
      * 🌟 新增：内存级幽灵节点获取器（只读 DB 或查 API，绝不 Insert）
+     * 🌟 优化：支持批量向量化，减少 API 请求次数
      */
     async _resolveGhostAnchors(tags, isCore) {
         const ghostTags = [];
@@ -317,34 +327,46 @@ class RAGDiaryPlugin {
         const checkStmt = db ? db.prepare('SELECT vector FROM tags WHERE name = ?') : null;
         const dim = this.vectorDBManager?.config?.dimension || 3072;
 
-        for (const tagName of tags) {
-            let vector = null;
+        const tagsToEmbed = [];
+        const tagResults = new Array(tags.length).fill(null);
 
-            // 1. 先查数据库（看是否是已有正规军）
+        // 1. 先查数据库（看是否是已有正规军）
+        tags.forEach((tagName, index) => {
             if (checkStmt) {
                 try {
                     const row = checkStmt.get(tagName);
                     if (row && row.vector) {
-                        vector = new Float32Array(row.vector.buffer, row.vector.byteOffset, dim);
+                        tagResults[index] = new Float32Array(row.vector.buffer, row.vector.byteOffset, dim);
                     }
                 } catch (e) { /* ignore */ }
             }
-
-            // 2. 数据库没有，调 API 动态向量化（依赖内存缓存）
-            if (!vector) {
-                const apiVec = await this.getSingleEmbeddingCached(tagName);
-                if (apiVec) vector = new Float32Array(apiVec);
+            if (!tagResults[index]) {
+                tagsToEmbed.push({ name: tagName, index });
             }
+        });
 
-            // 3. 组装成带有本体向量的幽灵对象
-            if (vector) {
+        // 2. 数据库没有的，批量调 API 动态向量化（依赖内存缓存）
+        if (tagsToEmbed.length > 0) {
+            const apiVecs = await this.getBatchEmbeddingsCached(tagsToEmbed.map(t => t.name));
+            apiVecs.forEach((vec, i) => {
+                if (vec) {
+                    const originalIndex = tagsToEmbed[i].index;
+                    tagResults[originalIndex] = new Float32Array(vec);
+                }
+            });
+        }
+
+        // 3. 组装成带有本体向量的幽灵对象
+        tags.forEach((tagName, index) => {
+            if (tagResults[index]) {
                 ghostTags.push({
                     name: tagName,
-                    vector: vector,
+                    vector: tagResults[index],
                     isCore: isCore // 标记它是强引力还是弱引力
                 });
             }
-        }
+        });
+
         return ghostTags;
     }
 
@@ -670,6 +692,33 @@ class RAGDiaryPlugin {
         if (!text || typeof text !== 'string') return text;
         // 匹配从[系统通知]到[系统通知结束]的整个块，可能包含前后空白
         return text.replace(/\[系统通知\][\s\S]*?\[系统通知结束\]/g, '').trim();
+    }
+
+    /**
+     * 🌟 统一内容净化器 - 确保 RAGDiaryPlugin 和 messageProcessor 向量化请求完全一致
+     * @param {string} content 原始文本
+     * @param {string} role 角色 ('user' 或 'assistant')
+     * @returns {string} 净化后的文本
+     */
+    sanitizeForEmbedding(content, role) {
+        if (!content || typeof content !== 'string') return '';
+
+        let processed = content;
+
+        // 1. 角色特定预处理
+        if (role === 'user') {
+            processed = this._stripSystemNotification(processed);
+        } else if (role === 'assistant') {
+            const anchorRegex = /\[@(!)?([^\]]+)\]/g;
+            processed = processed.replace(anchorRegex, '');
+        }
+
+        // 2. 通用净化流程 (顺序必须严格一致)
+        processed = this._stripHtml(processed);
+        processed = this._stripEmoji(processed);
+        processed = this._stripToolMarkers(processed);
+
+        return processed.trim();
     }
 
     /**
@@ -1033,10 +1082,7 @@ class RAGDiaryPlugin {
             // V3.1: 在向量化之前，清理userContent和aiContent中的HTML标签和emoji
             if (userContent) {
                 const originalUserContent = userContent;
-                userContent = this._stripSystemNotification(userContent); // ✅ 净化追加的系统提示框
-                userContent = this._stripHtml(userContent);
-                userContent = this._stripEmoji(userContent);
-                userContent = this._stripToolMarkers(userContent); // ✅ 新增：净化工具调用噪音
+                userContent = this.sanitizeForEmbedding(userContent, 'user');
                 if (originalUserContent.length !== userContent.length) {
                     console.log('[RAGDiaryPlugin] User content was sanitized (SystemNotification + HTML + Emoji removed).');
                 }
@@ -1048,7 +1094,9 @@ class RAGDiaryPlugin {
             let anchorMatch;
 
             if (aiContent) {
-                while ((anchorMatch = anchorRegex.exec(aiContent)) !== null) {
+                // 在净化之前提取锚点信息
+                let tempAiContent = aiContent;
+                while ((anchorMatch = anchorRegex.exec(tempAiContent)) !== null) {
                     const tagName = anchorMatch[2].trim();
                     if (Array.from(tagName).length > 25) continue; // 防幻觉截断
 
@@ -1058,8 +1106,6 @@ class RAGDiaryPlugin {
                     if (anchorMatch[1]) hardTagNames.push(tagName);
                     else softTagNames.push(tagName);
                 }
-                // 净化文本，不让标记本身污染向量空间
-                aiContent = aiContent.replace(anchorRegex, '').trim();
 
                 // 🌟 修复 1：必须将净化后的文本同步回原始 messages 数组！否则 Tag 会永远污染历史上下文
                 if (lastAiMessageIndex > -1) {
@@ -1073,9 +1119,7 @@ class RAGDiaryPlugin {
                 }
 
                 const originalAiContent = aiContent;
-                aiContent = this._stripHtml(aiContent);
-                aiContent = this._stripEmoji(aiContent);
-                aiContent = this._stripToolMarkers(aiContent); // ✅ 新增：净化工具调用噪音
+                aiContent = this.sanitizeForEmbedding(aiContent, 'assistant');
                 if (originalAiContent.length !== aiContent.length) {
                     console.log('[RAGDiaryPlugin] AI content was sanitized (HTML + Emoji removed).');
                 }
@@ -2082,8 +2126,8 @@ class RAGDiaryPlugin {
         const { lastAiMessage, toolResultsText } = contextData;
 
         // 1. 分别净化用户、AI 和工具的内容
-        const sanitizedUserContent = this._stripToolMarkers(this._stripEmoji(this._stripHtml(originalUserQuery || '')));
-        const sanitizedAiContent = this._stripToolMarkers(this._stripEmoji(this._stripHtml(lastAiMessage || '')));
+        const sanitizedUserContent = this.sanitizeForEmbedding(originalUserQuery || '', 'user');
+        const sanitizedAiContent = this.sanitizeForEmbedding(lastAiMessage || '', 'assistant');
 
         // [优化] 处理工具结果：先清理 Base64，再将 JSON 转换为 Markdown 以减少向量噪音
         let toolContentForVector = '';
@@ -2115,7 +2159,7 @@ class RAGDiaryPlugin {
 
         // 2. 并行获取所有向量
         const [userVector, aiVector, toolVector] = await Promise.all([
-            sanitizedUserContent ? this.getSingleEmbeddingCached(this._stripSystemNotification(sanitizedUserContent)) : null,
+            sanitizedUserContent ? this.getSingleEmbeddingCached(sanitizedUserContent) : null,
             sanitizedAiContent ? this.getSingleEmbeddingCached(sanitizedAiContent) : null,
             sanitizedToolContent ? this.getSingleEmbeddingCached(sanitizedToolContent) : null
         ]);
@@ -3359,6 +3403,108 @@ class RAGDiaryPlugin {
     //####################################################################################
     //## Embedding Cache - 向量缓存系统
     //####################################################################################
+
+    /**
+     * ✅ 批量向量化方法（支持 OpenAI 兼容接口）
+     */
+    async getBatchEmbeddings(texts) {
+        if (!texts || !Array.isArray(texts) || texts.length === 0) return [];
+
+        const apiKey = process.env.API_Key;
+        const apiUrl = process.env.API_URL;
+        const embeddingModel = process.env.WhitelistEmbeddingModel;
+
+        if (!apiKey || !apiUrl || !embeddingModel) {
+            console.error('[RAGDiaryPlugin] Embedding API credentials or model is not configured.');
+            return new Array(texts.length).fill(null);
+        }
+
+        const validTasks = texts.map((text, index) => ({ text, index })).filter(t => t.text && t.text.trim());
+        if (validTasks.length === 0) return new Array(texts.length).fill(null);
+
+        const results = new Array(texts.length).fill(null);
+        const maxRetries = 3;
+        const retryDelay = 1000;
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await axios.post(`${apiUrl}/v1/embeddings`, {
+                    model: embeddingModel,
+                    input: validTasks.map(t => t.text)
+                }, {
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 60000 // 批量请求可能需要更长时间
+                });
+
+                const embeddings = response.data?.data;
+                if (embeddings && Array.isArray(embeddings)) {
+                    embeddings.forEach((e, i) => {
+                        const originalIndex = validTasks[i].index;
+                        results[originalIndex] = e.embedding;
+                    });
+                    return results;
+                } else {
+                    console.error('[RAGDiaryPlugin] No embeddings found in batch response.');
+                    if (attempt === maxRetries) return results;
+                }
+            } catch (error) {
+                const status = error.response ? error.response.status : null;
+                if ((status === 500 || status === 503 || status === 429) && attempt < maxRetries) {
+                    console.warn(`[RAGDiaryPlugin] Batch Embedding API failed (${status}). Attempt ${attempt}/${maxRetries}. Retrying...`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    continue;
+                }
+                console.error('[RAGDiaryPlugin] Batch embedding API error:', error.message);
+                return results;
+            }
+        }
+        return results;
+    }
+
+    /**
+     * ✅ 批量带缓存的向量化方法
+     */
+    async getBatchEmbeddingsCached(texts) {
+        if (!texts || !Array.isArray(texts) || texts.length === 0) return [];
+
+        const results = new Array(texts.length).fill(null);
+        const missingIndices = [];
+        const missingTexts = [];
+
+        texts.forEach((text, index) => {
+            if (!text || !text.trim()) return;
+            const vector = this._getEmbeddingFromCacheOnly(text);
+            if (vector) {
+                results[index] = vector;
+            } else {
+                missingIndices.push(index);
+                missingTexts.push(text);
+            }
+        });
+
+        if (missingTexts.length > 0) {
+            console.log(`[RAGDiaryPlugin] Batch cache miss: ${missingTexts.length}/${texts.length} texts. Requesting API...`);
+            const newEmbeddings = await this.getBatchEmbeddings(missingTexts);
+            newEmbeddings.forEach((vec, i) => {
+                if (vec) {
+                    const originalIndex = missingIndices[i];
+                    results[originalIndex] = vec;
+                    // 存入缓存
+                    const text = missingTexts[i];
+                    const cacheKey = crypto.createHash('sha256').update(text.trim()).digest('hex');
+                    this.embeddingCache.set(cacheKey, {
+                        vector: vec,
+                        timestamp: Date.now()
+                    });
+                }
+            });
+        }
+
+        return results;
+    }
 
     /**
      * ✅ 带缓存的向量化方法（替代原 getSingleEmbedding）
