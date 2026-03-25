@@ -3,15 +3,20 @@ const path = require('path');
 const axios = require('axios');
 const dotenv = require('dotenv');
 const { HttpsProxyAgent } = require('https-proxy-agent');
+const { tavily } = require('@tavily/core');
 
 // --- 1. 初始化与配置加载 ---
 const configPath = path.resolve(__dirname, './config.env');
+const rootConfigPath = path.resolve(__dirname, '../../config.env');
+
 dotenv.config({ path: configPath });
 
 const {
     VSearchKey: API_KEY,
     VSearchUrl: API_URL,
     VSearchModel: MODEL,
+    GrokModel: GROK_MODEL,
+    TavilyModel: TAVILY_MODEL,
     VSearchMaxToken: MAX_TOKENS,
     MaxConcurrent: MAX_CONCURRENT,
     HTTP_PROXY: PROXY
@@ -89,7 +94,10 @@ const resolveRedirect = async (url) => {
     }
 };
 
-const callSearchModel = async (topic, keyword, showURL = false) => {
+/**
+ * Grounding 模式 (Google Search)
+ */
+const callGroundingMode = async (topic, keyword, showURL = false) => {
     const now = new Date();
     const currentTime = now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 
@@ -131,14 +139,15 @@ ${showURL ? '5. 严格溯源：每一条重要信息必须附带来源 URL。如
     };
 
     try {
-        log(`正在搜索关键词: "${keyword}"...`);
+        log(`[Grounding] 正在搜索关键词: "${keyword}"...`);
         const response = await axios.post(API_URL, payload, {
             headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
-            timeout: 180000 // 3分钟超时
+            timeout: 180000, // 3分钟超时
+            proxy: false  // 禁用代理，代理仅用于 URL 重定向解析
         });
         let content = response.data.choices[0].message.content;
 
-        // 尝试解析并替换 Vertex 代理 URL，无论 showURL 是什么，只要正文里有就提取并替换
+        // 尝试解析并替换 Vertex 代理 URL
         try {
             const metadata = response.data.choices[0].message?.grounding_metadata || response.data.choices[0]?.grounding_metadata;
 
@@ -199,39 +208,233 @@ ${showURL ? '5. 严格溯源：每一条重要信息必须附带来源 URL。如
 };
 
 // --- 3. 主逻辑 ---
+/**
+ * Grok 模式 (内置搜索，需流式返回)
+ */
+/**
+ * Grok 模式 (内置搜索，单次请求处理所有关键词)
+ */
+const callGrokMode = async (topic, keywordList) => {
+    const systemPrompt = `你是一个具备实时联网搜索能力的顶级 AI 助手。
+你的任务是针对用户提供的【检索目标主题】和一系列【检索关键词】，利用你的内置搜索能力获取最新信息并进行深度总结。
+请针对每个关键词进行搜索，并最终产出一份结构化、全景式的研究报告。`;
+
+    const userMessage = `【检索目标主题】：${topic}
+【检索关键词列表】：
+${keywordList.map((kw, i) => `${i + 1}. ${kw}`).join('\n')}
+
+请针对上述关键词执行联网搜索，并结合研究主题给出深度总结。`;
+
+    const payload = {
+        model: GROK_MODEL || "grok-4.20-beta",
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage }
+        ],
+        stream: true,
+        max_tokens: TOKENS
+    };
+
+    try {
+        log(`[Grok] 正在执行全量搜索 (关键词数量: ${keywordList.length})...`);
+        const response = await axios.post(API_URL, payload, {
+            headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
+            responseType: 'stream',
+            timeout: 300000,
+            proxy: false  // 禁用代理，代理仅用于 URL 重定向解析
+        });
+
+        return new Promise((resolve, reject) => {
+            let fullContent = '';
+            response.data.on('data', chunk => {
+                const lines = chunk.toString().split('\n').filter(line => line.trim() !== '');
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6);
+                        if (dataStr === '[DONE]') continue;
+                        try {
+                            const json = JSON.parse(dataStr);
+                            const content = json.choices[0]?.delta?.content || '';
+                            fullContent += content;
+                        } catch (e) { }
+                    }
+                }
+            });
+
+            response.data.on('end', () => {
+                const cleanedContent = fullContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                resolve(cleanedContent);
+            });
+
+            response.data.on('error', err => reject(err));
+        });
+    } catch (error) {
+        log(`[Grok] 全量搜索失败: ${error.message}`);
+        return `[Grok 搜索失败] 错误原因: ${error.message}`;
+    }
+};
+
+/**
+ * 从逗号分隔的 key 列表中随机选取一个
+ */
+const pickRandomKey = (keyStr) => {
+    if (!keyStr) return null;
+    if (keyStr.includes(',')) {
+        const keys = keyStr.split(',').map(k => k.trim()).filter(k => k);
+        return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : null;
+    }
+    return keyStr.trim();
+};
+
+/**
+ * 直接调用 Tavily SDK 执行单次搜索
+ */
+const callTavilySearch = async (query, tavilyKeyStr) => {
+    const apiKey = pickRandomKey(tavilyKeyStr);
+    if (!apiKey) {
+        throw new Error('TavilyKey 未配置，请在根目录 config.env 中设置 TavilyKey。');
+    }
+
+    const tvly = tavily({ apiKey });
+    const response = await tvly.search(query, {
+        search_depth: 'advanced',
+        topic: 'general',
+        max_results: 10,
+        include_answer: false,
+        include_images: false,
+    });
+
+    // 转换为 Markdown 格式
+    let markdown = '';
+    if (response.results && response.results.length > 0) {
+        response.results.forEach((item, index) => {
+            markdown += `${index + 1}. **[${item.title}](${item.url})**\n`;
+            if (item.content) {
+                markdown += `   ${item.content}\n\n`;
+            }
+        });
+    } else {
+        markdown = '未找到相关搜索结果。\n';
+    }
+    return markdown;
+};
+
+/**
+ * Tavily 模式 (直接调用 Tavily SDK 并发搜索 + 单次整体总结)
+ */
+const callTavilyMode = async (topic, keywordList, tavilyKeyStr) => {
+    // === 阶段1: 并发搜索 ===
+    let combinedResults = '';
+    try {
+        log(`[Tavily] 阶段1/2: 正在并发获取 ${keywordList.length} 个关键词的搜索结果 (直接调用 Tavily API)...`);
+
+        const searchPromises = keywordList.map(async (kw) => {
+            try {
+                const result = await callTavilySearch(kw, tavilyKeyStr);
+                log(`[Tavily] 关键词 "${kw}" 搜索成功`);
+                return `### 关键词: ${kw}\n${result}`;
+            } catch (e) {
+                log(`[Tavily] 关键词 "${kw}" 搜索失败: ${e.message}`);
+                return `### 关键词: ${kw}\n[搜索失败]: ${e.message}\n`;
+            }
+        });
+
+        const allSearchResults = await Promise.all(searchPromises);
+        combinedResults = allSearchResults.join('\n---\n');
+        log(`[Tavily] 阶段1/2 完成: 搜索结果总长度 ${combinedResults.length} 字符`);
+    } catch (searchError) {
+        log(`[Tavily] 阶段1 搜索整体失败: ${searchError.message}`);
+        return `[Tavily 搜索阶段失败] 错误原因: ${searchError.message}`;
+    }
+
+    // === 阶段2: 模型总结 ===
+    try {
+        const summaryModel = TAVILY_MODEL || "claude-sonnet-4-6";
+        log(`[Tavily] 阶段2/2: 正在使用 ${summaryModel} 通过 ${API_URL} 进行全量总结...`);
+        const summaryPayload = {
+            model: summaryModel,
+            messages: [
+                {
+                    role: 'system',
+                    content: `你是一个顶级信息整合专家。你会收到一份关于多个关键词的原始搜索结果汇总。
+你的任务是结合【研究主题：${topic}】，将这些零散的信息提炼成一份高质量、结构化、具有深度洞察的研究报告。
+请保留重要的 URL 链接，并确保报告逻辑严密。`
+                },
+                { role: 'user', content: `原始搜索结果汇总如下：\n\n${combinedResults}` }
+            ],
+            max_tokens: TOKENS
+        };
+
+        const summaryAxiosConfig = {
+            headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
+            timeout: 180000,
+            proxy: false  // 显式禁用代理，避免环境变量残留干扰
+        };
+
+        const summaryResponse = await axios.post(API_URL, summaryPayload, summaryAxiosConfig);
+
+        log(`[Tavily] 阶段2/2 完成: 总结成功`);
+        return summaryResponse.data.choices[0].message.content;
+    } catch (summaryError) {
+        const statusCode = summaryError.response?.status || 'N/A';
+        const errorDetail = summaryError.response?.data ? JSON.stringify(summaryError.response.data).substring(0, 500) : summaryError.message;
+        log(`[Tavily] 阶段2 总结失败 (HTTP ${statusCode}): ${errorDetail}`);
+
+        // 总结失败时，回退返回原始搜索结果而不是完全失败
+        return `[总结阶段失败 (HTTP ${statusCode}): ${summaryError.message}]\n\n**以下为原始搜索结果（未经整合）：**\n\n${combinedResults}`;
+    }
+};
+
 async function main(request) {
-    const { SearchTopic, Keywords, ShowURL } = request;
+    const { SearchTopic, Keywords, ShowURL, SearchMode = 'grounding' } = request;
     const showURL = ShowURL === true || ShowURL === 'true';
 
     if (!SearchTopic || !Keywords) {
         return sendResponse({ status: "error", error: "缺少必需参数: SearchTopic 或 Keywords。" });
     }
 
-    // 解析关键词：支持逗号、换行、中文逗号分隔
-    const keywordList = Keywords.split(/[,\n，]/)
-        .map(k => k.trim())
-        .filter(k => k.length > 0);
-
+    const keywordList = Keywords.split(/[,\n，]/).map(k => k.trim()).filter(k => k.length > 0);
     if (keywordList.length === 0) {
         return sendResponse({ status: "error", error: "未识别到有效的关键词。" });
     }
 
-    log(`启动 VSearch。主题: "${SearchTopic}"，关键词数量: ${keywordList.length}`);
+    log(`启动 VSearch [模式: ${SearchMode}]。主题: "${SearchTopic}"，关键词数量: ${keywordList.length}`);
 
+    if (SearchMode === 'grok') {
+        // Grok 模式：单次请求处理所有关键词
+        const result = await callGrokMode(SearchTopic, keywordList);
+        return sendResponse({ status: "success", result: `## VSearch 检索报告 [模式: Grok]\n\n**研究主题**: ${SearchTopic}\n\n${result}` });
+    }
+
+    if (SearchMode === 'tavily') {
+        // Tavily 模式：直接调用 Tavily SDK 并发搜索 + 单次总结
+        let tavilyKeyStr = '';
+        try {
+            const rootEnvContent = await fs.readFile(rootConfigPath, 'utf8');
+            const rootEnv = dotenv.parse(rootEnvContent);
+            tavilyKeyStr = rootEnv.TavilyKey || '';
+        } catch (e) {
+            log(`读取根目录配置失败: ${e.message}`);
+        }
+        if (!tavilyKeyStr) {
+            return sendResponse({ status: "error", error: "Tavily 模式需要在根目录 config.env 中配置 TavilyKey。" });
+        }
+        const result = await callTavilyMode(SearchTopic, keywordList, tavilyKeyStr);
+        return sendResponse({ status: "success", result: `## VSearch 检索报告 [模式: Tavily]\n\n**研究主题**: ${SearchTopic}\n\n${result}` });
+    }
+
+    // Grounding 模式：保持原有的并发分批逻辑
     let allResults = [];
-    // 分批执行并发搜索
     for (let i = 0; i < keywordList.length; i += CONCURRENCY) {
         const chunk = keywordList.slice(i, i + CONCURRENCY);
-        const promises = chunk.map(kw => callSearchModel(SearchTopic, kw, showURL));
+        const promises = chunk.map(kw => callGroundingMode(SearchTopic, kw, showURL));
         const results = await Promise.all(promises);
-
         results.forEach((res, idx) => {
             allResults.push(`### 关键词: ${chunk[idx]}\n${res}\n\n---\n\n`);
         });
     }
 
-    const finalOutput = `## VSearch 检索报告\n\n**研究主题**: ${SearchTopic}\n\n${allResults.join('')}`;
-
+    const finalOutput = `## VSearch 检索报告 [模式: Grounding]\n\n**研究主题**: ${SearchTopic}\n\n${allResults.join('')}`;
     sendResponse({ status: "success", result: finalOutput });
 }
 
