@@ -1,0 +1,801 @@
+const BRIDGE_VERSION = '1.1.0';
+const DEFAULT_RATE_LIMIT_PER_MINUTE = 60;
+const CANCELLED_INVOCATION_TTL_MS = 5 * 60 * 1000;
+
+function splitCsv(value) {
+	return String(value || '')
+		.split(',')
+		.map(item => item.trim())
+		.filter(Boolean);
+}
+
+function buildError(code, message, extra = {}) {
+	return {
+		code,
+		message,
+		...extra,
+	};
+}
+
+function normalizeCommandName(command) {
+	if (!command || typeof command !== 'object') {
+		return null;
+	}
+
+	return command.commandIdentifier || command.command || null;
+}
+
+function normalizeInvocationCommand(command) {
+	const commandName = normalizeCommandName(command);
+	if (!commandName) {
+		return null;
+	}
+
+	return {
+		commandName,
+		description: command.description || '',
+		parameters: Array.isArray(command.parameters) ? command.parameters : [],
+		example: command.example || '',
+	};
+}
+
+function parseToolError(error) {
+	if (!error) {
+		return buildError('bridge_unknown_error', 'Unknown bridge error.');
+	}
+
+	if (typeof error === 'string') {
+		return buildError('bridge_error', error);
+	}
+
+	if (error.message) {
+		try {
+			const parsed = JSON.parse(error.message);
+			if (parsed.plugin_error || parsed.plugin_execution_error) {
+				return buildError(
+					'plugin_execution_error',
+					parsed.plugin_error || parsed.plugin_execution_error,
+				);
+			}
+		} catch {}
+
+		return buildError('bridge_error', error.message);
+	}
+
+	return buildError('bridge_error', String(error));
+}
+
+class SnowBridge {
+	constructor() {
+		this.pluginManager = null;
+		this.wss = null;
+		this.config = {};
+		this.debugMode = false;
+		this.isHooked = false;
+		this.activeInvocations = new Map(); // invocationId -> context
+		this.taskToInvocationMap = new Map(); // taskId -> invocationId
+		this.rateLimitState = new Map(); // clientKey -> { windowStart, count }
+	}
+
+	async initialize(config, dependencies) {
+		this.config = config;
+		this.debugMode = config.DebugMode === true;
+		this.log = dependencies.vcpLogFunctions || {
+			pushVcpLog: () => {},
+			pushVcpInfo: () => {},
+		};
+
+		try {
+			this.pluginManager = require('../../Plugin.js');
+			this.setupEventListeners();
+		} catch (error) {
+			console.error(
+				'[SnowBridge] Failed to load PluginManager for event listening:',
+				error.message,
+			);
+		}
+
+		if (this.debugMode) {
+			console.log('[SnowBridge] Initialized with event listeners.');
+		}
+	}
+
+	setupEventListeners() {
+		if (!this.pluginManager) {
+			return;
+		}
+
+		const forwardLog = (bridgeType, data) => {
+			if (this.config.Bridge_Enabled === false) {
+				return;
+			}
+
+			const taskId = String(data.job_id || data.taskId || '');
+			if (!taskId) {
+				return;
+			}
+
+			const invocationId = this.taskToInvocationMap.get(taskId);
+			const context = invocationId
+				? this.activeInvocations.get(invocationId)
+				: null;
+
+			if (!context || context.cancelled) {
+				return;
+			}
+
+			if (this.debugMode) {
+				console.log(
+					`[SnowBridge] Forwarding ${bridgeType} for task ${taskId} to ${context.serverId}`,
+				);
+			}
+
+			this.sendToServer(context.serverId, {
+				type: 'vcp_tool_status',
+				data: {
+					requestId: context.requestId,
+					invocationId,
+					taskId,
+					bridgeType,
+					...data,
+				},
+			});
+		};
+
+		this.pluginManager.on('vcp_log', data => forwardLog('log', data));
+		this.pluginManager.on('vcp_info', data => forwardLog('info', data));
+
+		this.pluginManager.on('plugin_async_callback', info => {
+			if (this.config.Bridge_Enabled === false) {
+				return;
+			}
+
+			const taskId = String(info.taskId || '');
+			if (!taskId) {
+				return;
+			}
+
+			const invocationId = this.taskToInvocationMap.get(taskId);
+			const context = invocationId
+				? this.activeInvocations.get(invocationId)
+				: null;
+
+			if (!context) {
+				return;
+			}
+
+			if (context.cancelled) {
+				this.cleanupInvocation(invocationId);
+				return;
+			}
+
+			if (this.debugMode) {
+				console.log(
+					`[SnowBridge] Forwarding async result for task ${taskId} to ${context.serverId}`,
+				);
+			}
+
+			this.sendToServer(context.serverId, {
+				type: 'vcp_tool_result',
+				data: {
+					requestId: context.requestId,
+					invocationId,
+					taskId,
+					status: 'success',
+					async: true,
+					result: info.data,
+				},
+			});
+			this.cleanupInvocation(invocationId);
+		});
+	}
+
+	registerApiRoutes(router, config, projectBasePath, wss) {
+		this.wss = wss;
+		this.config = {...this.config, ...config};
+
+		if (!this.wss) {
+			console.error(
+				'[SnowBridge] WebSocketServer instance is missing in registerApiRoutes.',
+			);
+			return;
+		}
+
+		this.applyMonkeyPatch();
+
+		router.get('/status', (req, res) => {
+			res.json({
+				status: 'active',
+				hooked: this.isHooked,
+				bridgeEnabled: this.config.Bridge_Enabled !== false,
+				bridgeVersion: BRIDGE_VERSION,
+				capabilities: this.getBridgeCapabilities(),
+			});
+		});
+
+		if (this.debugMode) {
+			console.log(
+				'[SnowBridge] API routes registered and monkey patch applied.',
+			);
+		}
+	}
+
+	applyMonkeyPatch() {
+		if (this.isHooked) {
+			return;
+		}
+
+		const wss = this.wss;
+		let pluginManager;
+		try {
+			pluginManager = require('../../Plugin.js');
+		} catch (error) {
+			console.error(
+				'[SnowBridge] Error requiring Plugin.js:',
+				error.message,
+			);
+		}
+
+		if (!pluginManager) {
+			console.error('[SnowBridge] Could not obtain PluginManager instance.');
+			return;
+		}
+
+		const originalHandler = wss.handleDistributedServerMessage;
+		if (typeof originalHandler !== 'function') {
+			console.error(
+				'[SnowBridge] WebSocketServer.handleDistributedServerMessage is not a function. Hook failed.',
+			);
+			return;
+		}
+
+		const self = this;
+		wss.handleDistributedServerMessage = async function (serverId, message) {
+			if (self.config.Bridge_Enabled === false) {
+				return originalHandler.call(wss, serverId, message);
+			}
+
+			try {
+				if (self.debugMode) {
+					console.log(
+						`[SnowBridge] Intercepted message type ${message.type} from ${serverId}`,
+					);
+				}
+
+				switch (message.type) {
+					case 'get_vcp_manifests':
+						await self.handleGetManifests(serverId, message, pluginManager);
+						return;
+
+					case 'execute_vcp_tool':
+						await self.handleExecuteTool(serverId, message, pluginManager);
+						return;
+
+					case 'cancel_vcp_tool':
+						await self.handleCancelTool(serverId, message);
+						return;
+				}
+			} catch (error) {
+				console.error(
+					`[SnowBridge] Error handling bridged message ${message.type}:`,
+					error,
+				);
+			}
+
+			return originalHandler.call(wss, serverId, message);
+		};
+
+		this.isHooked = true;
+		console.log(
+			'[SnowBridge] Monkey patch successful: SnowBridge is now active.',
+		);
+	}
+
+	sendToServer(serverId, payload) {
+		if (!this.wss) {
+			return false;
+		}
+
+		return this.wss.sendMessageToClient(serverId.replace('dist-', ''), payload);
+	}
+
+	getBridgeCapabilities() {
+		return {
+			cancelVcpTool: true,
+			toolFilters: true,
+			asyncCallbacks: true,
+			statusEvents: true,
+			clientAuth: Boolean(this.getBridgeAccessToken()),
+		};
+	}
+
+	getBridgeAccessToken() {
+		return String(this.config.Bridge_Access_Token || '').trim();
+	}
+
+	getAllowedClients() {
+		return new Set(splitCsv(this.config.Allowed_Clients));
+	}
+
+	getAllowedTools() {
+		return new Set(splitCsv(this.config.Allowed_Tools));
+	}
+
+	getExcludedTools() {
+		return new Set(splitCsv(this.config.Excluded_Tools));
+	}
+
+	getExcludedDisplayKeywords() {
+		return splitCsv(this.config.Excluded_Display_Keywords).map(keyword =>
+			keyword.replace(/^["']|["']$/g, ''),
+		);
+	}
+
+	getRateLimitPerMinute() {
+		const parsed = Number.parseInt(this.config.Rate_Limit_Per_Minute, 10);
+		return Number.isInteger(parsed) && parsed > 0
+			? parsed
+			: DEFAULT_RATE_LIMIT_PER_MINUTE;
+	}
+
+	getClientIdentity(serverId, data) {
+		const clientInfo =
+			data && typeof data.clientInfo === 'object' && data.clientInfo !== null
+				? data.clientInfo
+				: {};
+
+		return (
+			clientInfo.clientId ||
+			clientInfo.clientName ||
+			clientInfo.name ||
+			serverId
+		);
+	}
+
+	assertBridgeAccess(serverId, data) {
+		if (this.config.Bridge_Enabled === false) {
+			throw buildError('bridge_disabled', 'SnowBridge is disabled.');
+		}
+
+		const requiredToken = this.getBridgeAccessToken();
+		const providedToken = String(
+			(data && (data.accessToken || data.authToken)) || '',
+		).trim();
+		if (requiredToken && providedToken !== requiredToken) {
+			throw buildError('bridge_auth_failed', 'Invalid bridge access token.');
+		}
+
+		const allowedClients = this.getAllowedClients();
+		if (allowedClients.size > 0) {
+			const identity = this.getClientIdentity(serverId, data);
+			if (!allowedClients.has(identity)) {
+				throw buildError(
+					'bridge_client_forbidden',
+					`Client "${identity}" is not allowed to access SnowBridge.`,
+				);
+			}
+		}
+
+		this.assertRateLimit(serverId, data);
+	}
+
+	assertRateLimit(serverId, data) {
+		const identity = this.getClientIdentity(serverId, data);
+		const limit = this.getRateLimitPerMinute();
+		const now = Date.now();
+		const state =
+			this.rateLimitState.get(identity) || {
+				windowStart: now,
+				count: 0,
+			};
+
+		if (now - state.windowStart >= 60_000) {
+			state.windowStart = now;
+			state.count = 0;
+		}
+
+		state.count += 1;
+		this.rateLimitState.set(identity, state);
+
+		if (state.count > limit) {
+			throw buildError(
+				'bridge_rate_limited',
+				`Bridge rate limit exceeded for client "${identity}".`,
+				{limit},
+			);
+		}
+	}
+
+	isToolAllowed(toolName) {
+		const allowedTools = this.getAllowedTools();
+		if (allowedTools.size === 0) {
+			return true;
+		}
+
+		return allowedTools.has(toolName);
+	}
+
+	normalizeToolFilters(rawFilters) {
+		if (!rawFilters) {
+			return [];
+		}
+
+		if (Array.isArray(rawFilters)) {
+			return rawFilters.map(value => String(value).trim()).filter(Boolean);
+		}
+
+		if (typeof rawFilters === 'object' && rawFilters !== null) {
+			if (Array.isArray(rawFilters.include)) {
+				return rawFilters.include.map(value => String(value).trim()).filter(Boolean);
+			}
+			if (typeof rawFilters.include === 'string') {
+				return splitCsv(rawFilters.include);
+			}
+		}
+
+		if (typeof rawFilters === 'string') {
+			return splitCsv(rawFilters);
+		}
+
+		return [];
+	}
+
+	matchesToolFilter(pluginName, displayName, bridgeCommands, filters) {
+		if (!filters || filters.length === 0) {
+			return true;
+		}
+
+		const haystacks = [
+			pluginName,
+			displayName,
+			...bridgeCommands.map(command => command.commandName),
+		]
+			.filter(Boolean)
+			.map(value => value.toLowerCase());
+
+		return filters.some(filterValue => {
+			const normalized = filterValue.toLowerCase();
+			return haystacks.some(haystack => haystack.includes(normalized));
+		});
+	}
+
+	buildExportablePlugin(plugin, pluginName) {
+		const bridgeCommands = (plugin.capabilities?.invocationCommands || [])
+			.map(normalizeInvocationCommand)
+			.filter(Boolean);
+
+		if (bridgeCommands.length === 0) {
+			return null;
+		}
+
+		return {
+			name: plugin.name || pluginName,
+			displayName: plugin.displayName || plugin.name || pluginName,
+			description: plugin.description || '',
+			capabilities: {
+				invocationCommands: plugin.capabilities?.invocationCommands || [],
+			},
+			bridgeCommands,
+		};
+	}
+
+	sendManifestError(serverId, requestId, error) {
+		this.sendToServer(serverId, {
+			type: 'vcp_manifest_response',
+			data: {
+				requestId,
+				status: 'error',
+				bridgeVersion: BRIDGE_VERSION,
+				vcpVersion: BRIDGE_VERSION,
+				capabilities: this.getBridgeCapabilities(),
+				plugins: [],
+				error,
+			},
+		});
+	}
+
+	sendToolError(serverId, requestId, invocationId, error) {
+		this.sendToServer(serverId, {
+			type: 'vcp_tool_result',
+			data: {
+				requestId,
+				invocationId,
+				status: 'error',
+				error,
+			},
+		});
+	}
+
+	async handleGetManifests(serverId, message, pluginManager) {
+		const data = (message && message.data) || {};
+		const requestId = data.requestId;
+
+		try {
+			this.assertBridgeAccess(serverId, data);
+
+			const excludedTools = this.getExcludedTools();
+			const excludedKeywords = this.getExcludedDisplayKeywords();
+			const clientFilters = this.normalizeToolFilters(data.toolFilters);
+			const exportablePlugins = [];
+
+			for (const [pluginName, plugin] of pluginManager.plugins.entries()) {
+				if (excludedTools.has(pluginName)) {
+					continue;
+				}
+
+				if (!this.isToolAllowed(pluginName)) {
+					continue;
+				}
+
+				if (plugin.isDistributed) {
+					continue;
+				}
+
+				if (
+					plugin.displayName &&
+					excludedKeywords.some(keyword => plugin.displayName.includes(keyword))
+				) {
+					continue;
+				}
+
+				const exportablePlugin = this.buildExportablePlugin(plugin, pluginName);
+				if (!exportablePlugin) {
+					continue;
+				}
+
+				if (
+					!this.matchesToolFilter(
+						exportablePlugin.name,
+						exportablePlugin.displayName,
+						exportablePlugin.bridgeCommands,
+						clientFilters,
+					)
+				) {
+					continue;
+				}
+
+				exportablePlugins.push(exportablePlugin);
+			}
+
+			this.sendToServer(serverId, {
+				type: 'vcp_manifest_response',
+				data: {
+					requestId,
+					status: 'success',
+					bridgeVersion: BRIDGE_VERSION,
+					vcpVersion: BRIDGE_VERSION,
+					capabilities: this.getBridgeCapabilities(),
+					plugins: exportablePlugins,
+				},
+			});
+		} catch (error) {
+			this.sendManifestError(serverId, requestId, parseToolError(error));
+		}
+	}
+
+	createInvocationContext(serverId, requestId, invocationId, toolName) {
+		return {
+			serverId,
+			requestId,
+			invocationId,
+			toolName,
+			taskId: null,
+			cancelled: false,
+			cancelledAt: null,
+			createdAt: Date.now(),
+		};
+	}
+
+	cleanupInvocation(invocationId) {
+		const context = this.activeInvocations.get(invocationId);
+		if (!context) {
+			return;
+		}
+
+		if (context.cancelCleanupTimer) {
+			clearTimeout(context.cancelCleanupTimer);
+		}
+
+		if (context.taskId) {
+			this.taskToInvocationMap.delete(context.taskId);
+		}
+
+		this.activeInvocations.delete(invocationId);
+	}
+
+	scheduleCancelledInvocationCleanup(invocationId) {
+		const context = this.activeInvocations.get(invocationId);
+		if (!context || context.cancelCleanupTimer) {
+			return;
+		}
+
+		context.cancelCleanupTimer = setTimeout(() => {
+			this.cleanupInvocation(invocationId);
+		}, CANCELLED_INVOCATION_TTL_MS);
+	}
+
+	async handleExecuteTool(serverId, message, pluginManager) {
+		const data = (message && message.data) || {};
+		const requestId = data.requestId;
+		const invocationId = data.invocationId || requestId;
+		const toolName = data.toolName;
+		const toolArgs = data.toolArgs && typeof data.toolArgs === 'object'
+			? {...data.toolArgs}
+			: {};
+
+		try {
+			this.assertBridgeAccess(serverId, data);
+
+			if (!requestId || !invocationId || !toolName) {
+				throw buildError(
+					'bridge_invalid_request',
+					'requestId, invocationId and toolName are required.',
+				);
+			}
+
+			if (!this.isToolAllowed(toolName)) {
+				throw buildError(
+					'bridge_tool_forbidden',
+					`Tool "${toolName}" is not allowed by SnowBridge.`,
+				);
+			}
+
+			const context = this.createInvocationContext(
+				serverId,
+				requestId,
+				invocationId,
+				toolName,
+			);
+			this.activeInvocations.set(invocationId, context);
+
+			const result = await pluginManager.processToolCall(toolName, toolArgs);
+			const latestContext = this.activeInvocations.get(invocationId);
+
+			if (result && result.taskId) {
+				const taskId = String(result.taskId);
+				if (latestContext) {
+					latestContext.taskId = taskId;
+					this.taskToInvocationMap.set(taskId, invocationId);
+					if (latestContext.cancelled) {
+						this.scheduleCancelledInvocationCleanup(invocationId);
+						return;
+					}
+				}
+
+				this.sendToServer(serverId, {
+					type: 'vcp_tool_status',
+					data: {
+						requestId,
+						invocationId,
+						taskId,
+						status: 'accepted',
+						async: true,
+						result,
+					},
+				});
+				return;
+			}
+
+			if (latestContext && latestContext.cancelled) {
+				this.cleanupInvocation(invocationId);
+				return;
+			}
+
+			this.sendToServer(serverId, {
+				type: 'vcp_tool_result',
+				data: {
+					requestId,
+					invocationId,
+					status: 'success',
+					result,
+				},
+			});
+		} catch (error) {
+			const context = this.activeInvocations.get(invocationId);
+			if (!context || !context.cancelled) {
+				this.sendToolError(
+					serverId,
+					requestId,
+					invocationId,
+					parseToolError(error),
+				);
+			}
+		} finally {
+			const context = this.activeInvocations.get(invocationId);
+			if (context && !context.taskId) {
+				this.cleanupInvocation(invocationId);
+			}
+		}
+	}
+
+	async handleCancelTool(serverId, message) {
+		const data = (message && message.data) || {};
+		const requestId = data.requestId;
+		const invocationId = data.invocationId || requestId;
+
+		try {
+			this.assertBridgeAccess(serverId, data);
+
+			if (!invocationId) {
+				throw buildError(
+					'bridge_invalid_cancel',
+					'requestId or invocationId is required for cancellation.',
+				);
+			}
+
+			const context = this.activeInvocations.get(invocationId);
+			if (!context) {
+				this.sendToServer(serverId, {
+					type: 'vcp_tool_cancel_ack',
+					data: {
+						requestId,
+						invocationId,
+						accepted: false,
+						mode: 'unsupported',
+						error: buildError(
+							'bridge_invocation_not_found',
+							`Invocation "${invocationId}" was not found.`,
+						),
+					},
+				});
+				return;
+			}
+
+			context.cancelled = true;
+			context.cancelledAt = Date.now();
+			this.scheduleCancelledInvocationCleanup(invocationId);
+
+			this.sendToServer(serverId, {
+				type: 'vcp_tool_cancel_ack',
+				data: {
+					requestId,
+					invocationId,
+					accepted: true,
+					mode: context.taskId ? 'ignored' : 'cancelled',
+				},
+			});
+		} catch (error) {
+			this.sendToServer(serverId, {
+				type: 'vcp_tool_cancel_ack',
+				data: {
+					requestId,
+					invocationId,
+					accepted: false,
+					mode: 'unsupported',
+					error: parseToolError(error),
+				},
+			});
+		}
+	}
+
+	async processToolCall(args) {
+		if (args.command === 'GetStatus') {
+			return {
+				status: 'running',
+				hooked: this.isHooked,
+				config: this.config,
+				bridgeVersion: BRIDGE_VERSION,
+				capabilities: this.getBridgeCapabilities(),
+			};
+		}
+
+		throw new Error(`Unknown command: ${args.command}`);
+	}
+
+	shutdown() {
+		for (const context of this.activeInvocations.values()) {
+			if (context.cancelCleanupTimer) {
+				clearTimeout(context.cancelCleanupTimer);
+			}
+		}
+		this.activeInvocations.clear();
+		this.taskToInvocationMap.clear();
+		this.rateLimitState.clear();
+
+		if (this.debugMode) {
+			console.log('[SnowBridge] Shutting down...');
+		}
+	}
+}
+
+module.exports = new SnowBridge();
