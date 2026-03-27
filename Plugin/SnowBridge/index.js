@@ -1,4 +1,4 @@
-const BRIDGE_VERSION = '1.1.0';
+const BRIDGE_VERSION = '2.0.0';
 const DEFAULT_RATE_LIMIT_PER_MINUTE = 60;
 const CANCELLED_INVOCATION_TTL_MS = 5 * 60 * 1000;
 
@@ -10,11 +10,49 @@ function splitCsv(value) {
 }
 
 function buildError(code, message, extra = {}) {
+	const details =
+		extra.details && typeof extra.details === 'object' ? extra.details : undefined;
+
 	return {
 		code,
 		message,
-		...extra,
+		retryable: extra.retryable === true,
+		source: extra.source || 'snowbridge',
+		...(details ? {details} : {}),
+		...Object.fromEntries(
+			Object.entries(extra).filter(([key]) =>
+				!['details', 'retryable', 'source'].includes(key),
+			),
+		),
 	};
+}
+
+function normalizeToolIdSegment(value) {
+	return (
+		String(value || '')
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9_-]+/g, '_')
+			.replace(/^_+|_+$/g, '') || 'tool'
+	);
+}
+
+function buildBridgeToolId(originName) {
+	return [
+		normalizeToolIdSegment('vcp_bridge'),
+		normalizeToolIdSegment('snowbridge'),
+		normalizeToolIdSegment(originName),
+	].join(':');
+}
+
+function uniqueStrings(values) {
+	return Array.from(
+		new Set(
+			values
+				.map(value => String(value || '').trim())
+				.filter(Boolean),
+		),
+	);
 }
 
 function normalizeCommandName(command) {
@@ -55,14 +93,106 @@ function parseToolError(error) {
 				return buildError(
 					'plugin_execution_error',
 					parsed.plugin_error || parsed.plugin_execution_error,
+					{
+						source: 'plugin',
+						details: parsed,
+					},
 				);
 			}
 		} catch {}
 
-		return buildError('bridge_error', error.message);
+		return buildError('bridge_error', error.message, {
+			source: 'snowbridge',
+		});
+	}
+
+	if (typeof error === 'object' && error.code) {
+		return buildError(error.code, error.message || String(error), {
+			retryable: error.retryable === true,
+			source: error.source || 'snowbridge',
+			details:
+				error.details && typeof error.details === 'object'
+					? error.details
+					: undefined,
+		});
 	}
 
 	return buildError('bridge_error', String(error));
+}
+
+function buildCapabilityTags(bridgeCommands, bridgeCapabilities) {
+	const tags = ['bridge_transport'];
+
+	tags.push((bridgeCommands || []).length > 1 ? 'multi_command' : 'single_command');
+
+	if (bridgeCapabilities.cancelVcpTool) {
+		tags.push('cancellable');
+	}
+
+	if (bridgeCapabilities.asyncCallbacks) {
+		tags.push('async_callback');
+	}
+
+	if (bridgeCapabilities.statusEvents) {
+		tags.push('status_events');
+	}
+
+	if (bridgeCapabilities.clientAuth) {
+		tags.push('client_auth');
+	}
+
+	return uniqueStrings(tags);
+}
+
+function buildAsyncStatusPayload(context, options = {}) {
+	const taskId = String(options.taskId || context.taskId || '').trim() || undefined;
+	const state = options.state || 'running';
+	const event = options.event || 'lifecycle';
+	const status = options.status || state;
+
+	return {
+		requestId: context.requestId,
+		invocationId: context.invocationId,
+		toolId: context.toolId,
+		toolName: context.publicName || context.toolName,
+		originName: context.toolName,
+		status,
+		async: true,
+		...(taskId ? {taskId} : {}),
+		asyncStatus: {
+			enabled: true,
+			state,
+			event,
+			...(taskId ? {taskId} : {}),
+		},
+		...(options.result !== undefined ? {result: options.result} : {}),
+		...(options.error ? {error: options.error} : {}),
+		...(options.extra || {}),
+	};
+}
+
+function buildToolResultPayload(context, options = {}) {
+	const taskId = String(options.taskId || context.taskId || '').trim() || undefined;
+	const error = options.error;
+	const nextStatus = options.status || (error ? 'error' : 'success');
+
+	return {
+		requestId: context.requestId,
+		invocationId: context.invocationId,
+		toolId: context.toolId,
+		toolName: context.publicName || context.toolName,
+		originName: context.toolName,
+		status: nextStatus,
+		...(taskId ? {taskId} : {}),
+		asyncStatus: {
+			enabled: Boolean(taskId),
+			state: nextStatus === 'error' ? 'error' : 'completed',
+			event: 'result',
+			...(taskId ? {taskId} : {}),
+		},
+		...(options.result !== undefined ? {result: options.result} : {}),
+		...(error ? {error} : {}),
+	};
 }
 
 class SnowBridge {
@@ -133,11 +263,14 @@ class SnowBridge {
 			this.sendToServer(context.serverId, {
 				type: 'vcp_tool_status',
 				data: {
-					requestId: context.requestId,
-					invocationId,
-					taskId,
-					bridgeType,
 					...data,
+					...buildAsyncStatusPayload(context, {
+						taskId,
+						state: 'running',
+						status: 'running',
+						event: bridgeType === 'log' ? 'log' : 'info',
+						extra: {bridgeType},
+					}),
 				},
 			});
 		};
@@ -177,14 +310,11 @@ class SnowBridge {
 
 			this.sendToServer(context.serverId, {
 				type: 'vcp_tool_result',
-				data: {
-					requestId: context.requestId,
-					invocationId,
+				data: buildToolResultPayload(context, {
 					taskId,
 					status: 'success',
-					async: true,
 					result: info.data,
-				},
+				}),
 			});
 			this.cleanupInvocation(invocationId);
 		});
@@ -468,10 +598,16 @@ class SnowBridge {
 			return null;
 		}
 
+		const bridgeCapabilities = this.getBridgeCapabilities();
+
 		return {
 			name: plugin.name || pluginName,
+			publicName: plugin.name || pluginName,
+			originName: pluginName,
+			toolId: buildBridgeToolId(pluginName),
 			displayName: plugin.displayName || plugin.name || pluginName,
 			description: plugin.description || '',
+			capabilityTags: buildCapabilityTags(bridgeCommands, bridgeCapabilities),
 			capabilities: {
 				invocationCommands: plugin.capabilities?.invocationCommands || [],
 			},
@@ -497,12 +633,20 @@ class SnowBridge {
 	sendToolError(serverId, requestId, invocationId, error) {
 		this.sendToServer(serverId, {
 			type: 'vcp_tool_result',
-			data: {
-				requestId,
-				invocationId,
-				status: 'error',
-				error,
-			},
+			data: buildToolResultPayload(
+				{
+					requestId,
+					invocationId,
+					toolName: '',
+					publicName: '',
+					toolId: undefined,
+					taskId: null,
+				},
+				{
+					status: 'error',
+					error,
+				},
+			),
 		});
 	}
 
@@ -573,12 +717,14 @@ class SnowBridge {
 		}
 	}
 
-	createInvocationContext(serverId, requestId, invocationId, toolName) {
+	createInvocationContext(serverId, requestId, invocationId, toolName, bridgeMeta = {}) {
 		return {
 			serverId,
 			requestId,
 			invocationId,
 			toolName,
+			toolId: bridgeMeta.toolId || buildBridgeToolId(toolName),
+			publicName: bridgeMeta.publicName || toolName,
 			taskId: null,
 			cancelled: false,
 			cancelledAt: null,
@@ -618,7 +764,9 @@ class SnowBridge {
 		const data = (message && message.data) || {};
 		const requestId = data.requestId;
 		const invocationId = data.invocationId || requestId;
-		const toolName = data.toolName;
+		const toolName = data.originName || data.toolName;
+		const toolId = data.toolId || buildBridgeToolId(toolName || '');
+		const publicName = data.publicName || data.toolName || toolName;
 		const toolArgs = data.toolArgs && typeof data.toolArgs === 'object'
 			? {...data.toolArgs}
 			: {};
@@ -645,6 +793,10 @@ class SnowBridge {
 				requestId,
 				invocationId,
 				toolName,
+				{
+					toolId,
+					publicName,
+				},
 			);
 			this.activeInvocations.set(invocationId, context);
 
@@ -664,14 +816,13 @@ class SnowBridge {
 
 				this.sendToServer(serverId, {
 					type: 'vcp_tool_status',
-					data: {
-						requestId,
-						invocationId,
+					data: buildAsyncStatusPayload(context, {
 						taskId,
+						state: 'accepted',
 						status: 'accepted',
-						async: true,
+						event: 'lifecycle',
 						result,
-					},
+					}),
 				});
 				return;
 			}
@@ -683,22 +834,27 @@ class SnowBridge {
 
 			this.sendToServer(serverId, {
 				type: 'vcp_tool_result',
-				data: {
-					requestId,
-					invocationId,
+				data: buildToolResultPayload(context, {
 					status: 'success',
 					result,
-				},
+				}),
 			});
 		} catch (error) {
 			const context = this.activeInvocations.get(invocationId);
 			if (!context || !context.cancelled) {
-				this.sendToolError(
-					serverId,
-					requestId,
-					invocationId,
-					parseToolError(error),
-				);
+				const parsedError = parseToolError(error);
+				if (context) {
+					this.sendToServer(serverId, {
+						type: 'vcp_tool_result',
+						data: buildToolResultPayload(context, {
+							status: 'error',
+							taskId: context.taskId,
+							error: parsedError,
+						}),
+					});
+				} else {
+					this.sendToolError(serverId, requestId, invocationId, parsedError);
+				}
 			}
 		} finally {
 			const context = this.activeInvocations.get(invocationId);
