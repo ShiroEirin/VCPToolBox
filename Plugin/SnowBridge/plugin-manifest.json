@@ -2,7 +2,7 @@
   "name": "SnowBridge",
   "displayName": "Snow 工具桥接器",
   "description": "为 Snow CLI 导出 VCP 原生工具，提供工具清单同步、远程执行与取消控制。",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Gugu_Kilo",
   "pluginType": "hybridservice",
   "entryPoint": {
