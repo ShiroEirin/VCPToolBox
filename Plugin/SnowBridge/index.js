@@ -71,9 +71,9 @@ function normalizeInvocationCommand(command) {
 
 	return {
 		commandName,
-		description: command.description || '',
+		description: normalizeBridgeText(command.description || ''),
 		parameters: Array.isArray(command.parameters) ? command.parameters : [],
-		example: command.example || '',
+		example: normalizeBridgeText(command.example || ''),
 	};
 }
 
@@ -144,6 +144,16 @@ function buildCapabilityTags(bridgeCommands, bridgeCapabilities) {
 	return uniqueStrings(tags);
 }
 
+function normalizeBridgeText(description) {
+	return String(description || '')
+		.replace(/\r\n?/g, '\n')
+		.split('\n')
+		.map(line => line.trimEnd())
+		.join('\n')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+}
+
 function buildAsyncStatusPayload(context, options = {}) {
 	const taskId = String(options.taskId || context.taskId || '').trim() || undefined;
 	const state = options.state || 'running';
@@ -202,6 +212,8 @@ class SnowBridge {
 		this.config = {};
 		this.debugMode = false;
 		this.isHooked = false;
+		this.eventSubscriptions = [];
+		this.patchState = null;
 		this.activeInvocations = new Map(); // invocationId -> context
 		this.taskToInvocationMap = new Map(); // taskId -> invocationId
 		this.rateLimitState = new Map(); // clientKey -> { windowStart, count }
@@ -216,7 +228,7 @@ class SnowBridge {
 		};
 
 		try {
-			this.pluginManager = require('../../Plugin.js');
+			this.bindPluginManager(require('../../Plugin.js'));
 			this.setupEventListeners();
 		} catch (error) {
 			console.error(
@@ -230,10 +242,21 @@ class SnowBridge {
 		}
 	}
 
+	bindPluginManager(pluginManager) {
+		if (this.pluginManager === pluginManager) {
+			return;
+		}
+
+		this.removeEventListeners();
+		this.pluginManager = pluginManager;
+	}
+
 	setupEventListeners() {
 		if (!this.pluginManager) {
 			return;
 		}
+
+		this.removeEventListeners();
 
 		const forwardLog = (bridgeType, data) => {
 			if (this.config.Bridge_Enabled === false) {
@@ -275,10 +298,9 @@ class SnowBridge {
 			});
 		};
 
-		this.pluginManager.on('vcp_log', data => forwardLog('log', data));
-		this.pluginManager.on('vcp_info', data => forwardLog('info', data));
-
-		this.pluginManager.on('plugin_async_callback', info => {
+		const logListener = data => forwardLog('log', data);
+		const infoListener = data => forwardLog('info', data);
+		const asyncCallbackListener = info => {
 			if (this.config.Bridge_Enabled === false) {
 				return;
 			}
@@ -317,10 +339,46 @@ class SnowBridge {
 				}),
 			});
 			this.cleanupInvocation(invocationId);
-		});
+		};
+
+		this.pluginManager.on('vcp_log', logListener);
+		this.pluginManager.on('vcp_info', infoListener);
+		this.pluginManager.on('plugin_async_callback', asyncCallbackListener);
+		this.eventSubscriptions = [
+			{eventName: 'vcp_log', listener: logListener},
+			{eventName: 'vcp_info', listener: infoListener},
+			{eventName: 'plugin_async_callback', listener: asyncCallbackListener},
+		];
+	}
+
+	removeEventListeners() {
+		if (!this.pluginManager || this.eventSubscriptions.length === 0) {
+			this.eventSubscriptions = [];
+			return;
+		}
+
+		for (const subscription of this.eventSubscriptions) {
+			if (typeof this.pluginManager.off === 'function') {
+				this.pluginManager.off(subscription.eventName, subscription.listener);
+				continue;
+			}
+
+			if (typeof this.pluginManager.removeListener === 'function') {
+				this.pluginManager.removeListener(
+					subscription.eventName,
+					subscription.listener,
+				);
+			}
+		}
+
+		this.eventSubscriptions = [];
 	}
 
 	registerApiRoutes(router, config, projectBasePath, wss) {
+		if (this.wss && this.wss !== wss) {
+			this.removeMonkeyPatch();
+		}
+
 		this.wss = wss;
 		this.config = {...this.config, ...config};
 
@@ -351,7 +409,11 @@ class SnowBridge {
 	}
 
 	applyMonkeyPatch() {
-		if (this.isHooked) {
+		if (
+			this.patchState?.wss === this.wss &&
+			this.patchState.wss?.handleDistributedServerMessage ===
+				this.patchState.wrappedHandler
+		) {
 			return;
 		}
 
@@ -371,6 +433,8 @@ class SnowBridge {
 			return;
 		}
 
+		this.bindPluginManager(pluginManager);
+
 		const originalHandler = wss.handleDistributedServerMessage;
 		if (typeof originalHandler !== 'function') {
 			console.error(
@@ -379,8 +443,10 @@ class SnowBridge {
 			return;
 		}
 
+		this.removeMonkeyPatch();
+
 		const self = this;
-		wss.handleDistributedServerMessage = async function (serverId, message) {
+		const wrappedHandler = async function (serverId, message) {
 			if (self.config.Bridge_Enabled === false) {
 				return originalHandler.call(wss, serverId, message);
 			}
@@ -414,11 +480,35 @@ class SnowBridge {
 
 			return originalHandler.call(wss, serverId, message);
 		};
+		wrappedHandler.__snowBridgePatched = true;
+		wrappedHandler.__snowBridgeOriginalHandler = originalHandler;
+
+		wss.handleDistributedServerMessage = wrappedHandler;
+		this.patchState = {
+			wss,
+			originalHandler,
+			wrappedHandler,
+		};
 
 		this.isHooked = true;
 		console.log(
 			'[SnowBridge] Monkey patch successful: SnowBridge is now active.',
 		);
+	}
+
+	removeMonkeyPatch() {
+		if (!this.patchState) {
+			this.isHooked = false;
+			return;
+		}
+
+		const {wss, originalHandler, wrappedHandler} = this.patchState;
+		if (wss?.handleDistributedServerMessage === wrappedHandler) {
+			wss.handleDistributedServerMessage = originalHandler;
+		}
+
+		this.patchState = null;
+		this.isHooked = false;
 	}
 
 	sendToServer(serverId, payload) {
@@ -604,9 +694,10 @@ class SnowBridge {
 			name: plugin.name || pluginName,
 			publicName: plugin.name || pluginName,
 			originName: pluginName,
+			pluginType: plugin.pluginType,
 			toolId: buildBridgeToolId(pluginName),
 			displayName: plugin.displayName || plugin.name || pluginName,
-			description: plugin.description || '',
+			description: normalizeBridgeText(plugin.description),
 			capabilityTags: buildCapabilityTags(bridgeCommands, bridgeCapabilities),
 			capabilities: {
 				invocationCommands: plugin.capabilities?.invocationCommands || [],
@@ -939,6 +1030,9 @@ class SnowBridge {
 	}
 
 	shutdown() {
+		this.removeEventListeners();
+		this.removeMonkeyPatch();
+
 		for (const context of this.activeInvocations.values()) {
 			if (context.cancelCleanupTimer) {
 				clearTimeout(context.cancelCleanupTimer);
@@ -947,6 +1041,8 @@ class SnowBridge {
 		this.activeInvocations.clear();
 		this.taskToInvocationMap.clear();
 		this.rateLimitState.clear();
+		this.pluginManager = null;
+		this.wss = null;
 
 		if (this.debugMode) {
 			console.log('[SnowBridge] Shutting down...');
