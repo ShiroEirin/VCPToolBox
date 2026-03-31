@@ -1,6 +1,17 @@
-const BRIDGE_VERSION = '2.0.0';
+const BRIDGE_VERSION = '2.1.0';
 const DEFAULT_RATE_LIMIT_PER_MINUTE = 60;
 const CANCELLED_INVOCATION_TTL_MS = 5 * 60 * 1000;
+const SNOW_REQUEST_HEADER_KEYS = [
+	'x-snow-client',
+	'x-snow-protocol',
+	'x-snow-tool-mode',
+	'x-snow-channel',
+];
+const SNOW_SOURCE_CONTRACT = Object.freeze({
+	'x-snow-client': ['snow-cli'],
+	'x-snow-protocol': ['function-calling'],
+	'x-snow-channel': ['bridge-ws'],
+});
 
 function splitCsv(value) {
 	return String(value || '')
@@ -203,6 +214,26 @@ function buildToolResultPayload(context, options = {}) {
 		...(options.result !== undefined ? {result: options.result} : {}),
 		...(error ? {error} : {}),
 	};
+}
+
+function normalizeHeaderValue(value) {
+	return String(value || '').trim();
+}
+
+function normalizeHeaderMap(value) {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return {};
+	}
+
+	return Object.fromEntries(
+		Object.entries(value)
+			.filter(([key]) => typeof key === 'string')
+			.map(([key, headerValue]) => [
+				key.trim().toLowerCase(),
+				normalizeHeaderValue(headerValue),
+			])
+			.filter(([, headerValue]) => Boolean(headerValue)),
+	);
 }
 
 class SnowBridge {
@@ -452,6 +483,11 @@ class SnowBridge {
 			}
 
 			try {
+				const requestData =
+					message && typeof message.data === 'object' && message.data !== null
+						? message.data
+						: {};
+
 				if (self.debugMode) {
 					console.log(
 						`[SnowBridge] Intercepted message type ${message.type} from ${serverId}`,
@@ -460,14 +496,23 @@ class SnowBridge {
 
 				switch (message.type) {
 					case 'get_vcp_manifests':
+						if (!self.isSnowBridgeRequest(requestData)) {
+							break;
+						}
 						await self.handleGetManifests(serverId, message, pluginManager);
 						return;
 
 					case 'execute_vcp_tool':
+						if (!self.isSnowBridgeRequest(requestData)) {
+							break;
+						}
 						await self.handleExecuteTool(serverId, message, pluginManager);
 						return;
 
 					case 'cancel_vcp_tool':
+						if (!self.isSnowBridgeRequest(requestData)) {
+							break;
+						}
 						await self.handleCancelTool(serverId, message);
 						return;
 				}
@@ -533,10 +578,6 @@ class SnowBridge {
 		return String(this.config.Bridge_Access_Token || '').trim();
 	}
 
-	getAllowedClients() {
-		return new Set(splitCsv(this.config.Allowed_Clients));
-	}
-
 	getAllowedTools() {
 		return new Set(splitCsv(this.config.Allowed_Tools));
 	}
@@ -558,18 +599,129 @@ class SnowBridge {
 			: DEFAULT_RATE_LIMIT_PER_MINUTE;
 	}
 
+	isSnowRequestHeaderValidationRequired() {
+		return this.config.Require_Snow_Request_Headers !== false;
+	}
+
+	getRequiredSnowSourceValues(headerName) {
+		return new Set(SNOW_SOURCE_CONTRACT[headerName] || []);
+	}
+
+	getAllowedSnowToolModes() {
+		return new Set(splitCsv(this.config.Allowed_Snow_Tool_Modes));
+	}
+
+	getSnowRequestHeaders(data) {
+		return normalizeHeaderMap(data?.requestHeaders);
+	}
+
+	hasRequestHeaders(data) {
+		return Boolean(
+			data &&
+				typeof data === 'object' &&
+				Object.prototype.hasOwnProperty.call(data, 'requestHeaders'),
+		);
+	}
+
+	isSnowBridgeRequest(data) {
+		if (!this.isSnowRequestHeaderValidationRequired()) {
+			return true;
+		}
+
+		if (!this.hasRequestHeaders(data)) {
+			return false;
+		}
+
+		const headers = this.getSnowRequestHeaders(data);
+		return (
+			SNOW_REQUEST_HEADER_KEYS.some(key => Boolean(headers[key]))
+		);
+	}
+
 	getClientIdentity(serverId, data) {
+		const snowHeaders = this.getSnowRequestHeaders(data);
 		const clientInfo =
 			data && typeof data.clientInfo === 'object' && data.clientInfo !== null
 				? data.clientInfo
 				: {};
 
 		return (
+			snowHeaders['x-snow-client'] ||
 			clientInfo.clientId ||
 			clientInfo.clientName ||
 			clientInfo.name ||
 			serverId
 		);
+	}
+
+	assertSnowSourceMetadata(data) {
+		if (!this.isSnowRequestHeaderValidationRequired()) {
+			return;
+		}
+
+		if (!this.hasRequestHeaders(data)) {
+			throw buildError(
+				'bridge_source_metadata_missing',
+				'SnowBridge requires requestHeaders with explicit Snow source metadata.',
+			);
+		}
+
+		const headers = this.getSnowRequestHeaders(data);
+		const missingHeaders = SNOW_REQUEST_HEADER_KEYS.filter(key => !headers[key]);
+		if (missingHeaders.length > 0) {
+			throw buildError(
+				'bridge_source_metadata_invalid',
+				'SnowBridge requestHeaders are missing required Snow metadata.',
+				{
+					details: {missingHeaders},
+				},
+			);
+		}
+
+		const validations = [
+			{
+				headerName: 'x-snow-client',
+				allowedValues: this.getRequiredSnowSourceValues('x-snow-client'),
+				errorCode: 'bridge_source_client_forbidden',
+			},
+			{
+				headerName: 'x-snow-protocol',
+				allowedValues: this.getRequiredSnowSourceValues('x-snow-protocol'),
+				errorCode: 'bridge_source_protocol_forbidden',
+			},
+			{
+				headerName: 'x-snow-tool-mode',
+				allowedValues: this.getAllowedSnowToolModes(),
+				errorCode: 'bridge_source_tool_mode_forbidden',
+			},
+			{
+				headerName: 'x-snow-channel',
+				allowedValues: this.getRequiredSnowSourceValues('x-snow-channel'),
+				errorCode: 'bridge_source_channel_forbidden',
+			},
+		];
+
+		for (const validation of validations) {
+			const {headerName, allowedValues, errorCode} = validation;
+			if (allowedValues.size === 0) {
+				continue;
+			}
+
+			const actualValue = headers[headerName];
+			if (!allowedValues.has(actualValue)) {
+				throw buildError(
+					errorCode,
+					`SnowBridge rejected request header "${headerName}" with value "${actualValue}".`,
+					{
+						details: {
+							headerName,
+							actualValue,
+							allowedValues: Array.from(allowedValues),
+						},
+					},
+				);
+			}
+		}
 	}
 
 	assertBridgeAccess(serverId, data) {
@@ -585,16 +737,7 @@ class SnowBridge {
 			throw buildError('bridge_auth_failed', 'Invalid bridge access token.');
 		}
 
-		const allowedClients = this.getAllowedClients();
-		if (allowedClients.size > 0) {
-			const identity = this.getClientIdentity(serverId, data);
-			if (!allowedClients.has(identity)) {
-				throw buildError(
-					'bridge_client_forbidden',
-					`Client "${identity}" is not allowed to access SnowBridge.`,
-				);
-			}
-		}
+		this.assertSnowSourceMetadata(data);
 
 		this.assertRateLimit(serverId, data);
 	}

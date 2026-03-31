@@ -2,7 +2,7 @@
   "name": "SnowBridge",
   "displayName": "Snow 工具桥接器",
   "description": "为 Snow CLI 导出 VCP 原生工具，提供工具清单同步、远程执行与取消控制。",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "Gugu_Kilo",
   "pluginType": "hybridservice",
   "entryPoint": {
@@ -34,10 +34,15 @@
       "default": "",
       "description": "允许导出的工具白名单（插件调用名，逗号分隔，留空表示按黑名单规则导出全部）"
     },
-    "Allowed_Clients": {
+    "Require_Snow_Request_Headers": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否要求 bridge 请求在 data.requestHeaders 中显式携带 Snow 来源元数据。开启后，请求必须满足固定契约：x-snow-client=snow-cli、x-snow-protocol=function-calling、x-snow-channel=bridge-ws。"
+    },
+    "Allowed_Snow_Tool_Modes": {
       "type": "string",
-      "default": "snow-cli",
-      "description": "允许访问桥接器的客户端标识白名单（建议填写 snow-cli，按 clientInfo.clientId 或 clientInfo.clientName 匹配）"
+      "default": "bridge,hybrid",
+      "description": "允许的 x-snow-tool-mode 白名单（逗号分隔）。默认接受 bridge 与 hybrid；local 会被拒绝。"
     },
     "Bridge_Access_Token": {
       "type": "string",
