@@ -72,12 +72,24 @@ function normalizeToolIdSegment(value) {
 	);
 }
 
+function slugifySegment(value) {
+	return String(value || '')
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+}
+
 function buildBridgeToolId(originName) {
 	return [
 		normalizeToolIdSegment('vcp_bridge'),
 		normalizeToolIdSegment('snowbridge'),
 		normalizeToolIdSegment(originName),
 	].join(':');
+}
+
+function buildBridgeToolName(pluginName, commandName) {
+	return `vcp-${slugifySegment(pluginName)}-${slugifySegment(commandName)}`;
 }
 
 function uniqueStrings(values) {
@@ -177,6 +189,28 @@ function buildCapabilityTags(bridgeCommands, bridgeCapabilities) {
 	}
 
 	return uniqueStrings(tags);
+}
+
+function normalizeFilterValues(rawValue) {
+	if (!rawValue) {
+		return [];
+	}
+
+	if (Array.isArray(rawValue)) {
+		return uniqueStrings(rawValue);
+	}
+
+	if (typeof rawValue === 'string') {
+		return uniqueStrings(splitCsv(rawValue));
+	}
+
+	return [];
+}
+
+function normalizeFilterSet(rawValue) {
+	return new Set(
+		normalizeFilterValues(rawValue).map(value => value.toLowerCase()),
+	);
 }
 
 function normalizeBridgeText(description) {
@@ -1237,30 +1271,59 @@ class SnowBridge {
 
 	normalizeToolFilters(rawFilters) {
 		if (!rawFilters) {
-			return [];
+			return {
+				include: [],
+				includeExactToolNames: new Set(),
+				excludeExactToolNames: new Set(),
+				excludeBridgeToolIds: new Set(),
+				excludePluginNames: new Set(),
+			};
 		}
 
-		if (Array.isArray(rawFilters)) {
-			return rawFilters.map(value => String(value).trim()).filter(Boolean);
+		if (Array.isArray(rawFilters) || typeof rawFilters === 'string') {
+			return {
+				include: normalizeFilterValues(rawFilters),
+				includeExactToolNames: new Set(),
+				excludeExactToolNames: new Set(),
+				excludeBridgeToolIds: new Set(),
+				excludePluginNames: new Set(),
+			};
 		}
 
 		if (typeof rawFilters === 'object' && rawFilters !== null) {
-			if (Array.isArray(rawFilters.include)) {
-				return rawFilters.include.map(value => String(value).trim()).filter(Boolean);
-			}
-			if (typeof rawFilters.include === 'string') {
-				return splitCsv(rawFilters.include);
-			}
+			return {
+				include: normalizeFilterValues(rawFilters.include),
+				includeExactToolNames: normalizeFilterSet(
+					rawFilters.includeExactToolNames || rawFilters.exactToolNames,
+				),
+				excludeExactToolNames: normalizeFilterSet(
+					rawFilters.excludeExactToolNames ||
+						rawFilters.disabledExactToolNames ||
+						rawFilters.disabledToolNames,
+				),
+				excludeBridgeToolIds: normalizeFilterSet(
+					rawFilters.excludeBridgeToolIds ||
+						rawFilters.disabledBridgeToolIds ||
+						rawFilters.disabledToolIds,
+				),
+				excludePluginNames: normalizeFilterSet(
+					rawFilters.excludePluginNames ||
+						rawFilters.excludePlugins ||
+						rawFilters.disabledPlugins,
+				),
+			};
 		}
 
-		if (typeof rawFilters === 'string') {
-			return splitCsv(rawFilters);
-		}
-
-		return [];
+		return {
+			include: [],
+			includeExactToolNames: new Set(),
+			excludeExactToolNames: new Set(),
+			excludeBridgeToolIds: new Set(),
+			excludePluginNames: new Set(),
+		};
 	}
 
-	matchesToolFilter(pluginName, displayName, bridgeCommands, filters) {
+	matchesToolFilter(pluginName, displayName, bridgeCommand, exactToolName, toolId, filters) {
 		if (!filters || filters.length === 0) {
 			return true;
 		}
@@ -1268,7 +1331,9 @@ class SnowBridge {
 		const haystacks = [
 			pluginName,
 			displayName,
-			...bridgeCommands.map(command => command.commandName),
+			bridgeCommand.commandName,
+			exactToolName,
+			toolId,
 		]
 			.filter(Boolean)
 			.map(value => value.toLowerCase());
@@ -1277,6 +1342,58 @@ class SnowBridge {
 			const normalized = filterValue.toLowerCase();
 			return haystacks.some(haystack => haystack.includes(normalized));
 		});
+	}
+
+	filterExportablePlugin(exportablePlugin, filters) {
+		if (!exportablePlugin) {
+			return null;
+		}
+
+		const normalizedPluginName = String(exportablePlugin.name || '').toLowerCase();
+		const normalizedToolId = String(exportablePlugin.toolId || '').toLowerCase();
+		if (
+			filters.excludePluginNames.has(normalizedPluginName) ||
+			filters.excludeBridgeToolIds.has(normalizedToolId)
+		) {
+			return null;
+		}
+
+		const filteredCommands = exportablePlugin.bridgeCommands.filter(command => {
+			const exactToolName = buildBridgeToolName(
+				exportablePlugin.name,
+				command.commandName,
+			);
+			const normalizedExactToolName = exactToolName.toLowerCase();
+
+			if (filters.excludeExactToolNames.has(normalizedExactToolName)) {
+				return false;
+			}
+
+			if (
+				filters.includeExactToolNames.size > 0 &&
+				!filters.includeExactToolNames.has(normalizedExactToolName)
+			) {
+				return false;
+			}
+
+			return this.matchesToolFilter(
+				exportablePlugin.name,
+				exportablePlugin.displayName,
+				command,
+				exactToolName,
+				exportablePlugin.toolId,
+				filters.include,
+			);
+		});
+
+		if (filteredCommands.length === 0) {
+			return null;
+		}
+
+		return {
+			...exportablePlugin,
+			bridgeCommands: filteredCommands,
+		};
 	}
 
 	buildExportablePlugin(plugin, pluginName) {
@@ -1374,22 +1491,15 @@ class SnowBridge {
 				}
 
 				const exportablePlugin = this.buildExportablePlugin(plugin, pluginName);
-				if (!exportablePlugin) {
+				const filteredPlugin = this.filterExportablePlugin(
+					exportablePlugin,
+					clientFilters,
+				);
+				if (!filteredPlugin) {
 					continue;
 				}
 
-				if (
-					!this.matchesToolFilter(
-						exportablePlugin.name,
-						exportablePlugin.displayName,
-						exportablePlugin.bridgeCommands,
-						clientFilters,
-					)
-				) {
-					continue;
-				}
-
-				exportablePlugins.push(exportablePlugin);
+				exportablePlugins.push(filteredPlugin);
 			}
 
 			this.sendToServer(serverId, {
