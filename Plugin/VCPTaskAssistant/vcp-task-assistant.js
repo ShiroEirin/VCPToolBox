@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const fsPromises = require('fs').promises;
 const schedule = require('node-schedule');
+const ForumEngine = require('./lib/forum-engine');
 
 const DATA_FILE = path.join(__dirname, 'task-center-data.json');
 const MIN_INTERVAL_MINUTES = 10;
@@ -21,6 +22,7 @@ let DEBUG_MODE = false;
 
 let taskCenterData = createDefaultData();
 let activeTimers = new Map();
+let forumEngine = null;
 
 function createDefaultData() {
     return {
@@ -105,7 +107,8 @@ function normalizeDispatch(input = {}) {
         channel: String(input.channel || 'AgentAssistant').trim() || 'AgentAssistant',
         temporaryContact: input.temporaryContact !== false,
         injectTools: normalizeStringArray(input.injectTools && input.injectTools.length ? input.injectTools : ['VCPForum']),
-        maid: String(input.maid || 'VCP系统').trim() || 'VCP系统'
+        maid: String(input.maid || 'VCP系统').trim() || 'VCP系统',
+        taskDelegation: !!input.taskDelegation
     };
 }
 
@@ -187,39 +190,7 @@ async function saveData() {
     }
 }
 
-async function getForumPostList(maxPosts = 200) {
-    const forumDir = path.join(PROJECT_BASE_PATH, 'dailynote', 'VCP论坛');
-    try {
-        await fsPromises.mkdir(forumDir, { recursive: true });
-        const files = await fsPromises.readdir(forumDir);
-        const mdFiles = files.filter(f => f.endsWith('.md')).slice(0, maxPosts);
-
-        if (mdFiles.length === 0) return 'VCP论坛中尚无帖子。';
-
-        const postsByBoard = {};
-        for (const file of mdFiles) {
-            const m = file.match(/^\[(.*?)\]\[(.*)\]\[(.*?)\]\[(.*?)\]\[(.*?)\]\.md$/);
-            if (!m) continue;
-            const board = m[1];
-            const title = m[2];
-            const author = m[3];
-            const uid = m[5];
-            if (!postsByBoard[board]) postsByBoard[board] = [];
-            postsByBoard[board].push(`[${author}] ${title} (UID: ${uid})`);
-        }
-
-        let output = 'VCP论坛帖子列表:\n';
-        for (const board of Object.keys(postsByBoard)) {
-            output += `\n————[${board}]————\n`;
-            postsByBoard[board].forEach(line => {
-                output += `${line}\n`;
-            });
-        }
-        return output.trim();
-    } catch (e) {
-        return `获取论坛帖子列表时出错: ${e.message}`;
-    }
-}
+// Forum logic has been moved to lib/forum-engine.js
 
 function renderPromptTemplate(template, replacements) {
     let result = String(template || '');
@@ -236,6 +207,7 @@ function wakeUpAgent(agentName, prompt, dispatchConfig = {}) {
         const injectTools = normalizeStringArray(dispatchConfig.injectTools || ['VCPForum']).join(',');
         const maid = String(dispatchConfig.maid || 'VCP系统').trim() || 'VCP系统';
         const temporaryContact = dispatchConfig.temporaryContact !== false ? 'true' : 'false';
+        const taskDelegation = dispatchConfig.taskDelegation ? 'true' : 'false';
 
         const requestBody = `<<<[TOOL_REQUEST]>>>
 maid:「始」${maid}「末」,
@@ -244,6 +216,7 @@ agent_name:「始」${agentName}「末」,
 prompt:「始」${prompt}「末」,
 temporary_contact:「始」${temporaryContact}「末」,
 inject_tools:「始」${injectTools}「末」,
+task_delegation:「始」${taskDelegation}「末」,
 <<<[END_TOOL_REQUEST]>>>`;
 
         const options = {
@@ -282,8 +255,8 @@ async function buildTaskPrompt(task) {
         return String(task.payload.promptTemplate || '');
     }
 
-    const forumList = task.payload.includeForumPostList
-        ? await getForumPostList(task.payload.maxPosts)
+    const forumList = task.payload.includeForumPostList && forumEngine
+        ? await forumEngine.getSparsePostList(task.payload.maxPosts)
         : '';
     const placeholder = task.payload.forumListPlaceholder || '{{forum_post_list}}';
 
@@ -330,14 +303,43 @@ async function executeTask(taskId, triggerSource = 'scheduler') {
     task.meta.updatedAt = new Date().toISOString();
     await saveData();
 
+    let agentsToExecute = [...task.targets.agents];
+    let randomTag = null;
     try {
         const prompt = await buildTaskPrompt(task);
         if (!prompt.trim()) {
             throw new Error('任务提示词为空');
         }
 
+        // --- 随机逻辑处理 ---
+        const rIndex = agentsToExecute.findIndex(a => /^random(\d+)$/i.test(a));
+        if (rIndex !== -1) {
+            randomTag = agentsToExecute[rIndex];
+            const match = randomTag.match(/^random(\d+)$/i);
+            const n = parseInt(match[1], 10);
+            
+            // 过滤掉标签，剩下的是候选人
+            const candidates = agentsToExecute.filter((_, idx) => idx !== rIndex);
+            if (candidates.length > 0) {
+                const pickCount = Math.min(Math.max(1, n), candidates.length);
+                // Fisher-Yates Shuffle
+                for (let i = candidates.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+                }
+                agentsToExecute = candidates.slice(0, pickCount);
+            } else {
+                agentsToExecute = [];
+            }
+        }
+        // ------------------
+
         const dispatchResults = [];
-        for (const agentName of task.targets.agents) {
+        if (agentsToExecute.length === 0) {
+            throw new Error('经过随机过滤后没有可执行的 Agent');
+        }
+
+        for (const agentName of agentsToExecute) {
             const dispatchResult = await wakeUpAgent(agentName, prompt, task.dispatch);
             if (dispatchResult.status < 200 || dispatchResult.status >= 300) {
                 throw new Error(`Agent ${agentName} 收到异常响应: HTTP ${dispatchResult.status}`);
@@ -352,7 +354,7 @@ async function executeTask(taskId, triggerSource = 'scheduler') {
         task.runtime.running = false;
         task.runtime.lastFinishTime = finishedAt.toISOString();
         task.runtime.lastDurationMs = finishedAt.getTime() - startedAt.getTime();
-        task.runtime.lastResult = `success (${dispatchResults.length} agents)`;
+        task.runtime.lastResult = `success (${dispatchResults.length} agents${randomTag ? ', picked from ' + randomTag : ''})`;
         task.runtime.successCount += 1;
         task.runtime.lastError = null;
         task.meta.updatedAt = finishedAt.toISOString();
@@ -367,14 +369,17 @@ async function executeTask(taskId, triggerSource = 'scheduler') {
             finishedAt: finishedAt.toISOString(),
             durationMs: task.runtime.lastDurationMs,
             status: 'success',
-            agents: task.targets.agents,
+            agents: agentsToExecute, // 记录实际执行的人
+            originalAgents: task.targets.agents, // 保留原始配置参考
+            randomTag,
             message: task.runtime.lastResult
         });
 
         await saveData();
         return {
             success: true,
-            message: task.runtime.lastResult
+            message: task.runtime.lastResult,
+            executedAgents: agentsToExecute
         };
     } catch (e) {
         const finishedAt = new Date();
@@ -396,7 +401,9 @@ async function executeTask(taskId, triggerSource = 'scheduler') {
             finishedAt: finishedAt.toISOString(),
             durationMs: task.runtime.lastDurationMs,
             status: 'error',
-            agents: task.targets.agents,
+            agents: agentsToExecute,
+            originalAgents: task.targets.agents,
+            randomTag,
             message: e.message
         });
 
@@ -545,7 +552,7 @@ function getTaskTemplate(type = 'forum_patrol') {
             enabled: true,
             schedule: { mode: 'manual', intervalMinutes: 60 },
             targets: { agents: [] },
-            dispatch: { channel: 'AgentAssistant', temporaryContact: true, injectTools: ['VCPForum'], maid: 'VCP系统' },
+            dispatch: { channel: 'AgentAssistant', temporaryContact: true, injectTools: ['VCPForum'], maid: 'VCP系统', taskDelegation: false },
             payload: {
                 promptTemplate: '',
                 availablePlaceholders: []
@@ -559,7 +566,7 @@ function getTaskTemplate(type = 'forum_patrol') {
         enabled: true,
         schedule: { mode: 'interval', intervalMinutes: 60 },
         targets: { agents: [] },
-        dispatch: { channel: 'AgentAssistant', temporaryContact: true, injectTools: ['VCPForum'], maid: 'VCP系统' },
+        dispatch: { channel: 'AgentAssistant', temporaryContact: true, injectTools: ['VCPForum'], maid: 'VCP系统', taskDelegation: false },
         payload: {
             promptTemplate: DEFAULT_FORUM_PROMPT,
             includeForumPostList: true,
@@ -699,6 +706,8 @@ function initialize(config) {
     VCP_KEY = config.Key || '';
     PROJECT_BASE_PATH = config.PROJECT_BASE_PATH || '';
     DEBUG_MODE = String(config.DebugMode || 'false').toLowerCase() === 'true';
+
+    forumEngine = new ForumEngine(PROJECT_BASE_PATH);
 
     console.log(`[TaskAssistant] 初始化 | PORT=${VCP_PORT} | Key=${VCP_KEY ? 'FOUND' : 'NOT FOUND'}`);
     loadData()
