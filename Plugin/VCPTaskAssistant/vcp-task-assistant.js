@@ -42,6 +42,14 @@ function logDebug(message) {
     }
 }
 
+/**
+ * 广播状态更新 — 当前实现为日志输出。
+ * 未来如需推送到前端可在此接入 WebSocket / SSE。
+ */
+function broadcastStatusUpdate() {
+    logDebug('broadcastStatusUpdate: task state changed');
+}
+
 function ensureDataShape(input) {
     const data = input && typeof input === 'object' ? input : {};
     const settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
@@ -106,7 +114,7 @@ function normalizeDispatch(input = {}) {
     return {
         channel: String(input.channel || 'AgentAssistant').trim() || 'AgentAssistant',
         temporaryContact: input.temporaryContact !== false,
-        injectTools: normalizeStringArray(input.injectTools && input.injectTools.length ? input.injectTools : ['VCPForum']),
+        // injectTools: normalizeStringArray(input.injectTools || []), // 已禁用：Agent 自身已知道可用工具，无需额外注入
         maid: String(input.maid || 'VCP系统').trim() || 'VCP系统',
         taskDelegation: !!input.taskDelegation
     };
@@ -175,6 +183,22 @@ async function loadData() {
         }
         const raw = await fsPromises.readFile(DATA_FILE, 'utf-8');
         taskCenterData = ensureDataShape(JSON.parse(raw));
+
+        // 🛡️ 启动时清理：重置所有卡死的 running 标志
+        // 服务器重启后不可能有任务正在运行，running=true 只可能是上次崩溃遗留的脏状态
+        let staleCount = 0;
+        for (const task of taskCenterData.tasks) {
+            if (task.runtime.running) {
+                task.runtime.running = false;
+                task.runtime.lastResult = `error: 服务器重启时发现任务卡死，已自动重置`;
+                task.runtime.lastError = '服务器重启自动重置 running 标志';
+                staleCount++;
+            }
+        }
+        if (staleCount > 0) {
+            console.warn(`[TaskAssistant] 🛡️ 启动清理: 重置了 ${staleCount} 个卡死的任务状态`);
+            await saveData();
+        }
     } catch (e) {
         console.error('[TaskAssistant] 加载 task-center-data.json 失败:', e.message);
         taskCenterData = createDefaultData();
@@ -200,11 +224,13 @@ function renderPromptTemplate(template, replacements) {
     return result;
 }
 
+const WAKEUP_TIMEOUT_MS = 180000; // 3分钟超时，防止无限挂起
+
 function wakeUpAgent(agentName, prompt, dispatchConfig = {}) {
     return new Promise((resolve, reject) => {
         if (!VCP_KEY) return reject(new Error('VCP Key 未配置'));
 
-        const injectTools = normalizeStringArray(dispatchConfig.injectTools || ['VCPForum']).join(',');
+        // inject_tools 功能已禁用：Agent 自身已拥有完整工具集，无需通过任务中心额外注入
         const maid = String(dispatchConfig.maid || 'VCP系统').trim() || 'VCP系统';
         const temporaryContact = dispatchConfig.temporaryContact !== false ? 'true' : 'false';
         const taskDelegation = dispatchConfig.taskDelegation ? 'true' : 'false';
@@ -215,7 +241,6 @@ tool_name:「始」AgentAssistant「末」,
 agent_name:「始」${agentName}「末」,
 prompt:「始」${prompt}「末」,
 temporary_contact:「始」${temporaryContact}「末」,
-inject_tools:「始」${injectTools}「末」,
 task_delegation:「始」${taskDelegation}「末」,
 <<<[END_TOOL_REQUEST]>>>`;
 
@@ -224,6 +249,7 @@ task_delegation:「始」${taskDelegation}「末」,
             port: VCP_PORT,
             path: '/v1/human/tool',
             method: 'POST',
+            timeout: WAKEUP_TIMEOUT_MS,
             headers: {
                 'Content-Type': 'text/plain;charset=UTF-8',
                 'Authorization': `Bearer ${VCP_KEY}`,
@@ -244,6 +270,10 @@ task_delegation:「始」${taskDelegation}「末」,
             });
         });
 
+        req.on('timeout', () => {
+            req.destroy();
+            reject(new Error(`唤醒Agent超时 (${WAKEUP_TIMEOUT_MS / 1000}s): ${agentName}`));
+        });
         req.on('error', e => reject(new Error(`唤醒Agent失败: ${e.message}`)));
         req.write(requestBody);
         req.end();
@@ -291,7 +321,16 @@ async function executeTask(taskId, triggerSource = 'scheduler') {
     }
 
     if (task.runtime.running) {
-        return { skipped: true, reason: 'already-running' };
+        // 🛡️ 卡死检测：如果 running=true 但距上次开始运行已超过 10 分钟，强制重置
+        const STALE_RUNNING_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟
+        const lastRunAt = task.runtime.lastRunTime ? new Date(task.runtime.lastRunTime).getTime() : 0;
+        if (Date.now() - lastRunAt > STALE_RUNNING_TIMEOUT_MS) {
+            console.warn(`[TaskAssistant] 🛡️ 检测到任务 "${task.name}" 卡死 (running=true 但已过 ${Math.round((Date.now() - lastRunAt) / 60000)} 分钟)，强制重置`);
+            task.runtime.running = false;
+            task.runtime.lastError = '任务执行超时，已自动重置 running 标志';
+        } else {
+            return { skipped: true, reason: 'already-running' };
+        }
     }
 
     const startedAt = new Date();
@@ -335,28 +374,78 @@ async function executeTask(taskId, triggerSource = 'scheduler') {
         // ------------------
 
         const dispatchResults = [];
+        const dispatchErrors = [];
         if (agentsToExecute.length === 0) {
             throw new Error('经过随机过滤后没有可执行的 Agent');
         }
 
+        console.log(`[TaskAssistant] 开始派发任务 "${task.name}" 给 ${agentsToExecute.length} 个 Agent: ${agentsToExecute.join(', ')}`);
+
         for (const agentName of agentsToExecute) {
-            const dispatchResult = await wakeUpAgent(agentName, prompt, task.dispatch);
-            if (dispatchResult.status < 200 || dispatchResult.status >= 300) {
-                throw new Error(`Agent ${agentName} 收到异常响应: HTTP ${dispatchResult.status}`);
+            try {
+                const dispatchResult = await wakeUpAgent(agentName, prompt, task.dispatch);
+                if (dispatchResult.status < 200 || dispatchResult.status >= 300) {
+                    const errMsg = `Agent ${agentName} 收到异常响应: HTTP ${dispatchResult.status}`;
+                    console.error(`[TaskAssistant] ${errMsg}`);
+                    dispatchErrors.push({ agentName, error: errMsg });
+                } else {
+                    console.log(`[TaskAssistant] Agent ${agentName} 派发成功 (HTTP ${dispatchResult.status})`);
+                    dispatchResults.push({
+                        agentName,
+                        status: dispatchResult.status
+                    });
+                }
+            } catch (agentErr) {
+                const errMsg = `Agent ${agentName} 派发异常: ${agentErr.message}`;
+                console.error(`[TaskAssistant] ${errMsg}`);
+                dispatchErrors.push({ agentName, error: errMsg });
             }
-            dispatchResults.push({
-                agentName,
-                status: dispatchResult.status
-            });
         }
 
         const finishedAt = new Date();
         task.runtime.running = false;
         task.runtime.lastFinishTime = finishedAt.toISOString();
         task.runtime.lastDurationMs = finishedAt.getTime() - startedAt.getTime();
-        task.runtime.lastResult = `success (${dispatchResults.length} agents${randomTag ? ', picked from ' + randomTag : ''})`;
+
+        // 判定整体状态：全部失败则标记为错误，部分成功则标记为部分成功
+        if (dispatchResults.length === 0) {
+            // 所有 Agent 都失败了
+            const errorSummary = dispatchErrors.map(e => e.error).join('; ');
+            task.runtime.lastResult = `error: 所有 Agent 均失败`;
+            task.runtime.lastError = errorSummary;
+            task.runtime.errorCount += 1;
+            task.meta.updatedAt = finishedAt.toISOString();
+
+            appendHistory({
+                id: `run_${Date.now()}`,
+                taskId: task.id,
+                taskName: task.name,
+                type: task.type,
+                triggerSource,
+                startedAt: startedAt.toISOString(),
+                finishedAt: finishedAt.toISOString(),
+                durationMs: task.runtime.lastDurationMs,
+                status: 'error',
+                agents: agentsToExecute,
+                originalAgents: task.targets.agents,
+                randomTag,
+                message: errorSummary
+            });
+
+            await saveData();
+            throw new Error(errorSummary);
+        }
+
+        // 有至少一个 Agent 成功
+        const hasPartialErrors = dispatchErrors.length > 0;
+        const statusLabel = hasPartialErrors ? 'partial_success' : 'success';
+        const resultMsg = hasPartialErrors
+            ? `partial_success (${dispatchResults.length}/${agentsToExecute.length} agents ok${randomTag ? ', picked from ' + randomTag : ''}, failed: ${dispatchErrors.map(e => e.agentName).join(',')})`
+            : `success (${dispatchResults.length} agents${randomTag ? ', picked from ' + randomTag : ''})`;
+
+        task.runtime.lastResult = resultMsg;
         task.runtime.successCount += 1;
-        task.runtime.lastError = null;
+        task.runtime.lastError = hasPartialErrors ? dispatchErrors.map(e => e.error).join('; ') : null;
         task.meta.updatedAt = finishedAt.toISOString();
 
         appendHistory({
@@ -368,46 +457,52 @@ async function executeTask(taskId, triggerSource = 'scheduler') {
             startedAt: startedAt.toISOString(),
             finishedAt: finishedAt.toISOString(),
             durationMs: task.runtime.lastDurationMs,
-            status: 'success',
-            agents: agentsToExecute, // 记录实际执行的人
-            originalAgents: task.targets.agents, // 保留原始配置参考
+            status: statusLabel,
+            agents: dispatchResults.map(r => r.agentName),
+            failedAgents: dispatchErrors.map(e => e.agentName),
+            originalAgents: task.targets.agents,
             randomTag,
-            message: task.runtime.lastResult
+            message: resultMsg
         });
 
         await saveData();
         return {
             success: true,
-            message: task.runtime.lastResult,
-            executedAgents: agentsToExecute
+            message: resultMsg,
+            executedAgents: dispatchResults.map(r => r.agentName),
+            failedAgents: dispatchErrors
         };
     } catch (e) {
-        const finishedAt = new Date();
-        task.runtime.running = false;
-        task.runtime.lastFinishTime = finishedAt.toISOString();
-        task.runtime.lastDurationMs = finishedAt.getTime() - startedAt.getTime();
-        task.runtime.lastResult = `error: ${e.message}`;
-        task.runtime.lastError = e.message;
-        task.runtime.errorCount += 1;
-        task.meta.updatedAt = finishedAt.toISOString();
+        // 仅处理 buildTaskPrompt / 随机过滤 等前置阶段的异常，以及全部 Agent 失败时的 rethrow
+        if (!task.runtime.lastFinishTime || task.runtime.running) {
+            // 前置阶段异常（prompt构建失败等），需要手动更新 runtime
+            const finishedAt = new Date();
+            task.runtime.running = false;
+            task.runtime.lastFinishTime = finishedAt.toISOString();
+            task.runtime.lastDurationMs = finishedAt.getTime() - startedAt.getTime();
+            task.runtime.lastResult = `error: ${e.message}`;
+            task.runtime.lastError = e.message;
+            task.runtime.errorCount += 1;
+            task.meta.updatedAt = finishedAt.toISOString();
 
-        appendHistory({
-            id: `run_${Date.now()}`,
-            taskId: task.id,
-            taskName: task.name,
-            type: task.type,
-            triggerSource,
-            startedAt: startedAt.toISOString(),
-            finishedAt: finishedAt.toISOString(),
-            durationMs: task.runtime.lastDurationMs,
-            status: 'error',
-            agents: agentsToExecute,
-            originalAgents: task.targets.agents,
-            randomTag,
-            message: e.message
-        });
+            appendHistory({
+                id: `run_${Date.now()}`,
+                taskId: task.id,
+                taskName: task.name,
+                type: task.type,
+                triggerSource,
+                startedAt: startedAt.toISOString(),
+                finishedAt: finishedAt.toISOString(),
+                durationMs: task.runtime.lastDurationMs,
+                status: 'error',
+                agents: agentsToExecute,
+                originalAgents: task.targets.agents,
+                randomTag,
+                message: e.message
+            });
 
-        await saveData();
+            await saveData();
+        }
         throw e;
     }
 }
@@ -471,7 +566,11 @@ function scheduleTask(task) {
             const runAt = new Date(task.schedule.runAt);
             if (!isNaN(runAt.getTime()) && runAt > new Date()) {
                 job = schedule.scheduleJob(runAt, async () => {
-                    await executeTask(task.id, 'once-scheduler');
+                    try {
+                        await executeTask(task.id, 'once-scheduler');
+                    } catch (e) {
+                        console.error(`[TaskAssistant] once-scheduler 执行失败 (${task.id}):`, e.message);
+                    }
                     // 一次性任务执行后禁用
                     const t = taskCenterData.tasks.find(i => i.id === task.id);
                     if (t) {
@@ -490,7 +589,12 @@ function scheduleTask(task) {
 
             const nextTime = new Date(Date.now() + intervalMs);
             job = schedule.scheduleJob(nextTime, async function runAndReschedule() {
-                await executeTask(task.id, 'interval-scheduler');
+                try {
+                    await executeTask(task.id, 'interval-scheduler');
+                } catch (e) {
+                    console.error(`[TaskAssistant] interval-scheduler 执行失败 (${task.id}):`, e.message);
+                }
+                // 无论任务成功与否，都继续调度下一轮
                 const againTime = new Date(Date.now() + intervalMs);
                 const nextJob = schedule.scheduleJob(againTime, runAndReschedule);
                 activeTimers.set(task.id, nextJob);
@@ -502,7 +606,11 @@ function scheduleTask(task) {
             const cronValue = task.schedule.cronValue;
             if (cronValue) {
                 job = schedule.scheduleJob(cronValue, async () => {
-                    await executeTask(task.id, 'cron-scheduler');
+                    try {
+                        await executeTask(task.id, 'cron-scheduler');
+                    } catch (e) {
+                        console.error(`[TaskAssistant] cron-scheduler 执行失败 (${task.id}):`, e.message);
+                    }
                     task.runtime.nextRunTime = job.nextInvocation()?.toISOString() || null;
                     broadcastStatusUpdate();
                 });
