@@ -1,5 +1,12 @@
 @echo off
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
-npx pm2 stop vcp-toolbox-local && npx pm2 delete vcp-toolbox-local
+
+CALL npx pm2 stop vcp-admin 2>nul
+CALL npx pm2 stop vcp-main 2>nul
+CALL npx pm2 delete vcp-admin 2>nul
+CALL npx pm2 delete vcp-main 2>nul
+CALL npx pm2 stop vcp-toolbox-local 2>nul
+CALL npx pm2 delete vcp-toolbox-local 2>nul
+CALL npx pm2 list
 pause
