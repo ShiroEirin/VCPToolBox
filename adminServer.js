@@ -31,9 +31,12 @@ if (!existsSync(VUE_ADMIN_PANEL_INDEX)) {
 // ============================================================
 const loginAttempts = new Map();
 const tempBlocks = new Map();
-const MAX_LOGIN_ATTEMPTS = 5;
+const noCredentialAccess = new Map(); // 无凭据访问计数（防DDoS探测）
+const MAX_LOGIN_ATTEMPTS = 5; // 错误凭据上限
+const MAX_NO_CREDENTIAL_REQUESTS = 100; // 无凭据访问上限（防DDoS探测）
 const LOGIN_ATTEMPT_WINDOW = 15 * 60 * 1000;
-const TEMP_BLOCK_DURATION = 30 * 60 * 1000;
+const TEMP_BLOCK_DURATION = 30 * 60 * 1000; // 错误凭据触发封禁时长
+const NO_CREDENTIAL_BLOCK_DURATION = 15 * 60 * 1000; // 无凭据DDoS触发封禁时长
 
 // ============================================================
 // Express App
@@ -125,7 +128,11 @@ const adminAuth = (req, res, next) => {
 
     // 验证凭据
     if (!credentials || credentials.name !== ADMIN_USERNAME || credentials.pass !== ADMIN_PASSWORD) {
-        if (clientIp && !isReadOnlyPath) {
+        // 🌟 关键修复：只有当用户主动提供了凭据（但凭据错误）时才计入失败次数
+        // 当 credentials 为 null 时（如 cookie 过期、用户登出后面板后台轮询），
+        // 不计入失败次数，避免面板挂着时 cookie 过期导致立即封禁 IP
+        const isActiveLoginAttempt = !!credentials;
+        if (clientIp && !isReadOnlyPath && isActiveLoginAttempt) {
             const now = Date.now();
             let attemptInfo = loginAttempts.get(clientIp) || { count: 0, firstAttempt: now };
             if (now - attemptInfo.firstAttempt > LOGIN_ATTEMPT_WINDOW) {
@@ -137,6 +144,28 @@ const adminAuth = (req, res, next) => {
                 loginAttempts.delete(clientIp);
             } else {
                 loginAttempts.set(clientIp, attemptInfo);
+            }
+        }
+        // 🌟 防DDoS：无凭据访问独立计数，阈值更宽松（不影响正常 cookie 过期场景）
+        else if (clientIp && !isReadOnlyPath) {
+            const now = Date.now();
+            let accessInfo = noCredentialAccess.get(clientIp) || { count: 0, firstAccess: now };
+
+            if (now - accessInfo.firstAccess > LOGIN_ATTEMPT_WINDOW) {
+                accessInfo = { count: 0, firstAccess: now };
+            }
+
+            accessInfo.count++;
+
+            if (accessInfo.count >= MAX_NO_CREDENTIAL_REQUESTS) {
+                console.warn(`[AdminServer] IP ${clientIp} blocked for ${NO_CREDENTIAL_BLOCK_DURATION / 60000} min — excessive unauthenticated requests (${accessInfo.count}/${MAX_NO_CREDENTIAL_REQUESTS}).`);
+                tempBlocks.set(clientIp, { expires: now + NO_CREDENTIAL_BLOCK_DURATION });
+                noCredentialAccess.delete(clientIp);
+            } else {
+                noCredentialAccess.set(clientIp, accessInfo);
+                if (accessInfo.count % 10 === 0) {
+                    console.log(`[AdminServer] Unauthenticated access from IP: ${clientIp}. Count: ${accessInfo.count}/${MAX_NO_CREDENTIAL_REQUESTS}`);
+                }
             }
         }
 
