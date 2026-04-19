@@ -6,7 +6,7 @@ const dotenv = require('dotenv');
 dotenv.config({ path: 'config.env' });
 
 const path = require('path');
-const fs = require('fs').promises;
+const { promises: fs, existsSync } = require('fs');
 const http = require('http');
 const basicAuth = require('basic-auth');
 const cors = require('cors');
@@ -17,15 +17,26 @@ const DEBUG_MODE = (process.env.DebugMode || 'False').toLowerCase() === 'true';
 
 const ADMIN_USERNAME = process.env.AdminUsername;
 const ADMIN_PASSWORD = process.env.AdminPassword;
+const VUE_ADMIN_PANEL_ROOT = path.join(__dirname, 'AdminPanel-Vue', 'dist');
+const LEGACY_ADMIN_PANEL_BACKUP_ROOT = path.join(__dirname, 'AdminPanel-backup-20260408-201832');
+const VUE_ADMIN_PANEL_INDEX = path.join(VUE_ADMIN_PANEL_ROOT, 'index.html');
+
+if (!existsSync(VUE_ADMIN_PANEL_INDEX)) {
+    console.warn(`[AdminServer] Vue AdminPanel build not found: ${VUE_ADMIN_PANEL_INDEX}`);
+    console.warn('[AdminServer] Run "npm run build" inside AdminPanel-Vue before starting the admin server.');
+}
 
 // ============================================================
 // 登录防暴力破解
 // ============================================================
 const loginAttempts = new Map();
 const tempBlocks = new Map();
-const MAX_LOGIN_ATTEMPTS = 5;
+const noCredentialAccess = new Map(); // 无凭据访问计数（防DDoS探测）
+const MAX_LOGIN_ATTEMPTS = 5; // 错误凭据上限
+const MAX_NO_CREDENTIAL_REQUESTS = 100; // 无凭据访问上限（防DDoS探测）
 const LOGIN_ATTEMPT_WINDOW = 15 * 60 * 1000;
-const TEMP_BLOCK_DURATION = 30 * 60 * 1000;
+const TEMP_BLOCK_DURATION = 30 * 60 * 1000; // 错误凭据触发封禁时长
+const NO_CREDENTIAL_BLOCK_DURATION = 15 * 60 * 1000; // 无凭据DDoS触发封禁时长
 
 // ============================================================
 // Express App
@@ -117,7 +128,11 @@ const adminAuth = (req, res, next) => {
 
     // 验证凭据
     if (!credentials || credentials.name !== ADMIN_USERNAME || credentials.pass !== ADMIN_PASSWORD) {
-        if (clientIp && !isReadOnlyPath) {
+        // 🌟 关键修复：只有当用户主动提供了凭据（但凭据错误）时才计入失败次数
+        // 当 credentials 为 null 时（如 cookie 过期、用户登出后面板后台轮询），
+        // 不计入失败次数，避免面板挂着时 cookie 过期导致立即封禁 IP
+        const isActiveLoginAttempt = !!credentials;
+        if (clientIp && !isReadOnlyPath && isActiveLoginAttempt) {
             const now = Date.now();
             let attemptInfo = loginAttempts.get(clientIp) || { count: 0, firstAttempt: now };
             if (now - attemptInfo.firstAttempt > LOGIN_ATTEMPT_WINDOW) {
@@ -131,11 +146,33 @@ const adminAuth = (req, res, next) => {
                 loginAttempts.set(clientIp, attemptInfo);
             }
         }
+        // 🌟 防DDoS：无凭据访问独立计数，阈值更宽松（不影响正常 cookie 过期场景）
+        else if (clientIp && !isReadOnlyPath) {
+            const now = Date.now();
+            let accessInfo = noCredentialAccess.get(clientIp) || { count: 0, firstAccess: now };
+
+            if (now - accessInfo.firstAccess > LOGIN_ATTEMPT_WINDOW) {
+                accessInfo = { count: 0, firstAccess: now };
+            }
+
+            accessInfo.count++;
+
+            if (accessInfo.count >= MAX_NO_CREDENTIAL_REQUESTS) {
+                console.warn(`[AdminServer] IP ${clientIp} blocked for ${NO_CREDENTIAL_BLOCK_DURATION / 60000} min — excessive unauthenticated requests (${accessInfo.count}/${MAX_NO_CREDENTIAL_REQUESTS}).`);
+                tempBlocks.set(clientIp, { expires: now + NO_CREDENTIAL_BLOCK_DURATION });
+                noCredentialAccess.delete(clientIp);
+            } else {
+                noCredentialAccess.set(clientIp, accessInfo);
+                if (accessInfo.count % 10 === 0) {
+                    console.log(`[AdminServer] Unauthenticated access from IP: ${clientIp}. Count: ${accessInfo.count}/${MAX_NO_CREDENTIAL_REQUESTS}`);
+                }
+            }
+        }
 
         if (isVerifyEndpoint || req.path.startsWith('/admin_api') ||
             (req.headers.accept && req.headers.accept.includes('application/json'))) {
             return res.status(401).json({ error: 'Unauthorized' });
-        } else if (req.path.startsWith('/AdminPanel')) {
+        } else if (req.path.startsWith('/AdminPanel') || req.path.startsWith('/AdminPanelLegacy')) {
             return res.redirect('/AdminPanel/login.html');
         } else {
             res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"');
@@ -150,8 +187,21 @@ const adminAuth = (req, res, next) => {
 
 app.use(adminAuth);
 
-// 静态文件
-app.use('/AdminPanel', express.static(path.join(__dirname, 'AdminPanel')));
+// 静态文件：默认托管 Vue 构建产物，并保留 legacy 路径兼容旧链接
+app.use('/AdminPanel', express.static(VUE_ADMIN_PANEL_ROOT));
+// Static serving targets the Vue build by default and keeps the legacy route alive.
+app.use('/AdminPanel', express.static(VUE_ADMIN_PANEL_ROOT));
+app.use('/AdminPanelLegacy', express.static(VUE_ADMIN_PANEL_ROOT));
+
+function serveVueAdminPanelApp(req, res, next) {
+    if (path.extname(req.path)) {
+        return next();
+    }
+    return res.sendFile(VUE_ADMIN_PANEL_INDEX);
+}
+
+app.get(/^\/AdminPanel(?:\/.*)?$/, serveVueAdminPanelApp);
+app.get(/^\/AdminPanelLegacy(?:\/.*)?$/, serveVueAdminPanelApp);
 
 // 默认路由：访问根路径重定向到 AdminPanel
 app.get('/', (req, res) => {
@@ -412,6 +462,8 @@ app.post('/admin_api/config/main/reload-notify', async (req, res) => {
 app.listen(ADMIN_PORT, () => {
     console.log(`[AdminServer] 管理面板独立进程已启动，监听端口 ${ADMIN_PORT}`);
     console.log(`[AdminServer] 管理面板地址: http://localhost:${ADMIN_PORT}/AdminPanel/`);
+    console.log(`[AdminServer] Vue 面板目录: ${VUE_ADMIN_PANEL_ROOT}`);
+    console.log(`[AdminServer] Legacy 备份目录: ${LEGACY_ADMIN_PANEL_BACKUP_ROOT}`);
     console.log(`[AdminServer] 主服务地址: http://localhost:${MAIN_PORT}`);
     console.log(`[AdminServer] 本地处理模块: ${localModules.join(', ')}`);
     console.log(`[AdminServer] 未匹配的 /admin_api 请求将自动代理到主进程 PORT ${MAIN_PORT}`);

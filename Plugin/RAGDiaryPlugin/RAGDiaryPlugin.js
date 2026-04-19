@@ -123,39 +123,39 @@ class RAGDiaryPlugin {
             this.lastConfigHash = currentConfigHash;
 
             if (!currentConfigHash) {
-                console.log('[RAGDiaryPlugin] 未找到 rag_tags.json 文件，跳过缓存处理。');
+                console.log('[RAGDiaryPlugin] 未找到 rag_tags.json 文件：跳过 RAG 标签缓存加载，但继续初始化 AIMemo / MetaThinking / FoldingStore 等子系统。');
                 this.ragConfig = {};
-                return;
-            }
-
-            let cache = null;
-            try {
-                const cacheData = await fs.readFile(cachePath, 'utf-8');
-                cache = JSON.parse(cacheData);
-            } catch (e) {
-                console.log('[RAGDiaryPlugin] 缓存文件不存在或已损坏，将重新构建。');
-            }
-
-            if (cache && cache.sourceHash === currentConfigHash) {
-                // --- 缓存命中 ---
-                console.log('[RAGDiaryPlugin] 缓存有效，从磁盘加载向量...');
-                this.ragConfig = JSON.parse(await fs.readFile(configPath, 'utf-8'));
-                this.enhancedVectorCache = cache.vectors;
-                console.log(`[RAGDiaryPlugin] 成功从缓存加载 ${Object.keys(this.enhancedVectorCache).length} 个向量。`);
             } else {
-                // --- 缓存失效或未命中 ---
-                if (cache) {
-                    console.log('[RAGDiaryPlugin] rag_tags.json 已更新，正在重建缓存...');
-                } else {
-                    console.log('[RAGDiaryPlugin] 未找到有效缓存，首次构建向量缓存...');
+                let cache = null;
+                try {
+                    const cacheData = await fs.readFile(cachePath, 'utf-8');
+                    cache = JSON.parse(cacheData);
+                } catch (e) {
+                    console.log('[RAGDiaryPlugin] 缓存文件不存在或已损坏，将重新构建。');
                 }
 
-                const configData = await fs.readFile(configPath, 'utf-8');
-                this.ragConfig = JSON.parse(configData);
+                if (cache && cache.sourceHash === currentConfigHash) {
+                    // --- 缓存命中 ---
+                    console.log('[RAGDiaryPlugin] 缓存有效，从磁盘加载向量...');
+                    this.ragConfig = JSON.parse(await fs.readFile(configPath, 'utf-8'));
+                    this.enhancedVectorCache = cache.vectors;
+                    console.log(`[RAGDiaryPlugin] 成功从缓存加载 ${Object.keys(this.enhancedVectorCache).length} 个向量。`);
+                } else {
+                    // --- 缓存失效或未命中 ---
+                    if (cache) {
+                        console.log('[RAGDiaryPlugin] rag_tags.json 已更新，正在重建缓存...');
+                    } else {
+                        console.log('[RAGDiaryPlugin] 未找到有效缓存，首次构建向量缓存...');
+                    }
 
-                // 调用 _buildAndSaveCache 来生成向量
-                await this._buildAndSaveCache(currentConfigHash, cachePath);
+                    const configData = await fs.readFile(configPath, 'utf-8');
+                    this.ragConfig = JSON.parse(configData);
+
+                    // 调用 _buildAndSaveCache 来生成向量
+                    await this._buildAndSaveCache(currentConfigHash, cachePath);
+                }
             }
+
 
         } catch (error) {
             console.error('[RAGDiaryPlugin] 加载配置文件或处理缓存时发生严重错误:', error);
@@ -167,20 +167,46 @@ class RAGDiaryPlugin {
 
         // --- 🌟 V2折叠：初始化 FoldingStore（热重载安全：先关旧实例再开新实例） ---
         try {
+            const foldingDbPath = path.join(__dirname, 'folding_store.db');
+            const foldingStoreOptions = {
+                maxEntries: parseInt(process.env.FOLDING_STORE_MAX_ENTRIES) || 200,
+                evictCount: parseInt(process.env.FOLDING_STORE_EVICT_COUNT) || 20
+            };
+
+            console.log(
+                `[RAGDiaryPlugin] FoldingStore 初始化开始: ` +
+                `dbPath=${foldingDbPath}, ` +
+                `cwd=${process.cwd()}, ` +
+                `pluginDir=${__dirname}, ` +
+                `options=${JSON.stringify(foldingStoreOptions)}`
+            );
+
             // 防止热重载时产生幽灵实例：如果旧 store 存在，先优雅关闭
             if (this.foldingStore) {
                 console.log('[RAGDiaryPlugin] 检测到 FoldingStore 旧实例，正在关闭以防竞态...');
                 this.foldingStore.shutdown();
                 this.foldingStore = null;
+                console.log('[RAGDiaryPlugin] FoldingStore 旧实例已关闭。');
             }
 
-            const foldingDbPath = path.join(__dirname, 'folding_store.db');
-            this.foldingStore = new FoldingStore(foldingDbPath, {
-                maxEntries: parseInt(process.env.FOLDING_STORE_MAX_ENTRIES) || 200,
-                evictCount: parseInt(process.env.FOLDING_STORE_EVICT_COUNT) || 20
-            });
+            this.foldingStore = new FoldingStore(foldingDbPath, foldingStoreOptions);
+
+            if (this.foldingStore) {
+                const stats = this.foldingStore.getStats();
+                console.log(
+                    `[RAGDiaryPlugin] FoldingStore 初始化完成: ` +
+                    `available=${stats.available}, count=${stats.count}, maxEntries=${stats.maxEntries}`
+                );
+            } else {
+                console.warn('[RAGDiaryPlugin] FoldingStore 初始化结束，但实例为空，折叠功能将不可用。');
+            }
         } catch (e) {
-            console.error('[RAGDiaryPlugin] FoldingStore 初始化失败，折叠功能将不可用:', e.message);
+            console.error('[RAGDiaryPlugin] FoldingStore 初始化失败，折叠功能将不可用。');
+            console.error(`[RAGDiaryPlugin] FoldingStore 初始化失败详情: dbPath=${path.join(__dirname, 'folding_store.db')}, cwd=${process.cwd()}, pluginDir=${__dirname}`);
+            console.error('[RAGDiaryPlugin] FoldingStore 初始化错误消息:', e.message);
+            if (e.stack) {
+                console.error('[RAGDiaryPlugin] FoldingStore 初始化错误堆栈:', e.stack);
+            }
             this.foldingStore = null;
         }
     }
