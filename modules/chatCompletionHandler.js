@@ -157,7 +157,27 @@ async function fetchWithRetry(
       });
       cleanup();
 
-      if (response.status === 500 || response.status === 503 || response.status === 429) {
+      let shouldRetryStatus = response.status === 500 || response.status === 503 || response.status === 429;
+      let retryMessage = response.statusText;
+
+      // Gemini / NewAPI 偶发特殊空回：上游可能以 401 返回包含 token 的错误文本
+      // 例如：{"error":{"message":"Invalid token ..."}}
+      // 这类并非 VCP 本地 Key 配置错误，而是上游瞬时 token 异常，可安全纳入重试。
+      if (response.status === 401) {
+        try {
+          const responseBodyText = await response.clone().text();
+          if (responseBodyText.toLowerCase().includes('token')) {
+            shouldRetryStatus = true;
+            retryMessage = responseBodyText || response.statusText;
+          }
+        } catch (bodyReadError) {
+          if (debugMode) {
+            console.warn(`[Fetch Retry] Failed to inspect 401 response body: ${bodyReadError.message}`);
+          }
+        }
+      }
+
+      if (shouldRetryStatus) {
         const currentDelay = delay * (i + 1);
         if (debugMode) {
           console.warn(
@@ -165,7 +185,7 @@ async function fetchWithRetry(
           );
         }
         if (onRetry) {
-          await onRetry(i + 1, { status: response.status, message: response.statusText });
+          await onRetry(i + 1, { status: response.status, message: retryMessage });
         }
         await new Promise(resolve => setTimeout(resolve, currentDelay));
         continue;
@@ -360,14 +380,63 @@ class ChatCompletionHandler {
     const id = req.body.requestId || req.body.messageId;
     const abortController = new AbortController();
 
+    let clientDisconnectedAbortReason = null;
+    let cleanupClientDisconnectListeners = () => {};
+
     if (id) {
       activeRequests.set(id, {
         req,
         res,
         abortController,
         timestamp: Date.now(),
-        aborted: false // 修复 Bug #4: 添加中止标志
+        aborted: false, // 修复 Bug #4: 添加中止标志
+        abortReason: null
       });
+
+      // 通用前端兼容：如果客户端没有显式调用 /v1/interrupt，
+      // 但 HTTP/SSE 连接已经断开，则把传输层断联转换为同一条级联中止链路。
+      // 注意：这里不能区分“用户点停止 / 刷新页面 / 网络断线 / 代理断开”，统一视为客户端不再等待响应。
+      const triggerClientDisconnectAbort = (reason) => {
+        const requestData = activeRequests.get(id);
+        if (!requestData) return;
+
+        // 正常完成的响应也会触发 close，此时不能误杀已经完成的请求。
+        if (res.writableEnded) return;
+
+        if (requestData.aborted) return;
+
+        requestData.aborted = true;
+        requestData.abortReason = reason;
+        clientDisconnectedAbortReason = reason;
+
+        if (!abortController.signal.aborted) {
+          abortController.abort();
+        }
+
+        console.log(`[ClientDisconnect] Request ${id} aborted due to ${reason}. Upstream cascade abort triggered.`);
+      };
+
+      const onReqAborted = () => triggerClientDisconnectAbort('request_aborted');
+      const onReqClose = () => {
+        if (req.aborted && !res.writableEnded) {
+          triggerClientDisconnectAbort('request_close_after_abort');
+        }
+      };
+      const onResClose = () => {
+        if (!res.writableEnded) {
+          triggerClientDisconnectAbort('response_close_before_finish');
+        }
+      };
+
+      req.on('aborted', onReqAborted);
+      req.on('close', onReqClose);
+      res.on('close', onResClose);
+
+      cleanupClientDisconnectListeners = () => {
+        req.off('aborted', onReqAborted);
+        req.off('close', onReqClose);
+        res.off('close', onResClose);
+      };
     }
 
     let originalBody = req.body;
@@ -758,10 +827,11 @@ class ChatCompletionHandler {
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        // When a request is aborted, the '/v1/interrupt' handler is responsible for closing the response stream.
-        // This catch block should simply log the event and stop processing to prevent race conditions
-        // and avoid throwing an uncaught exception if it also tries to write to the already-closed stream.
-        console.log(`[Abort] Caught AbortError for request ${id}. Execution will be halted. The interrupt handler is responsible for the client response.`);
+        // 显式 /v1/interrupt 或客户端断联都会走到这里。
+        // 如果是客户端断联，响应通道通常已经不可写；如果是显式 interrupt，则由 interrupt 路由负责关闭响应流。
+        // 这里仅停止后续处理，避免与中止链路竞态写入。
+        const abortReason = clientDisconnectedAbortReason || activeRequests.get(id)?.abortReason || 'explicit_interrupt_or_abort';
+        console.log(`[Abort] Caught AbortError for request ${id}. Execution halted. reason=${abortReason}`);
         return; // Stop processing and allow the 'finally' block to clean up.
       }
       // Only log full stack trace for non-abort errors
@@ -842,6 +912,8 @@ class ChatCompletionHandler {
         }
       }
     } finally {
+      cleanupClientDisconnectListeners();
+
       if (id) {
         const requestData = activeRequests.get(id);
         if (requestData) {
@@ -853,6 +925,7 @@ class ChatCompletionHandler {
           if (!requestData.aborted && requestData.abortController && !requestData.abortController.signal.aborted) {
             if (res.destroyed && !res.writableEnded) {
               requestData.aborted = true;
+              requestData.abortReason = 'response_destroyed_in_finally';
               requestData.abortController.abort();
             }
           }
