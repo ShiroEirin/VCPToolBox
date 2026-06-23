@@ -7,6 +7,15 @@ const fs = require('fs').promises;
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const finalContextStore = require('./finalContextStore.js');
+
+// 多模态配置真相源（JSON 优先 + 热更新），用于在请求时动态拉取 MultiModalForceTranslateModels
+let multiModalConfigStore = null;
+try {
+  multiModalConfigStore = require('./multiModalConfigStore.js');
+} catch (storeError) {
+  multiModalConfigStore = null;
+}
 
 // 🌟 核心网络优化：引入防御性长连接池 (Keep-Alive Pool)
 // 解决 "-1s Socket Hang Up" 与上游代理秒断僵尸连接的问题
@@ -30,6 +39,245 @@ const ToolExecutor = require('./vcpLoop/toolExecutor');
 const StreamHandler = require('./handlers/streamHandler');
 const NonStreamHandler = require('./handlers/nonStreamHandler');
 
+const VCP_TOOL_USE_FORBIDDEN_PLACEHOLDER = '[[VCPToolUse=Forbidden]]';
+
+function parseBooleanEnv(value, defaultValue = false) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  return String(value).toLowerCase() === 'true';
+}
+
+function normalizeClientIp(ip) {
+  if (ip && ip.substr(0, 7) === '::ffff:') {
+    return ip.substr(7);
+  }
+  return ip || 'unknown';
+}
+
+class ResponseReplayCache {
+  constructor({ enabled = false, maxEntries = 100, debugMode = false } = {}) {
+    this.enabled = enabled;
+    this.maxEntries = Number.isFinite(maxEntries) && maxEntries > 0 ? Math.floor(maxEntries) : 100;
+    this.debugMode = debugMode;
+    this.cache = new Map();
+  }
+
+  buildKey(clientIp, messageId) {
+    if (!this.enabled || !messageId) return null;
+    return `${normalizeClientIp(clientIp)}::${String(messageId)}`;
+  }
+
+  get(key) {
+    if (!this.enabled || !key || !this.cache.has(key)) return null;
+    const value = this.cache.get(key);
+    this.cache.delete(key);
+    this.cache.set(key, value);
+    return value;
+  }
+
+  set(key, entry) {
+    if (!this.enabled || !key || !entry || !Array.isArray(entry.chunks) || entry.chunks.length === 0) return;
+    if (this.cache.has(key)) this.cache.delete(key);
+    this.cache.set(key, {
+      ...entry,
+      chunks: entry.chunks.map(chunk => Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(String(chunk))),
+      cachedAt: Date.now()
+    });
+
+    while (this.cache.size > this.maxEntries) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+
+    if (this.debugMode) {
+      console.log(`[ResponseReplayCache] Cached response for key=${key}. entries=${this.cache.size}/${this.maxEntries}`);
+    }
+  }
+
+  replay(key, req, res) {
+    const entry = this.get(key);
+    if (!entry) return false;
+
+    if (this.debugMode) {
+      console.log(`[ResponseReplayCache] Replaying cached response for key=${key}. No tool chain will be executed.`);
+    }
+
+    if (!res.headersSent) {
+      res.status(entry.statusCode || 200);
+      for (const [name, value] of Object.entries(entry.headers || {})) {
+        if (value !== undefined && value !== null) {
+          res.setHeader(name, value);
+        }
+      }
+    }
+
+    for (const chunk of entry.chunks) {
+      if (res.writableEnded || res.destroyed) break;
+      res.write(chunk);
+    }
+
+    if (!res.writableEnded && !res.destroyed) {
+      res.end();
+    }
+
+    return true;
+  }
+}
+
+function installResponseCacheRecorder(res, { cache, cacheKey, id, clientIp, streamMode, debugMode }) {
+  if (!cache?.enabled || !cacheKey || res.__vcpReplayCacheRecorderInstalled) {
+    return () => {};
+  }
+
+  res.__vcpReplayCacheRecorderInstalled = true;
+
+  const capturedChunks = [];
+  const originalWrite = res.write.bind(res);
+  const originalEnd = res.end.bind(res);
+  let finalized = false;
+
+  const captureChunk = (chunk, encoding) => {
+    if (chunk === undefined || chunk === null) return;
+    if (Buffer.isBuffer(chunk)) {
+      capturedChunks.push(Buffer.from(chunk));
+    } else {
+      capturedChunks.push(Buffer.from(String(chunk), typeof encoding === 'string' ? encoding : 'utf8'));
+    }
+  };
+
+  res.write = function patchedWrite(chunk, encoding, callback) {
+    captureChunk(chunk, encoding);
+    return originalWrite(chunk, encoding, callback);
+  };
+
+  res.end = function patchedEnd(chunk, encoding, callback) {
+    captureChunk(chunk, encoding);
+    return originalEnd(chunk, encoding, callback);
+  };
+
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
+
+    const statusCode = res.statusCode || 200;
+    if (statusCode >= 200 && statusCode < 500 && capturedChunks.length > 0) {
+      cache.set(cacheKey, {
+        id,
+        clientIp,
+        streamMode,
+        statusCode,
+        headers: res.getHeaders ? res.getHeaders() : {},
+        chunks: capturedChunks
+      });
+    } else if (debugMode) {
+      console.log(`[ResponseReplayCache] Skip caching key=${cacheKey}, status=${statusCode}, chunks=${capturedChunks.length}`);
+    }
+  };
+
+  res.once('finish', finalize);
+
+  return finalize;
+}
+
+/**
+ * 从顶层 system 提示词中检测并移除 VCP 工具禁用占位符。
+ * 只扫描首个连续 system 消息区间，避免普通上下文/用户内容误触发。
+ * @param {Array} messages
+ * @returns {boolean}
+ */
+function consumeVcpToolUseForbiddenPlaceholder(messages) {
+  if (!Array.isArray(messages)) return false;
+
+  let found = false;
+  for (const msg of messages) {
+    if (!msg || msg.role !== 'system') break;
+
+    if (typeof msg.content === 'string') {
+      if (msg.content.includes(VCP_TOOL_USE_FORBIDDEN_PLACEHOLDER)) {
+        found = true;
+        msg.content = msg.content.split(VCP_TOOL_USE_FORBIDDEN_PLACEHOLDER).join('');
+      }
+    } else if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (part?.type === 'text' && typeof part.text === 'string' && part.text.includes(VCP_TOOL_USE_FORBIDDEN_PLACEHOLDER)) {
+          found = true;
+          part.text = part.text.split(VCP_TOOL_USE_FORBIDDEN_PLACEHOLDER).join('');
+        }
+      }
+    }
+  }
+
+  return found;
+}
+
+/**
+ * 检测当前真实后端模型是否命中纯文本模型 Tag 列表（不区分大小写）。
+ * 配合模型动态路由（VCPModelAuto / SemanticModelRouter）使用：
+ * 当语义路由切换到不支持多模态的模型（如 deepseek-v4 / GLM-4.5）时，
+ * 自动把 base64 翻译为文本，避免上游 API 报错或丢图。
+ *
+ * @param {string} modelName 真实后端模型名（已经过 ModelRedirect 与语义路由解析）
+ * @param {string[]} tagList tag 数组（已统一为小写，由 server.js 解析）
+ * @returns {boolean} 是否命中
+ */
+function isTextOnlyModelByTag(modelName, tagList) {
+  if (!modelName || !Array.isArray(tagList) || tagList.length === 0) return false;
+  const lowerName = String(modelName).toLowerCase();
+  for (const tag of tagList) {
+    if (!tag) continue;
+    if (lowerName.includes(tag)) return true;
+  }
+  return false;
+}
+
+/**
+ * 检测一条消息（或其 content 数组）中是否包含 base64 多模态部分。
+ * 仅用于 Force-Translate 触发判定，避免在没有图片/音视频的请求里空转翻译插件。
+ *
+ * @param {Array} messages 消息数组
+ * @returns {boolean}
+ */
+function messagesContainBase64Media(messages) {
+  if (!Array.isArray(messages)) return false;
+  for (const msg of messages) {
+    if (!msg || (msg.role !== 'user' && msg.role !== 'system')) continue;
+    if (!Array.isArray(msg.content)) continue;
+    for (const part of msg.content) {
+      if (
+        part &&
+        part.type === 'image_url' &&
+        part.image_url &&
+        typeof part.image_url.url === 'string' &&
+        /^data:(image|audio|video)\/[^;]+;base64,/.test(part.image_url.url)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Copy non-enumerable array metadata produced by upstream preprocessors.
+ * OneRing attaches __oneRingMeta to the messages array itself; any pipeline
+ * step that returns a fresh array must preserve it explicitly.
+ */
+function copyArrayMetadata(source, target) {
+  if (!Array.isArray(source) || !Array.isArray(target)) return target;
+
+  for (const key of Object.getOwnPropertyNames(source)) {
+    if (/^(?:length|\d+)$/.test(key)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(source, key);
+    if (!descriptor) continue;
+    try {
+      Object.defineProperty(target, key, descriptor);
+    } catch (e) {
+      // Metadata preservation is best-effort and must not break request flow.
+    }
+  }
+
+  return target;
+}
+
 /**
  * 检测工具返回结果是否为错误
  * @param {any} result - 工具返回的结果
@@ -42,23 +290,36 @@ function isToolResultError(result) {
 
   // 1. 对象形式的错误检测
   if (typeof result === 'object') {
-    // 检查常见的错误标识字段
-    if (result.error === true ||
+    // 判定顺序必须先看明确成功标志：
+    // 工具成功返回的正文/嵌套字段里可能包含“拒绝/错误/error”等业务文本，不能因此覆盖 status: success。
+    if (
+      result.success === true ||
+      result.status === 'success' ||
+      result.status === 'ok' ||
+      result.ok === true
+    ) {
+      return false;
+    }
+
+    // 然后只信任结构化失败字段。
+    if (
+      result.error === true ||
       result.success === false ||
       result.status === 'error' ||
       result.status === 'failed' ||
-      result.code?.toString().startsWith('4') || // 4xx 错误码
-      result.code?.toString().startsWith('5')) { // 5xx 错误码
+      result.status === 'failure' ||
+      result.ok === false
+    ) {
       return true;
     }
 
-    // 对象转字符串后检查
-    try {
-      const jsonStr = JSON.stringify(result).toLowerCase();
-      return jsonStr.includes('"error"') && !jsonStr.includes('"error":false');
-    } catch (e) {
-      return false;
+    const codeValue = result.code ?? result.statusCode ?? result.httpStatus;
+    const numericCode = Number(codeValue);
+    if (Number.isFinite(numericCode) && numericCode >= 400 && numericCode < 600) {
+      return true;
     }
+
+    return false;
   }
 
   // 2. 字符串形式的错误检测（模糊匹配）
@@ -75,10 +336,8 @@ function isToolResultError(result) {
       }
     }
 
-    // 模糊匹配（需要更谨慎）
-    // 只有在明确包含"错误"或"失败"这类强指示词时才认为是错误
-    if (result.includes('错误') || result.includes('失败') ||
-      lowerResult.includes('error:') || lowerResult.includes('failed:')) {
+    // 字符串仅接受显式错误前缀/格式，不再因正文任意位置包含“错误/失败/拒绝”等业务文本而误判。
+    if (lowerResult.includes('error:') || lowerResult.includes('failed:')) {
       return true;
     }
   }
@@ -114,15 +373,50 @@ async function getRealAuthCode(debugMode = false) {
   }
 }
 
+function applyModelFallbackForAttempt(options, candidates, attemptIndex, debugMode = false) {
+  if (!Array.isArray(candidates) || candidates.length === 0 || !options || typeof options.body !== 'string') {
+    return options;
+  }
+
+  const selectedModel = candidates[Math.min(attemptIndex, candidates.length - 1)];
+  if (!selectedModel) return options;
+
+  try {
+    const parsedBody = JSON.parse(options.body);
+    if (!parsedBody || typeof parsedBody !== 'object') return options;
+
+    const previousModel = parsedBody.model;
+    parsedBody.model = selectedModel;
+
+    if (debugMode && previousModel !== selectedModel) {
+      console.log(`[SemanticModelRouter] 容灾切换上游模型: ${previousModel} -> ${selectedModel} (attempt=${attemptIndex + 1})`);
+    }
+
+    return {
+      ...options,
+      body: JSON.stringify(parsedBody)
+    };
+  } catch (error) {
+    if (debugMode) {
+      console.warn(`[SemanticModelRouter] 无法为本次重试替换模型，继续使用原始请求体: ${error.message}`);
+    }
+    return options;
+  }
+}
+
 // A helper function to handle fetch with retries for specific status codes
 // connectionTimeout: 连接超时安全网，防止上游 API 静默挂起导致永久等待（仅覆盖到收到响应头为止）
 async function fetchWithRetry(
   url,
   options,
-  { retries = 3, delay = 1000, debugMode = false, onRetry = null, connectionTimeout = 120000 } = {},
+  { retries = 3, delay = 1000, debugMode = false, onRetry = null, connectionTimeout = 120000, modelFallbackCandidates = null } = {},
 ) {
   const { default: fetch } = await import('node-fetch');
-  for (let i = 0; i < retries; i++) {
+  const maxAttempts = Math.max(
+    Number.isFinite(Number(retries)) && Number(retries) > 0 ? Math.floor(Number(retries)) : 1,
+    Array.isArray(modelFallbackCandidates) ? modelFallbackCandidates.length : 0
+  );
+  for (let i = 0; i < maxAttempts; i++) {
     // 为每次尝试创建独立的中止控制器，用于超时保护
     const attemptController = new AbortController();
     let didTimeout = false;
@@ -150,14 +444,35 @@ async function fetchWithRetry(
     };
 
     try {
+      const attemptOptions = applyModelFallbackForAttempt(options, modelFallbackCandidates, i, debugMode);
       const response = await fetch(url, {
-        ...options,
+        ...attemptOptions,
         agent: getFetchAgent, // 注入防御性长连接池
         signal: attemptController.signal,
       });
       cleanup();
 
-      if (response.status === 500 || response.status === 503 || response.status === 429) {
+      let shouldRetryStatus = response.status === 500 || response.status === 503 || response.status === 429;
+      let retryMessage = response.statusText;
+
+      // Gemini / NewAPI 偶发特殊空回：上游可能以 401 返回包含 token 的错误文本
+      // 例如：{"error":{"message":"Invalid token ..."}}
+      // 这类并非 VCP 本地 Key 配置错误，而是上游瞬时 token 异常，可安全纳入重试。
+      if (response.status === 401) {
+        try {
+          const responseBodyText = await response.clone().text();
+          if (responseBodyText.toLowerCase().includes('token')) {
+            shouldRetryStatus = true;
+            retryMessage = responseBodyText || response.statusText;
+          }
+        } catch (bodyReadError) {
+          if (debugMode) {
+            console.warn(`[Fetch Retry] Failed to inspect 401 response body: ${bodyReadError.message}`);
+          }
+        }
+      }
+
+      if (shouldRetryStatus) {
         const currentDelay = delay * (i + 1);
         if (debugMode) {
           console.warn(
@@ -165,7 +480,7 @@ async function fetchWithRetry(
           );
         }
         if (onRetry) {
-          await onRetry(i + 1, { status: response.status, message: response.statusText });
+          await onRetry(i + 1, { status: response.status, message: retryMessage });
         }
         await new Promise(resolve => setTimeout(resolve, currentDelay));
         continue;
@@ -179,7 +494,7 @@ async function fetchWithRetry(
         if (didTimeout) {
           // 超时中止 → 视为可重试的网络错误
           const msg = `Connection timed out after ${connectionTimeout / 1000}s`;
-          if (i === retries - 1) {
+          if (i === maxAttempts - 1) {
             console.error(`[Fetch Retry] ${msg}. All retries exhausted.`);
             throw new Error(msg);
           }
@@ -195,7 +510,7 @@ async function fetchWithRetry(
         throw error;
       }
 
-      if (i === retries - 1) {
+      if (i === maxAttempts - 1) {
         console.error(`[Fetch Retry] All retries failed. Last error: ${error.message}`);
         throw error;
       }
@@ -312,6 +627,11 @@ async function _refreshRagBlocksIfNeeded(messages, newContext, pluginManager, de
 class ChatCompletionHandler {
   constructor(config) {
     this.config = config;
+    this.responseReplayCache = new ResponseReplayCache({
+      enabled: parseBooleanEnv(config.responseReplayCacheEnabled ?? process.env.ResponseReplayCacheEnabled, false),
+      maxEntries: parseInt(config.responseReplayCacheMaxEntries ?? process.env.ResponseReplayCacheMaxEntries, 10) || 100,
+      debugMode: config.DEBUG_MODE
+    });
     this.toolExecutor = new ToolExecutor({
       pluginManager: config.pluginManager,
       webSocketServer: config.webSocketServer,
@@ -348,17 +668,86 @@ class ChatCompletionHandler {
       roleDividerRemoveDisabledTags, // 新增
       chinaModel1, // 新增
       chinaModel1Cot, // 新增
+      semanticModelRouter,
+      multiModalForceTranslateModels: configForceTranslateModels, // 启动时快照（ENV）作为兜底
     } = this.config;
 
-    const shouldShowVCP = SHOW_VCP_OUTPUT || forceShowVCP;
-
-    let clientIp = req.ip;
-    if (clientIp && clientIp.substr(0, 7) === '::ffff:') {
-      clientIp = clientIp.substr(7);
+    // 优先从 multimodal-config.json 真相源拉取最新 tag 列表，失败时回退 ENV 快照
+    let multiModalForceTranslateModels = configForceTranslateModels;
+    if (multiModalConfigStore) {
+      try {
+        const liveTags = multiModalConfigStore.getForceTranslateModels();
+        if (Array.isArray(liveTags)) {
+          multiModalForceTranslateModels = liveTags;
+        }
+      } catch (storeReadErr) {
+        // 静默回退，不阻塞请求
+      }
     }
 
+    const shouldShowVCP = SHOW_VCP_OUTPUT || forceShowVCP;
+    const applyChinaModelThinkingControl = (body) => {
+      if (!body || !body.model || !chinaModel1 || !Array.isArray(chinaModel1) || chinaModel1.length === 0) {
+        return body;
+      }
+
+      const modelNameLower = String(body.model).toLowerCase();
+      const isChinaModel = chinaModel1.some(m => modelNameLower.includes(String(m).toLowerCase()));
+      if (!isChinaModel) return body;
+
+      if (chinaModel1Cot) {
+        body.thinking = { type: "enabled" };
+      } else {
+        delete body.thinking;
+      }
+
+      if (DEBUG_MODE) {
+        console.log(`[ChinaModel] 模型 '${body.model}' 匹配成功。思维链状态: ${chinaModel1Cot ? '开启 (enabled)' : '关闭 (已移除字段)'}`);
+      }
+
+      return body;
+    };
+
+    let clientIp = normalizeClientIp(req.ip);
+
     const id = req.body.requestId || req.body.messageId;
+    let originalBody = req.body;
+    const vcpchatExtensions = originalBody && typeof originalBody === 'object'
+      ? originalBody.vcpchatExtensions
+      : null;
+    if (vcpchatExtensions !== undefined) {
+      delete originalBody.vcpchatExtensions;
+      const bindingCount = Array.isArray(vcpchatExtensions?.messageTimestampBindings)
+        ? vcpchatExtensions.messageTimestampBindings.length
+        : 0;
+      console.log(`[VCPChatExtensions] Intercepted and stripped vcpchatExtensions before upstream forwarding. timestampBindings=${bindingCount}`);
+    }
+    const requestPreprocessorConfig = vcpchatExtensions
+      ? { vcpchatExtensions }
+      : {};
+    const isOriginalRequestStreaming = originalBody.stream === true;
+    const responseCacheKey = this.responseReplayCache.buildKey(clientIp, id);
+
+    if (responseCacheKey && this.responseReplayCache.replay(responseCacheKey, req, res)) {
+      return;
+    }
+
     const abortController = new AbortController();
+
+    let clientDisconnectedAbortReason = null;
+    let cleanupClientDisconnectListeners = () => {};
+    let finalizeResponseCacheRecorder = () => {};
+
+    if (responseCacheKey) {
+      finalizeResponseCacheRecorder = installResponseCacheRecorder(res, {
+        cache: this.responseReplayCache,
+        cacheKey: responseCacheKey,
+        id,
+        clientIp,
+        streamMode: isOriginalRequestStreaming,
+        debugMode: DEBUG_MODE
+      });
+    }
 
     if (id) {
       activeRequests.set(id, {
@@ -366,12 +755,55 @@ class ChatCompletionHandler {
         res,
         abortController,
         timestamp: Date.now(),
-        aborted: false // 修复 Bug #4: 添加中止标志
+        aborted: false, // 修复 Bug #4: 添加中止标志
+        abortReason: null
       });
-    }
 
-    let originalBody = req.body;
-    const isOriginalRequestStreaming = originalBody.stream === true;
+      // 通用前端兼容：如果客户端没有显式调用 /v1/interrupt，
+      // 但 HTTP/SSE 连接已经断开，则把传输层断联转换为同一条级联中止链路。
+      // 注意：这里不能区分“用户点停止 / 刷新页面 / 网络断线 / 代理断开”，统一视为客户端不再等待响应。
+      const triggerClientDisconnectAbort = (reason) => {
+        const requestData = activeRequests.get(id);
+        if (!requestData) return;
+
+        // 正常完成的响应也会触发 close，此时不能误杀已经完成的请求。
+        if (res.writableEnded) return;
+
+        if (requestData.aborted) return;
+
+        requestData.aborted = true;
+        requestData.abortReason = reason;
+        clientDisconnectedAbortReason = reason;
+
+        if (!abortController.signal.aborted) {
+          abortController.abort();
+        }
+
+        console.log(`[ClientDisconnect] Request ${id} aborted due to ${reason}. Upstream cascade abort triggered.`);
+      };
+
+      const onReqAborted = () => triggerClientDisconnectAbort('request_aborted');
+      const onReqClose = () => {
+        if (req.aborted && !res.writableEnded) {
+          triggerClientDisconnectAbort('request_close_after_abort');
+        }
+      };
+      const onResClose = () => {
+        if (!res.writableEnded) {
+          triggerClientDisconnectAbort('response_close_before_finish');
+        }
+      };
+
+      req.on('aborted', onReqAborted);
+      req.on('close', onReqClose);
+      res.on('close', onResClose);
+
+      cleanupClientDisconnectListeners = () => {
+        req.off('aborted', onReqAborted);
+        req.off('close', onReqClose);
+        res.off('close', onResClose);
+      };
+    }
 
     // --- 上下文控制 (Context Control) ---
     // 1. 拦截 contextTokenLimit 参数
@@ -398,45 +830,29 @@ class ChatCompletionHandler {
     try {
       if (originalBody.model) {
         const originalModel = originalBody.model;
-        const redirectedModel = modelRedirectHandler.redirectModelForBackend(originalModel);
-        if (redirectedModel !== originalModel) {
-          originalBody = { ...originalBody, model: redirectedModel };
-          console.log(`[ModelRedirect] 客户端请求模型 '${originalModel}' 已重定向为后端模型 '${redirectedModel}'`);
-        }
+        const isSemanticRoutingModel = semanticModelRouter && typeof semanticModelRouter.isRoutingModel === 'function'
+          ? semanticModelRouter.isRoutingModel(originalModel)
+          : false;
 
-        // --- 国产A类模型推理功能控制 (ChinaModel Thinking Control) ---
-        if (chinaModel1 && Array.isArray(chinaModel1) && chinaModel1.length > 0) {
-          const modelNameLower = originalBody.model.toLowerCase();
-          const isChinaModel = chinaModel1.some(m => modelNameLower.includes(m.toLowerCase()));
-          if (isChinaModel) {
-            if (chinaModel1Cot) {
-              originalBody.thinking = { type: "enabled" };
-            } else {
-              delete originalBody.thinking;
-            }
-
-            if (DEBUG_MODE) {
-              console.log(`[ChinaModel] 模型 '${originalBody.model}' 匹配成功。思维链状态: ${chinaModel1Cot ? '开启 (enabled)' : '关闭 (已移除字段)'}`);
-            }
+        if (!isSemanticRoutingModel) {
+          const redirectedModel = modelRedirectHandler.redirectModelForBackend(originalModel);
+          if (redirectedModel !== originalModel) {
+            originalBody = { ...originalBody, model: redirectedModel };
+            console.log(`[ModelRedirect] 客户端请求模型 '${originalModel}' 已重定向为后端模型 '${redirectedModel}'`);
           }
+
+          // --- 国产A类模型推理功能控制 (ChinaModel Thinking Control) ---
+          applyChinaModelThinkingControl(originalBody);
+        } else if (DEBUG_MODE) {
+          console.log(`[SemanticModelRouter] 检测到语义路由模型 '${originalModel}'，延后到消息预处理完成后选择真实后端模型。`);
         }
       }
 
       await writeDebugLog('LogInput', originalBody);
 
-      // --- 角色分割处理 (Role Divider) - 初始阶段 ---
-      // 移动到最前端，确保拆分出的楼层能享受后续所有解析功能
-      if (enableRoleDivider) {
-        if (DEBUG_MODE) console.log('[Server] Applying Role Divider processing (Initial Stage)...');
-        // skipCount: 1 to exclude the initial SystemPrompt from splitting
-        originalBody.messages = roleDivider.process(originalBody.messages, {
-          ignoreList: roleDividerIgnoreList,
-          switches: roleDividerSwitches,
-          scanSwitches: roleDividerScanSwitches,
-          removeDisabledTags: roleDividerRemoveDisabledTags,
-          skipCount: 1
-        });
-        if (DEBUG_MODE) await writeDebugLog('LogAfterInitialRoleDivider', originalBody.messages);
+      const vcpToolUseForbidden = consumeVcpToolUseForbiddenPlaceholder(originalBody.messages);
+      if (vcpToolUseForbidden && DEBUG_MODE) {
+        console.log(`[VCPToolUse] Detected ${VCP_TOOL_USE_FORBIDDEN_PLACEHOLDER} in top-level system prompt. Tool parsing/execution is disabled for this request.`);
       }
 
       let shouldProcessMedia = false;
@@ -485,16 +901,78 @@ class ChatCompletionHandler {
       if (pluginManager.messagePreprocessors.has('VCPTavern')) {
         if (DEBUG_MODE) console.log(`[Server] Calling priority message preprocessor: VCPTavern`);
         try {
-          tavernProcessedMessages = await pluginManager.executeMessagePreprocessor('VCPTavern', originalBody.messages);
+          tavernProcessedMessages = await pluginManager.executeMessagePreprocessor('VCPTavern', originalBody.messages, requestPreprocessorConfig);
         } catch (pluginError) {
           console.error(`[Server] Error in priority preprocessor VCPTavern:`, pluginError);
         }
+      }
+
+      // --- 语义模型路由：在变量替换前确定真实后端模型 ---
+      // 这一步必须放在 VCPTavern 之后、变量替换之前：
+      // 1) 路由依据已经包含 Tavern 注入的最新 user/assistant 上下文，更贴近真实意图。
+      // 2) 在变量替换前完成，使后续的 SarPrompt、ChinaModel 等模型相关注入能针对真实路由模型生效。
+      let semanticRoutePlan = null;
+      let semanticModelFallbackCandidates = null;
+      if (semanticModelRouter && typeof semanticModelRouter.isRoutingModel === 'function' && semanticModelRouter.isRoutingModel(originalBody.model)) {
+        semanticRoutePlan = await semanticModelRouter.resolveRoute({
+          requestedModel: originalBody.model,
+          messages: tavernProcessedMessages,
+          pluginManager
+        });
+
+        if (semanticRoutePlan && semanticRoutePlan.active) {
+          const rawCandidates = Array.isArray(semanticRoutePlan.candidates) && semanticRoutePlan.candidates.length > 0
+            ? semanticRoutePlan.candidates
+            : [semanticRoutePlan.selectedModel];
+
+          semanticModelFallbackCandidates = rawCandidates
+            .map(model => modelRedirectHandler.redirectModelForBackend(model))
+            .filter(Boolean)
+            .filter((model, index, arr) => arr.indexOf(model) === index);
+
+          const selectedBackendModel = semanticModelFallbackCandidates[0] || modelRedirectHandler.redirectModelForBackend(semanticRoutePlan.selectedModel);
+          const previousModel = originalBody.model;
+          originalBody = { ...originalBody, model: selectedBackendModel };
+
+          if (DEBUG_MODE || previousModel !== selectedBackendModel) {
+            console.log(
+              `[SemanticModelRouter] 请求模型 '${previousModel}' 已路由到 '${selectedBackendModel}' ` +
+              `(preset=${semanticRoutePlan.presetName}, reason=${semanticRoutePlan.reason}, candidates=${semanticModelFallbackCandidates.join(' -> ')})`
+            );
+          }
+
+          applyChinaModelThinkingControl(originalBody);
+        }
+      }
+
+      // --- 纯文本模型强制翻译多模态 ---
+      // 当语义路由 / ModelRedirect 解析后的真实后端模型命中
+      // MultiModalForceTranslateModels 列表（不区分大小写、tag 子串匹配）时：
+      // 1) 自动开启多模态翻译（无视用户是否配置 {{TransBase64}}/{{TransBase64+}}）
+      // 2) 强制关闭 + 模式的 base64 还原（因为目标模型是纯文本模型，无法处理 base64）
+      // 3) 初始请求仍仅在消息确实含有 base64 多模态时执行翻译，避免空转翻译插件
+      // 4) 该标记也会传递给 VCP loop，用于工具回包后才出现 image_url 的情况
+      const isTextOnlyForceTranslateModel = Array.isArray(multiModalForceTranslateModels) &&
+        multiModalForceTranslateModels.length > 0 &&
+        isTextOnlyModelByTag(originalBody.model, multiModalForceTranslateModels);
+      if (
+        isTextOnlyForceTranslateModel &&
+        messagesContainBase64Media(tavernProcessedMessages)
+      ) {
+        const previousMode = shouldProcessMediaPlus ? 'TransBase64+' : (shouldProcessMedia ? 'TransBase64' : 'none');
+        shouldProcessMedia = true;
+        shouldProcessMediaPlus = false; // 关键：禁用还原 base64
+        console.log(
+          `[MultiModalForceTranslate] 模型 '${originalBody.model}' 命中纯文本模型 tag 列表，` +
+          `自动启用多模态文本翻译并禁用 base64 还原（先前模式: ${previousMode}）。`
+        );
       }
 
       // --- 统一处理所有变量替换 ---
       // 创建一个包含所有所需依赖的统一上下文
       const processingContext = {
         pluginManager,
+        webSocketServer,
         cachedEmojiLists: this.config.cachedEmojiLists,
         detectors: this.config.detectors,
         superDetectors: this.config.superDetectors,
@@ -560,7 +1038,7 @@ class ChatCompletionHandler {
         if (pluginManager.messagePreprocessors.has(processorName)) {
           if (DEBUG_MODE) console.log(`[Server] Calling message preprocessor: ${processorName}`);
           try {
-            processedMessages = await pluginManager.executeMessagePreprocessor(processorName, processedMessages);
+            processedMessages = await pluginManager.executeMessagePreprocessor(processorName, processedMessages, requestPreprocessorConfig);
           } catch (pluginError) {
             console.error(`[Server] Error in preprocessor ${processorName}:`, pluginError);
           }
@@ -574,7 +1052,7 @@ class ChatCompletionHandler {
 
         if (DEBUG_MODE) console.log(`[Server] Calling message preprocessor: ${name}`);
         try {
-          processedMessages = await pluginManager.executeMessagePreprocessor(name, processedMessages);
+          processedMessages = await pluginManager.executeMessagePreprocessor(name, processedMessages, requestPreprocessorConfig);
         } catch (pluginError) {
           console.error(`[Server] Error in preprocessor ${name}:`, pluginError);
         }
@@ -616,12 +1094,60 @@ class ChatCompletionHandler {
         if (DEBUG_MODE) console.log(`[Server] TransBase64+ cleanup and media restore complete.`);
       }
 
+      // --- Detector / SuperDetector 后置处理 ---
+      // 保证所有消息预处理器执行完成后，再统一应用 Detector 与 SuperDetector；
+      // Role Divider 必须在其后作为最终消息拆分步骤。
+      // Detector 会返回 fresh array；必须显式保护 OneRing 等预处理器挂在数组上的非枚举元数据。
+      const messagesBeforeDetectors = processedMessages;
+      processedMessages = copyArrayMetadata(
+        messagesBeforeDetectors,
+        messageProcessor.applyDetectorsToMessages(processedMessages, processingContext)
+      );
+      if (DEBUG_MODE) await writeDebugLog('LogAfterDetectors', processedMessages);
+
+      // --- 角色分割处理 (Role Divider) - 最终阶段 ---
+      if (enableRoleDivider) {
+        if (DEBUG_MODE) console.log('[Server] Applying Role Divider processing (Final Stage)...');
+        // skipCount: 1 to exclude the initial SystemPrompt from splitting
+        processedMessages = roleDivider.process(processedMessages, {
+          ignoreList: roleDividerIgnoreList,
+          switches: roleDividerSwitches,
+          scanSwitches: roleDividerScanSwitches,
+          removeDisabledTags: roleDividerRemoveDisabledTags,
+          skipCount: 1
+        });
+        if (DEBUG_MODE) await writeDebugLog('LogAfterFinalRoleDivider', processedMessages);
+      }
+
       // 经过改造后，processedMessages 已经是最终版本，无需再调用 replaceOtherVariables
 
       originalBody.messages = processedMessages;
-      await writeDebugLog('LogOutputAfterProcessing', originalBody);
+
+      let oneRingResponseMeta = null;
+      try {
+        const oneRingModule = pluginManager?.messagePreprocessors?.get?.('OneRing');
+        if (oneRingModule && typeof oneRingModule.extractMetaFromMessages === 'function') {
+          oneRingResponseMeta = oneRingModule.extractMetaFromMessages(processedMessages);
+          if (DEBUG_MODE && oneRingResponseMeta) {
+            console.log(`[OneRing] Frozen response meta before upstream fetch: agent=${oneRingResponseMeta.agentName} frontend=${oneRingResponseMeta.frontendSource} turn=${oneRingResponseMeta.turnId || 'none'}`);
+          }
+        }
+      } catch (oneRingMetaError) {
+        console.warn('[OneRing] Failed to freeze response meta before upstream fetch:', oneRingMetaError.message);
+      }
 
       const willStreamResponse = isOriginalRequestStreaming;
+      const finalUpstreamBody = { ...originalBody, stream: willStreamResponse };
+
+      finalContextStore.setLastFinalContext(finalUpstreamBody, {
+        requestId: req.body.requestId || null,
+        messageId: req.body.messageId || null,
+        clientIp,
+        forceShowVCP,
+        capturedStage: 'before_upstream_fetch'
+      });
+
+      await writeDebugLog('LogOutputAfterProcessing', finalUpstreamBody);
 
       let firstAiAPIResponse = await fetchWithRetry(
         `${apiUrl}/v1/chat/completions`,
@@ -633,13 +1159,14 @@ class ChatCompletionHandler {
             ...(req.headers['user-agent'] && { 'User-Agent': req.headers['user-agent'] }),
             Accept: willStreamResponse ? 'text/event-stream' : req.headers['accept'] || 'application/json',
           },
-          body: JSON.stringify({ ...originalBody, stream: willStreamResponse }),
+          body: JSON.stringify(finalUpstreamBody),
           signal: abortController.signal,
         },
         {
           retries: apiRetries,
           delay: apiRetryDelay,
           debugMode: DEBUG_MODE,
+          modelFallbackCandidates: semanticModelFallbackCandidates,
           onRetry: async (attempt, errorInfo) => {
             if (!res.headersSent && isOriginalRequestStreaming) {
               if (DEBUG_MODE)
@@ -748,7 +1275,14 @@ class ChatCompletionHandler {
         _refreshRagBlocksIfNeeded,
         fetchWithRetry,
         isToolResultError,
-        formatToolResult
+        formatToolResult,
+        vcpToolUseForbidden,
+        semanticModelFallbackCandidates,
+        oneRingResponseMeta,
+        shouldProcessMedia,
+        shouldProcessMediaPlus,
+        isTextOnlyForceTranslateModel,
+        requestPreprocessorConfig
       };
 
       if (isUpstreamStreaming) {
@@ -758,10 +1292,11 @@ class ChatCompletionHandler {
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        // When a request is aborted, the '/v1/interrupt' handler is responsible for closing the response stream.
-        // This catch block should simply log the event and stop processing to prevent race conditions
-        // and avoid throwing an uncaught exception if it also tries to write to the already-closed stream.
-        console.log(`[Abort] Caught AbortError for request ${id}. Execution will be halted. The interrupt handler is responsible for the client response.`);
+        // 显式 /v1/interrupt 或客户端断联都会走到这里。
+        // 如果是客户端断联，响应通道通常已经不可写；如果是显式 interrupt，则由 interrupt 路由负责关闭响应流。
+        // 这里仅停止后续处理，避免与中止链路竞态写入。
+        const abortReason = clientDisconnectedAbortReason || activeRequests.get(id)?.abortReason || 'explicit_interrupt_or_abort';
+        console.log(`[Abort] Caught AbortError for request ${id}. Execution halted. reason=${abortReason}`);
         return; // Stop processing and allow the 'finally' block to clean up.
       }
       // Only log full stack trace for non-abort errors
@@ -842,6 +1377,14 @@ class ChatCompletionHandler {
         }
       }
     } finally {
+      cleanupClientDisconnectListeners();
+
+      if (!res.writableEnded && !res.destroyed) {
+        // 仍未结束的异常路径不应写入缓存；正常 finish 会自动 finalize。
+      } else {
+        finalizeResponseCacheRecorder();
+      }
+
       if (id) {
         const requestData = activeRequests.get(id);
         if (requestData) {
@@ -853,6 +1396,7 @@ class ChatCompletionHandler {
           if (!requestData.aborted && requestData.abortController && !requestData.abortController.signal.aborted) {
             if (res.destroyed && !res.writableEnded) {
               requestData.aborted = true;
+              requestData.abortReason = 'response_destroyed_in_finally';
               requestData.abortController.abort();
             }
           }

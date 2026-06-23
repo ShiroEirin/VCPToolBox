@@ -1,8 +1,10 @@
 // modules/dynamicToolRegistry.js
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const dotenv = require('dotenv');
+const { buildDynamicFoldObject, hasFoldMarkers } = require('./foldProtocol');
 
 const PRIVATE_CONFIG_RELATIVE_PATH = path.join('Plugin', 'DynamicToolBridge', 'config.env');
 const LIGHT_LIST_TOKEN_BUDGET = 15;
@@ -23,7 +25,8 @@ const DEFAULT_CONFIG = Object.freeze({
     manualOverrides: {
         excludedOriginKeys: [],
         pinnedOriginKeys: [],
-        categoryAliases: {}
+        categoryAliases: {},
+        descriptionOverrides: {}
     },
     smallModel: {
         enabled: false,
@@ -237,6 +240,9 @@ class DynamicToolRegistry {
         this._boundPluginManager = null;
         this._toolsChangedHandler = null;
         this._distributedOfflineHandler = null;
+        this._configWatchers = [];
+        this._configReloadTimer = null;
+        this._configReloadPromise = Promise.resolve();
     }
 
     async initialize(options = {}) {
@@ -245,7 +251,8 @@ class DynamicToolRegistry {
             projectBasePath = path.join(__dirname, '..'),
             debugMode = false,
             config = {},
-            classifier = null
+            classifier = null,
+            watchConfigFiles = true
         } = options;
 
         this.debugMode = Boolean(debugMode);
@@ -269,6 +276,7 @@ class DynamicToolRegistry {
         await this._loadCatalog();
         await this._loadCategories();
         this._bindPluginManagerEvents(this.pluginManager);
+        if (watchConfigFiles) this._watchConfigFiles();
         this.initialized = true;
         return this;
     }
@@ -294,10 +302,20 @@ class DynamicToolRegistry {
 
         for (const record of currentRecords) {
             const previous = this.catalog.get(record.originKey);
+            const reusablePrevious = previous || this._findReusableDistributedRecord(record);
+            if (!previous && reusablePrevious && reusablePrevious.originKey !== record.originKey) {
+                const reusableClassification = this.categories.get(reusablePrevious.originKey);
+                if (reusableClassification && !this.categories.has(record.originKey)) {
+                    this.categories.set(record.originKey, {
+                        ...reusableClassification,
+                        pluginName: record.pluginName
+                    });
+                }
+            }
             const merged = {
-                ...(previous || {}),
+                ...(reusablePrevious || {}),
                 ...record,
-                firstSeenAt: previous?.firstSeenAt || now,
+                firstSeenAt: reusablePrevious?.firstSeenAt || now,
                 lastSeenAt: now
             };
 
@@ -329,6 +347,8 @@ class DynamicToolRegistry {
             this.catalog.set(originKey, next);
         }
 
+        this._compactDistributedHistory();
+
         this.snapshotId += 1;
         await this._writeCatalog();
         this._scheduleClassificationFlush();
@@ -349,16 +369,32 @@ class DynamicToolRegistry {
 
         for (const record of manifestRecords) {
             const previous = this.catalog.get(record.originKey);
+            const reusablePrevious = previous || this._findReusableDistributedRecord(record);
+            if (!previous && reusablePrevious && reusablePrevious.originKey !== record.originKey) {
+                const reusableClassification = this.categories.get(reusablePrevious.originKey);
+                if (reusableClassification && !this.categories.has(record.originKey)) {
+                    this.categories.set(record.originKey, {
+                        ...reusableClassification,
+                        pluginName: record.pluginName
+                    });
+                }
+            }
             const next = {
-                ...(previous || {}),
+                ...(reusablePrevious || {}),
                 ...record,
-                enabled: previous?.enabled !== false,
+                enabled: reusablePrevious?.enabled !== false,
                 online: false,
                 available: false,
-                firstSeenAt: previous?.firstSeenAt || now,
+                firstSeenAt: reusablePrevious?.firstSeenAt || now,
                 lastSeenAt: now,
                 lastStatusChangeAt: now
             };
+            if (reusablePrevious && reusablePrevious.sourceHash) {
+                next.manifestHash = reusablePrevious.manifestHash;
+                next.descriptionHash = reusablePrevious.descriptionHash;
+                next.sourceHash = reusablePrevious.sourceHash;
+                next.fullDescription = reusablePrevious.fullDescription || record.fullDescription;
+            }
             this.catalog.set(record.originKey, next);
             const classification = this.categories.get(record.originKey);
             if (!classification || classification.sourceHash !== next.sourceHash) {
@@ -380,10 +416,84 @@ class DynamicToolRegistry {
             }
         }
         if (changed) {
+            this._compactDistributedHistory();
             this.snapshotId += 1;
             await this._writeCatalog();
             this._scheduleClassificationFlush();
         }
+    }
+
+    _findReusableDistributedRecord(record) {
+        if (!record || record.originKind !== 'distributed') return null;
+        const identityKey = this._stableDistributedIdentityKey(record);
+        if (!identityKey) return null;
+
+        const candidates = Array.from(this.catalog.values())
+            .filter((item) => (
+                item &&
+                item.originKind === 'distributed' &&
+                item.originKey !== record.originKey &&
+                this._stableDistributedIdentityKey(item) === identityKey
+            ))
+            .sort((a, b) => this._compareDistributedHistoryCandidates(a, b));
+
+        return candidates[0] || null;
+    }
+
+    _compactDistributedHistory() {
+        const groups = new Map();
+        for (const record of this.catalog.values()) {
+            if (!record || record.originKind !== 'distributed') continue;
+            const identityKey = this._stableDistributedIdentityKey(record);
+            if (!identityKey) continue;
+            if (!groups.has(identityKey)) groups.set(identityKey, []);
+            groups.get(identityKey).push(record);
+        }
+
+        for (const records of groups.values()) {
+            if (records.length <= 1) continue;
+            records.sort((a, b) => this._compareDistributedHistoryCandidates(a, b));
+            const keeper = records[0];
+            const keeperClassification = this.categories.get(keeper.originKey);
+
+            for (const duplicate of records.slice(1)) {
+                const duplicateClassification = this.categories.get(duplicate.originKey);
+                if (!keeperClassification && duplicateClassification) {
+                    this.categories.set(keeper.originKey, {
+                        ...duplicateClassification,
+                        pluginName: keeper.pluginName
+                    });
+                }
+                this.catalog.delete(duplicate.originKey);
+                this.categories.delete(duplicate.originKey);
+                this._removeClassificationQueueEntriesForOrigin(duplicate.originKey);
+            }
+        }
+    }
+
+    _removeClassificationQueueEntriesForOrigin(originKey) {
+        if (!originKey) return;
+        for (const queueKey of Array.from(this.classificationQueue.keys())) {
+            if (queueKey.startsWith(`${originKey}:`)) {
+                this.classificationQueue.delete(queueKey);
+            }
+        }
+    }
+
+    _compareDistributedHistoryCandidates(a, b) {
+        const aAvailable = this._isAvailable(a) && a.available !== false ? 1 : 0;
+        const bAvailable = this._isAvailable(b) && b.available !== false ? 1 : 0;
+        if (aAvailable !== bAvailable) return bAvailable - aAvailable;
+
+        const aOnline = a.online !== false ? 1 : 0;
+        const bOnline = b.online !== false ? 1 : 0;
+        if (aOnline !== bOnline) return bOnline - aOnline;
+
+        const aSeen = Date.parse(a.lastSeenAt || a.lastStatusChangeAt || a.firstSeenAt || 0) || 0;
+        const bSeen = Date.parse(b.lastSeenAt || b.lastStatusChangeAt || b.firstSeenAt || 0) || 0;
+        if (aSeen !== bSeen) return bSeen - aSeen;
+
+        return String(a.originKey || '').localeCompare(String(b.originKey || ''));
     }
 
     enqueueClassification(record, reason = 'source_changed') {
@@ -526,7 +636,7 @@ class DynamicToolRegistry {
             lines.push('Expanded tool usage:');
             for (const record of expandedRecords) {
                 lines.push(`--- ${record.displayName || record.pluginName} (${record.pluginName}) ---`);
-                lines.push(record.fullDescription || record.description || 'No full description available.');
+                lines.push(await this._expandedDescriptionFor(record, options));
             }
         }
 
@@ -540,8 +650,7 @@ class DynamicToolRegistry {
     }
 
     getAdminState() {
-        const records = Array.from(this.catalog.values())
-            .sort((a, b) => this._compareRecordsWithPinned(a, b))
+        const records = this._getAdminRecords()
             .map((record) => {
                 const classification = this.categories.get(record.originKey);
                 return {
@@ -582,6 +691,27 @@ class DynamicToolRegistry {
         return this._redactConfig(this.config);
     }
 
+    async reloadConfigFromDisk(reason = 'config_file_changed') {
+        this._configReloadPromise = this._configReloadPromise
+            .catch((error) => {
+                this.lastError = error.message;
+            })
+            .then(async () => {
+                const fileConfig = await this._readJson(this.configPath, null);
+                this.persistedConfig = mergeConfig(DEFAULT_CONFIG, fileConfig, {});
+                this.config = cloneJson(this.persistedConfig);
+                this.privateConfig = await this._readPrivatePluginConfig();
+                this._applyPrivateConfig();
+                await this._writeConfigIfMissingOrSanitized(fileConfig, this.persistedConfig);
+                this._refreshClassificationOverrides();
+                if (this.pluginManager && this.pluginManager.plugins) {
+                    await this.syncFromPluginManager(reason);
+                }
+                return this.getAdminState();
+            });
+        return this._configReloadPromise;
+    }
+
     async forceRebuild(options = {}) {
         const mode = typeof options === 'string' ? options : (options.mode || 'classification');
         const wait = typeof options === 'string' ? true : options.wait !== false;
@@ -607,6 +737,49 @@ class DynamicToolRegistry {
         return this.getAdminState();
     }
 
+    _getAdminRecords() {
+        const records = Array.from(this.catalog.values());
+        const distributedGroups = new Map();
+
+        for (const record of records) {
+            if (!record || record.originKind !== 'distributed') continue;
+            const identityKey = this._stableDistributedIdentityKey(record);
+            if (!identityKey) continue;
+            if (!distributedGroups.has(identityKey)) distributedGroups.set(identityKey, []);
+            distributedGroups.get(identityKey).push(record);
+        }
+
+        const visibleDistributedKeys = new Set();
+        for (const group of distributedGroups.values()) {
+            group.sort((a, b) => this._compareDistributedHistoryCandidates(a, b));
+            if (group[0]?.originKey) visibleDistributedKeys.add(group[0].originKey);
+        }
+
+        return records
+            .filter((record) => {
+                if (!record || record.originKind !== 'distributed') return true;
+                const identityKey = this._stableDistributedIdentityKey(record);
+                if (!identityKey) return true;
+                return visibleDistributedKeys.has(record.originKey);
+            })
+            .sort((a, b) => this._compareRecordsWithPinned(a, b));
+    }
+
+    _stableDistributedIdentityKey(record) {
+        if (!record || record.originKind !== 'distributed') return '';
+        return [
+            record.pluginName || '',
+            this._normalizeDistributedDisplayName(record.displayName || record.pluginName),
+            record.description || ''
+        ].map((item) => String(item).trim()).join('::');
+    }
+
+    _normalizeDistributedDisplayName(value) {
+        return String(value || '')
+            .replace(/^(?:\s*\[云端\]\s*)+/u, '')
+            .trim();
+    }
+
     _extractRecords(pluginManager, now) {
         const descriptions = typeof pluginManager.getIndividualPluginDescriptions === 'function'
             ? pluginManager.getIndividualPluginDescriptions()
@@ -623,7 +796,9 @@ class DynamicToolRegistry {
             const originKey = originKind === 'distributed'
                 ? `distributed:${originId}:${manifest.name}`
                 : `local:${manifest.name}`;
-            const fullDescription = descriptions.get(`VCP${manifest.name}`) || this._buildFullDescriptionFromManifest(manifest);
+            const rawFullDescription = descriptions.get(`VCP${manifest.name}`) || this._buildFullDescriptionFromManifest(manifest);
+            const descriptionOverride = this._descriptionOverrideFor(originKey);
+            const fullDescription = descriptionOverride.fullDescription || rawFullDescription;
             const manifestHash = sha256(stableStringify({
                 name: manifest.name,
                 displayName: manifest.displayName,
@@ -649,7 +824,7 @@ class DynamicToolRegistry {
                 descriptionHash,
                 sourceHash,
                 commandIdentifiers: commands.map((cmd) => cmd.commandIdentifier || cmd.command || manifest.name).filter(Boolean),
-                brief: cleanText(manifest.description || commands.map((cmd) => cmd.description).find(Boolean) || ''),
+                brief: cleanText(descriptionOverride.brief || manifest.description || commands.map((cmd) => cmd.description).find(Boolean) || ''),
                 fullDescription,
                 lastSeenAt: now
             };
@@ -671,9 +846,141 @@ class DynamicToolRegistry {
         return chunks.join('\n');
     }
 
+    async _expandedDescriptionFor(record, options = {}) {
+        const fullDescription = record.fullDescription || record.description || 'No full description available.';
+        if (!this._descriptionHasFoldProtocol(fullDescription)) return fullDescription;
+
+        const foldObj = this._parseFoldProtocolDescription(fullDescription, record);
+        return this._resolveFoldBlocksForInjection(foldObj, options, record);
+    }
+
+    _parseFoldProtocolDescription(fullDescription, record = {}) {
+        const text = String(fullDescription || '').trim();
+        if (text.startsWith('{')) {
+            try {
+                const json = JSON.parse(text);
+                if (json && json.vcp_dynamic_fold && Array.isArray(json.fold_blocks)) return json;
+            } catch {
+                // Fall through to marker parsing.
+            }
+        }
+        return buildDynamicFoldObject({
+            content: fullDescription,
+            pluginDescription: record.description || record.displayName || record.pluginName,
+            strategy: 'toolbox_block_similarity'
+        });
+    }
+
+    _descriptionHasFoldProtocol(fullDescription) {
+        if (typeof fullDescription !== 'string') return false;
+        if (hasFoldMarkers(fullDescription)) return true;
+        const trimmed = fullDescription.trim();
+        if (!trimmed.startsWith('{')) return false;
+        try {
+            const json = JSON.parse(trimmed);
+            return Boolean(json && json.vcp_dynamic_fold && Array.isArray(json.fold_blocks));
+        } catch {
+            return false;
+        }
+    }
+
+    async _resolveFoldBlocksForInjection(foldObj, options = {}, record = {}) {
+        const blocks = asArray(foldObj?.fold_blocks).filter((block) => block && typeof block.content === 'string');
+        if (blocks.length === 0) return record.fullDescription || record.description || 'No full description available.';
+
+        const fallbackBlock = [...blocks]
+            .sort((a, b) => Number(a.threshold || 0) - Number(b.threshold || 0))
+            .find((block) => block.content) || blocks[0];
+        const ragPlugin = options.pluginManager?.messagePreprocessors?.get
+            ? options.pluginManager.messagePreprocessors.get('RAGDiaryPlugin')
+            : null;
+        if (!ragPlugin || typeof ragPlugin.getSingleEmbeddingCached !== 'function') {
+            return fallbackBlock.content;
+        }
+
+        const queryText = extractMessageText(options.messages || []);
+        if (!queryText.trim()) return fallbackBlock.content;
+
+        try {
+            const userVector = await withTimeout(
+                Promise.resolve(ragPlugin.getSingleEmbeddingCached(queryText)),
+                this.config.classifierTimeoutMs,
+                'dynamic tool fold query embedding'
+            );
+            const vectorDBManager = options.pluginManager?.vectorDBManager || ragPlugin.vectorDBManager;
+            const getBlockVector = async (text) => {
+                if (vectorDBManager && typeof vectorDBManager.getPluginDescriptionVector === 'function') {
+                    return vectorDBManager.getPluginDescriptionVector(
+                        `dynamic_tool_fold:${String(text || '').trim()}`,
+                        ragPlugin.getSingleEmbeddingCached.bind(ragPlugin)
+                    );
+                }
+                return ragPlugin.getSingleEmbeddingCached(text);
+            };
+            let pluginSimilarity = null;
+            const getPluginSimilarity = async () => {
+                if (pluginSimilarity !== null) return pluginSimilarity;
+                const descText = foldObj.plugin_description || record.description || record.displayName || record.pluginName;
+                const descVector = await withTimeout(
+                    Promise.resolve(getBlockVector(descText)),
+                    this.config.classifierTimeoutMs,
+                    'dynamic tool fold plugin embedding'
+                );
+                pluginSimilarity = this._cosineSimilarity(userVector, descVector);
+                return pluginSimilarity;
+            };
+
+            const included = [];
+            for (const block of blocks) {
+                const threshold = Number.isFinite(Number(block.threshold)) ? Number(block.threshold) : 0;
+                if (threshold <= 0) {
+                    included.push(block.content);
+                    continue;
+                }
+                if (!String(block.description || '').trim()) {
+                    if (await getPluginSimilarity() >= threshold) included.push(block.content);
+                    continue;
+                }
+                const targetText = block.description || block.content;
+                const blockVector = await withTimeout(
+                    Promise.resolve(getBlockVector(targetText)),
+                    this.config.classifierTimeoutMs,
+                    'dynamic tool fold block embedding'
+                );
+                if (this._cosineSimilarity(userVector, blockVector) >= threshold) {
+                    included.push(block.content);
+                }
+            }
+            return included.length > 0 ? included.join('\n\n') : fallbackBlock.content;
+        } catch (error) {
+            this.lastError = error.message;
+            if (this.debugMode) console.warn('[DynamicToolRegistry] fold block expansion failed:', error.message);
+            return fallbackBlock.content;
+        }
+    }
+
     _isAvailable(record) {
         const excluded = new Set(asArray(this.config.manualOverrides?.excludedOriginKeys));
         return record.enabled !== false && record.online !== false && !excluded.has(record.originKey);
+    }
+
+    _descriptionOverrideFor(originKey) {
+        const overrides = this.config.manualOverrides?.descriptionOverrides;
+        const value = overrides && typeof overrides === 'object' ? overrides[originKey] : null;
+        if (!value || typeof value !== 'object') {
+            return {
+                brief: '',
+                fullDescription: '',
+                categories: [],
+                keywords: []
+            };
+        }
+        return {
+            brief: typeof value.brief === 'string' ? cleanText(value.brief, 240) : '',
+            fullDescription: typeof value.fullDescription === 'string' ? value.fullDescription : '',
+            categories: asArray(value.categories).map(String).map((item) => item.trim()).filter(Boolean),
+            keywords: asArray(value.keywords).map(String).map((item) => item.trim()).filter(Boolean)
+        };
     }
 
     async _classifyRecord(record, reason) {
@@ -764,13 +1071,36 @@ class DynamicToolRegistry {
         const categories = asArray(result.categories).map(String).map((item) => item.trim()).filter(Boolean);
         const keywords = asArray(result.keywords).map(String).map((item) => item.trim()).filter(Boolean);
         const selectedCategories = categories.length > 0 ? categories : fallback.categories;
-        return {
+        const normalized = {
             brief: this._compactBrief(record, selectedCategories, result.brief || fallback.brief),
             categories: selectedCategories,
             keywords: keywords.length > 0 ? keywords : fallback.keywords,
             classifiedBy: result.classifiedBy || classifiedBy,
             confidence: Number.isFinite(Number(result.confidence)) ? Number(result.confidence) : fallback.confidence
         };
+        return this._applyDescriptionOverrideToClassification(record, normalized);
+    }
+
+    _applyDescriptionOverrideToClassification(record, classification) {
+        const override = this._descriptionOverrideFor(record.originKey);
+        const categories = override.categories.length > 0 ? override.categories : classification.categories;
+        return {
+            ...classification,
+            brief: override.brief ? this._compactBrief(record, categories, override.brief) : classification.brief,
+            categories,
+            keywords: override.keywords.length > 0 ? override.keywords : classification.keywords,
+            classifiedBy: override.brief || override.categories.length > 0 || override.keywords.length > 0
+                ? `${classification.classifiedBy || 'keyword_fallback'}+manual_override`
+                : classification.classifiedBy
+        };
+    }
+
+    _refreshClassificationOverrides() {
+        for (const [originKey, classification] of this.categories.entries()) {
+            const record = this.catalog.get(originKey);
+            if (!record || !classification) continue;
+            this.categories.set(originKey, this._applyDescriptionOverrideToClassification(record, classification));
+        }
     }
 
     async _classifyWithEmbeddings(record) {
@@ -837,16 +1167,31 @@ class DynamicToolRegistry {
         const ragPlugin = this.pluginManager?.messagePreprocessors?.get
             ? this.pluginManager.messagePreprocessors.get('RAGDiaryPlugin')
             : null;
-        if (ragPlugin && typeof ragPlugin.getSingleEmbedding === 'function') {
-            return ragPlugin.getSingleEmbedding.bind(ragPlugin);
-        }
-        if (ragPlugin && typeof ragPlugin.getContextBridge === 'function') {
+        if (!ragPlugin) return null;
+
+        let rawEmbeddingFn = null;
+        if (typeof ragPlugin.getSingleEmbeddingCached === 'function') {
+            rawEmbeddingFn = ragPlugin.getSingleEmbeddingCached.bind(ragPlugin);
+        } else if (typeof ragPlugin.getSingleEmbedding === 'function') {
+            rawEmbeddingFn = ragPlugin.getSingleEmbedding.bind(ragPlugin);
+        } else if (typeof ragPlugin.getContextBridge === 'function') {
             const bridge = ragPlugin.getContextBridge();
-            if (bridge && typeof bridge.getSingleEmbedding === 'function') {
-                return bridge.getSingleEmbedding.bind(bridge);
+            if (bridge && typeof bridge.embedText === 'function') {
+                rawEmbeddingFn = bridge.embedText.bind(bridge);
             }
         }
-        return null;
+
+        if (!rawEmbeddingFn) return null;
+
+        const vectorDBManager = this.pluginManager?.vectorDBManager || ragPlugin.vectorDBManager;
+        if (vectorDBManager && typeof vectorDBManager.getPluginDescriptionVector === 'function') {
+            return async (text) => vectorDBManager.getPluginDescriptionVector(
+                `dynamic_tool_registry:${String(text || '').trim()}`,
+                rawEmbeddingFn
+            );
+        }
+
+        return rawEmbeddingFn;
     }
 
     _cosineSimilarity(a, b) {
@@ -1062,6 +1407,61 @@ class DynamicToolRegistry {
         if (delay === 0 && this.classificationTimer.unref) this.classificationTimer.unref();
     }
 
+    _watchConfigFiles() {
+        this._closeConfigWatchers();
+        const watchTargets = [
+            { dir: this.toolConfigsDir, names: new Set([path.basename(this.configPath)]) },
+            { dir: path.dirname(this.privateConfigPath), names: new Set([path.basename(this.privateConfigPath)]) }
+        ];
+
+        for (const target of watchTargets) {
+            try {
+                if (!fsSync.existsSync(target.dir)) continue;
+                const watcher = fsSync.watch(target.dir, (eventType, filename) => {
+                    if (!filename || !target.names.has(String(filename))) return;
+                    if (eventType !== 'change' && eventType !== 'rename') return;
+                    this._scheduleConfigReload(`config_${eventType}`);
+                });
+                if (typeof watcher.unref === 'function') watcher.unref();
+                watcher.on('error', (error) => {
+                    this.lastError = error.message;
+                    if (this.debugMode) console.warn('[DynamicToolRegistry] config watcher error:', error.message);
+                });
+                this._configWatchers.push(watcher);
+            } catch (error) {
+                this.lastError = error.message;
+                if (this.debugMode) console.warn('[DynamicToolRegistry] failed to watch config files:', error.message);
+            }
+        }
+    }
+
+    _scheduleConfigReload(reason) {
+        if (this._configReloadTimer) clearTimeout(this._configReloadTimer);
+        this._configReloadTimer = setTimeout(() => {
+            this._configReloadTimer = null;
+            this.reloadConfigFromDisk(reason).catch((error) => {
+                this.lastError = error.message;
+                console.error('[DynamicToolRegistry] config hot reload failed:', error);
+            });
+        }, 100);
+        if (typeof this._configReloadTimer.unref === 'function') this._configReloadTimer.unref();
+    }
+
+    _closeConfigWatchers() {
+        for (const watcher of this._configWatchers) {
+            try {
+                watcher.close();
+            } catch {
+                // Ignore watcher close failures during reinitialization.
+            }
+        }
+        this._configWatchers = [];
+        if (this._configReloadTimer) {
+            clearTimeout(this._configReloadTimer);
+            this._configReloadTimer = null;
+        }
+    }
+
     async _loadCatalog() {
         const data = await this._readJson(this.catalogPath, { version: 1, snapshotId: 0, plugins: {} });
         this.snapshotId = Number(data.snapshotId || 0);
@@ -1163,6 +1563,9 @@ class DynamicToolRegistry {
             ...(this.config.smallModel || {}),
             ...this.privateConfig.smallModel
         };
+        if (this.config.smallModel.endpoint) {
+            this.config.smallModel.endpoint = normalizeOpenAIChatEndpoint(this.config.smallModel.endpoint);
+        }
     }
 
     _redactConfig(config) {

@@ -209,11 +209,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         // 广播状态更新
         broadcastStatusUpdate();
+        broadcastMonitoringStatusToTabs();
         
         // 如果开启监控，立即请求当前活动标签页的信息
         if (isMonitoringEnabled && currentActiveTabId) {
             chrome.tabs.sendMessage(currentActiveTabId, {
-                type: 'REQUEST_PAGE_INFO_UPDATE'
+                type: 'REQUEST_PAGE_INFO_UPDATE',
+                isMonitoringEnabled: true
             }).catch(e => {
                 if (!e.message.includes("Could not establish connection")) {
                     console.log("Error requesting page info:", e.message);
@@ -240,12 +242,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return true;
         }
         
-        // 检查2：监控是否开启（但新标签页的首次更新仍然会被发送）
-        if (!isMonitoringEnabled) {
-            console.log('[VCP Background] ⚠️ 页面监控未开启，但仍处理活动标签页的更新');
+        // 检查2：监控未开启时忽略自动页面更新，避免关闭监控后仍持续刷新日志。
+        // 手动刷新和命令执行后的显式更新可通过 force=true 绕过该限制。
+        const isForcedUpdate = request.data?.force === true;
+        if (!isMonitoringEnabled && !isForcedUpdate) {
+            console.log('[VCP Background] ⚠️ 页面监控未开启，忽略自动页面更新');
+            return true;
         }
         
-        console.log(`[VCP Background] ✅ 接受活动标签页 [ID:${senderTabId}] 的更新`);
+        console.log(`[VCP Background] ✅ 接受活动标签页 [ID:${senderTabId}] 的${isForcedUpdate ? '强制' : '自动'}更新`);
         
         // 发送到VCP服务器（如果已连接）
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -376,12 +381,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleIncomingCommand(commandData) {
     const { command, requestId, sourceClientId } = commandData;
     
-    // 某些指令由 background 直接处理 (CDP 相关 / 主世界脚本执行)
-    if (command.startsWith('cdp_') || command === 'execute_script') {
+    // 某些指令由 background 直接处理 (CDP 相关 / 主世界脚本执行 / 标签页管理)
+    if (command.startsWith('cdp_') || command === 'execute_script' || command === 'list_tabs' || command === 'switch_tab' || command === 'close_tab') {
         try {
-            const result = command === 'execute_script'
-                ? await executeScriptInMainWorld(commandData)
-                : await processCdpCommand(commandData);
+            let result;
+            if (command === 'execute_script') {
+                result = await executeScriptInMainWorld(commandData);
+            } else if (command === 'list_tabs') {
+                result = await listTabs();
+            } else if (command === 'switch_tab') {
+                result = await switchTab(commandData);
+            } else if (command === 'close_tab') {
+                result = await closeTab(commandData);
+            } else {
+                result = await processCdpCommand(commandData);
+            }
             sendResponseToWs({
                 type: 'command_result',
                 data: { requestId, sourceClientId, status: 'success', ...result }
@@ -422,6 +436,51 @@ function sendResponseToWs(message) {
     }
 }
 
+function parseJsonParam(value, fallback = {}) {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'object') return value;
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            throw new Error(`JSON 参数解析失败: ${error.message}`);
+        }
+    }
+    throw new Error('JSON 参数必须是对象或 JSON 字符串');
+}
+
+function parseBooleanParam(value, defaultValue = false) {
+    if (value === undefined || value === null || value === '') return defaultValue;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+        if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
+    }
+    return Boolean(value);
+}
+
+function parseNumberParam(value, defaultValue, minValue, maxValue) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return defaultValue;
+    return Math.min(Math.max(parsed, minValue), maxValue);
+}
+
+async function ensureDebuggerAttached(tabId) {
+    if (attachedTabId === tabId) return;
+    if (attachedTabId) await detachDebugger(attachedTabId);
+    await attachDebugger(tabId);
+}
+
+function sendCdpCommand(tabId, method, params = {}) {
+    return new Promise((resolve, reject) => {
+        chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve(result || {});
+        });
+    });
+}
+
 async function executeScriptInMainWorld(commandData) {
     const tabId = currentActiveTabId;
     const code = commandData.text || '';
@@ -444,8 +503,133 @@ async function executeScriptInMainWorld(commandData) {
     };
 }
 
+function listTabs() {
+    return new Promise((resolve) => {
+        chrome.tabs.query({}, (tabs) => {
+            const tabList = tabs.map(tab => ({
+                id: tab.id,
+                title: tab.title,
+                url: tab.url,
+                active: tab.active
+            }));
+            resolve({
+                message: '获取标签页列表成功',
+                result: tabList
+            });
+        });
+    });
+}
+
+function switchTab(commandData) {
+    const target = commandData.target;
+    if (!target) {
+        throw new Error('switch_tab 缺少 target 参数');
+    }
+    return new Promise((resolve, reject) => {
+        chrome.tabs.query({}, (tabs) => {
+            let targetTab = null;
+            
+            // 1. 尝试作为 tabId 匹配
+            const tabId = parseInt(target, 10);
+            if (!isNaN(tabId)) {
+                targetTab = tabs.find(t => t.id === tabId);
+            }
+            
+            // 2. 如果没找到，尝试模糊匹配标题或 URL
+            if (!targetTab) {
+                const normalizedTarget = target.toLowerCase();
+                targetTab = tabs.find(t =>
+                    (t.title && t.title.toLowerCase().includes(normalizedTarget)) ||
+                    (t.url && t.url.toLowerCase().includes(normalizedTarget))
+                );
+            }
+            
+            if (!targetTab) {
+                return reject(new Error(`未找到匹配的标签页: ${target}`));
+            }
+            
+            chrome.tabs.update(targetTab.id, { active: true }, (tab) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(`切换标签页失败: ${chrome.runtime.lastError.message}`));
+                } else {
+                    currentActiveTabId = targetTab.id;
+                    resolve({
+                        message: `成功切换到标签页: ${targetTab.title || targetTab.url}`,
+                        result: { id: targetTab.id, title: targetTab.title, url: targetTab.url }
+                    });
+                }
+            });
+        });
+    });
+}
+
+function closeTab(commandData) {
+    const target = commandData.target;
+    return new Promise((resolve, reject) => {
+        chrome.tabs.query({}, (tabs) => {
+            let targetTab = null;
+            
+            if (!target) {
+                targetTab = tabs.find(t => t.active);
+            } else {
+                // 1. 尝试作为 tabId 匹配
+                const tabId = parseInt(target, 10);
+                if (!isNaN(tabId)) {
+                    targetTab = tabs.find(t => t.id === tabId);
+                }
+                
+                // 2. 如果没找到，尝试模糊匹配标题或 URL
+                if (!targetTab) {
+                    const normalizedTarget = target.toLowerCase();
+                    targetTab = tabs.find(t =>
+                        (t.title && t.title.toLowerCase().includes(normalizedTarget)) ||
+                        (t.url && t.url.toLowerCase().includes(normalizedTarget))
+                    );
+                }
+            }
+            
+            if (!targetTab) {
+                return reject(new Error(`未找到要关闭的标签页: ${target || '当前活动标签页'}`));
+            }
+            
+            chrome.tabs.remove(targetTab.id, () => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(`关闭标签页失败: ${chrome.runtime.lastError.message}`));
+                } else {
+                    resolve({
+                        message: `成功关闭标签页: ${targetTab.title || targetTab.url}`,
+                        result: { id: targetTab.id, title: targetTab.title, url: targetTab.url }
+                    });
+                }
+            });
+        });
+    });
+}
+
 async function processCdpCommand(commandData) {
-    const { command, urlIncludes, cdpRequestId } = commandData;
+    const {
+        command,
+        urlIncludes,
+        cdpRequestId,
+        expression,
+        selector,
+        nodeId,
+        depth,
+        pierce,
+        headers,
+        userAgent,
+        acceptLanguage,
+        platform,
+        timezoneId,
+        locale,
+        width,
+        height,
+        deviceScaleFactor,
+        mobile,
+        origin,
+        storageTypes,
+        cdpParams
+    } = commandData;
     const tabId = currentActiveTabId;
 
     if (!tabId) throw new Error('没有活动的标签页');
@@ -470,16 +654,122 @@ async function processCdpCommand(commandData) {
 
         case 'cdp_get_response_body':
             if (!attachedTabId) throw new Error('CDP 未启动');
-            return new Promise((resolve, reject) => {
-                chrome.debugger.sendCommand({ tabId: attachedTabId }, "Network.getResponseBody", { requestId: cdpRequestId }, (result) => {
-                    if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-                    else resolve({ result });
-                });
-            });
+            return { result: await sendCdpCommand(attachedTabId, 'Network.getResponseBody', { requestId: cdpRequestId }) };
 
         case 'cdp_clear_network':
             networkLogs.clear();
             return { message: '网络日志已清空' };
+
+        case 'cdp_runtime_evaluate':
+            await ensureDebuggerAttached(tabId);
+            if (!expression || !String(expression).trim()) throw new Error('cdp_runtime_evaluate 缺少 expression 参数');
+            return {
+                message: 'Runtime.evaluate 执行成功',
+                result: await sendCdpCommand(tabId, 'Runtime.evaluate', {
+                    expression: String(expression),
+                    awaitPromise: true,
+                    returnByValue: true,
+                    ...parseJsonParam(cdpParams, {})
+                })
+            };
+
+        case 'cdp_dom_get_document':
+            await ensureDebuggerAttached(tabId);
+            return {
+                message: 'DOM.getDocument 执行成功',
+                result: await sendCdpCommand(tabId, 'DOM.getDocument', {
+                    depth: parseNumberParam(depth, 1, -1, 100),
+                    pierce: parseBooleanParam(pierce, false),
+                    ...parseJsonParam(cdpParams, {})
+                })
+            };
+
+        case 'cdp_dom_query_selector':
+            await ensureDebuggerAttached(tabId);
+            if (!selector || !String(selector).trim()) throw new Error('cdp_dom_query_selector 缺少 selector 参数');
+            let rootNodeId = Number(nodeId);
+            if (!Number.isFinite(rootNodeId) || rootNodeId <= 0) {
+                const documentResult = await sendCdpCommand(tabId, 'DOM.getDocument', { depth: 1, pierce: true });
+                rootNodeId = documentResult.root?.nodeId;
+            }
+            if (!rootNodeId) throw new Error('无法获取 DOM 根节点 nodeId');
+            return {
+                message: 'DOM.querySelector 执行成功',
+                result: await sendCdpCommand(tabId, 'DOM.querySelector', {
+                    nodeId: rootNodeId,
+                    selector: String(selector),
+                    ...parseJsonParam(cdpParams, {})
+                })
+            };
+
+        case 'cdp_network_set_extra_http_headers':
+            await ensureDebuggerAttached(tabId);
+            return {
+                message: 'Network.setExtraHTTPHeaders 执行成功',
+                result: await sendCdpCommand(tabId, 'Network.setExtraHTTPHeaders', {
+                    headers: parseJsonParam(headers || cdpParams, {})
+                })
+            };
+
+        case 'cdp_network_set_user_agent_override':
+            await ensureDebuggerAttached(tabId);
+            if (!userAgent || !String(userAgent).trim()) throw new Error('cdp_network_set_user_agent_override 缺少 userAgent 参数');
+            return {
+                message: 'Network.setUserAgentOverride 执行成功',
+                result: await sendCdpCommand(tabId, 'Network.setUserAgentOverride', {
+                    userAgent: String(userAgent),
+                    ...(acceptLanguage ? { acceptLanguage: String(acceptLanguage) } : {}),
+                    ...(platform ? { platform: String(platform) } : {}),
+                    ...parseJsonParam(cdpParams, {})
+                })
+            };
+
+        case 'cdp_emulation_set_timezone_override':
+            await ensureDebuggerAttached(tabId);
+            if (!timezoneId || !String(timezoneId).trim()) throw new Error('cdp_emulation_set_timezone_override 缺少 timezoneId 参数');
+            return {
+                message: 'Emulation.setTimezoneOverride 执行成功',
+                result: await sendCdpCommand(tabId, 'Emulation.setTimezoneOverride', { timezoneId: String(timezoneId) })
+            };
+
+        case 'cdp_emulation_set_locale_override':
+            await ensureDebuggerAttached(tabId);
+            if (!locale || !String(locale).trim()) throw new Error('cdp_emulation_set_locale_override 缺少 locale 参数');
+            return {
+                message: 'Emulation.setLocaleOverride 执行成功',
+                result: await sendCdpCommand(tabId, 'Emulation.setLocaleOverride', { locale: String(locale) })
+            };
+
+        case 'cdp_emulation_set_device_metrics_override':
+            await ensureDebuggerAttached(tabId);
+            return {
+                message: 'Emulation.setDeviceMetricsOverride 执行成功',
+                result: await sendCdpCommand(tabId, 'Emulation.setDeviceMetricsOverride', {
+                    width: parseNumberParam(width, 1280, 1, 10000),
+                    height: parseNumberParam(height, 720, 1, 10000),
+                    deviceScaleFactor: parseNumberParam(deviceScaleFactor, 1, 0, 10),
+                    mobile: parseBooleanParam(mobile, false),
+                    ...parseJsonParam(cdpParams, {})
+                })
+            };
+
+        case 'cdp_storage_get_cookies':
+            await ensureDebuggerAttached(tabId);
+            return {
+                message: 'Storage.getCookies 执行成功',
+                result: await sendCdpCommand(tabId, 'Storage.getCookies', parseJsonParam(cdpParams, {}))
+            };
+
+        case 'cdp_storage_clear_data_for_origin':
+            await ensureDebuggerAttached(tabId);
+            if (!origin || !String(origin).trim()) throw new Error('cdp_storage_clear_data_for_origin 缺少 origin 参数');
+            return {
+                message: 'Storage.clearDataForOrigin 执行成功',
+                result: await sendCdpCommand(tabId, 'Storage.clearDataForOrigin', {
+                    origin: String(origin),
+                    storageTypes: String(storageTypes || 'cookies,local_storage,session_storage,cache_storage,indexeddb')
+                })
+            };
 
         default:
             throw new Error('未知的 CDP 指令: ' + command);
@@ -489,9 +779,10 @@ async function processCdpCommand(commandData) {
 function attachDebugger(tabId) {
     return new Promise((resolve, reject) => {
         chrome.debugger.attach({ tabId }, "1.3", () => {
-            if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+            if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
             attachedTabId = tabId;
             chrome.debugger.sendCommand({ tabId }, "Network.enable", {}, () => {
+                if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
                 console.log('[VCP Background] CDP Network enabled');
                 resolve();
             });
@@ -533,6 +824,21 @@ chrome.debugger.onDetach.addListener((source) => {
     }
 });
 
+function broadcastMonitoringStatusToTabs() {
+    chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] }, (tabs) => {
+        tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, {
+                type: 'MONITORING_STATUS_CHANGED',
+                isMonitoringEnabled
+            }).catch(e => {
+                if (!e.message.includes("Could not establish connection")) {
+                    console.log("[VCP Background] ⚠️ 同步监控状态到标签页失败:", e.message);
+                }
+            });
+        });
+    });
+}
+
 function broadcastStatusUpdate() {
     chrome.runtime.sendMessage({
         type: 'STATUS_UPDATE',
@@ -568,7 +874,7 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
     if (isMonitoringEnabled) {
         // 使用重试机制发送更新请求，因为content script可能还未完全准备好
         const sendUpdateRequest = (retryCount = 0) => {
-            chrome.tabs.sendMessage(activeInfo.tabId, { type: 'REQUEST_PAGE_INFO_UPDATE' }, (response) => {
+            chrome.tabs.sendMessage(activeInfo.tabId, { type: 'REQUEST_PAGE_INFO_UPDATE', isMonitoringEnabled: true }, (response) => {
                 if (chrome.runtime.lastError) {
                     if (retryCount < 2) { // 最多重试2次
                         console.log(`[VCP Background] ⚠️ 发送更新请求失败，${200 * (retryCount + 1)}ms后重试 (${retryCount + 1}/2)`);
@@ -608,7 +914,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             // 页面加载完成后，稍微延迟一下再请求，让页面内容更稳定
             setTimeout(() => {
                 const sendUpdateRequest = (retryCount = 0) => {
-                    chrome.tabs.sendMessage(tabId, { type: 'REQUEST_PAGE_INFO_UPDATE' }, (response) => {
+                    chrome.tabs.sendMessage(tabId, { type: 'REQUEST_PAGE_INFO_UPDATE', isMonitoringEnabled: true }, (response) => {
                         if (chrome.runtime.lastError) {
                             if (retryCount < 3) { // 页面加载后可以多重试几次
                                 console.log(`[VCP Background] ⚠️ 页面加载完成后请求失败，${300 * (retryCount + 1)}ms后重试 (${retryCount + 1}/3)`);
@@ -640,6 +946,7 @@ chrome.storage.local.get(['isMonitoringEnabled'], (result) => {
     if (result.isMonitoringEnabled !== undefined) {
         isMonitoringEnabled = result.isMonitoringEnabled;
         console.log('[VCP Background] 📡 恢复监控状态:', isMonitoringEnabled ? '开启' : '关闭');
+        broadcastMonitoringStatusToTabs();
     }
 });
 

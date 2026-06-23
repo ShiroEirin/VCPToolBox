@@ -362,8 +362,65 @@ function createSecureStaticMiddleware(rootDir, serviceType) {
             console.log(`[SecureStatic] 安全检查通过，请求文件: ${requestedFile}`);
         }
 
-        // 直接使用express.static中间件
-        staticMiddleware(req, res, next);
+        // 先尝试 express.static 精确匹配
+        staticMiddleware(req, res, () => {
+            // 精确匹配失败 → 尝试图片格式回退（仅限 Image 服务）
+            if (serviceType !== 'Image') return next();
+
+            // 关键：req.path 是 URL 编码的，必须解码后才能匹配文件系统路径
+            let decodedPath;
+            try {
+                decodedPath = decodeURIComponent(req.path);
+            } catch (e) {
+                return next(); // URL 解码失败，跳过回退
+            }
+
+            const ext = path.extname(decodedPath).toLowerCase();
+            if (!ext) return next(); // 无扩展名，跳过
+
+            const baseName = decodedPath.slice(0, -ext.length);
+            const fallbackExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'].filter(e => e !== ext);
+
+            for (const tryExt of fallbackExts) {
+                const tryPath = path.join(rootDir, baseName + tryExt);
+                const normalizedTry = path.resolve(tryPath);
+                // 安全检查：确保回退路径仍在允许目录内
+                if (!normalizedTry.startsWith(normalizedRoot)) continue;
+                if (fs.existsSync(tryPath)) {
+                    if (pluginDebugMode) {
+                        console.log(`[SecureStatic] 🔄 格式回退: ${decodedPath} -> ${baseName + tryExt}`);
+                    }
+                    return res.sendFile(normalizedTry);
+                }
+            }
+            next(); // 所有回退格式都找不到 → 404
+        });
+    };
+}
+
+/**
+ * 创建单数路径到复数路径的安全重定向中间件。
+ * 只做 308 跳转，不直接提供文件；跳转后的复数路由仍会经过认证、路径安全校验和静态文件安全检查。
+ */
+function createSingularPathRedirectMiddleware(singularSegment, pluralSegment, serviceType) {
+    return (req, res) => {
+        const originalUrl = req.originalUrl || req.url || '';
+        const pathSegmentWithKey = req.params.pathSegmentWithKey;
+        const singularPrefix = `/${pathSegmentWithKey}/${singularSegment}`;
+        const pluralPrefix = `/${pathSegmentWithKey}/${pluralSegment}`;
+        
+        if (!originalUrl.startsWith(singularPrefix)) {
+            console.warn(`[${serviceType}Redirect] 🚨 单数路径重定向前缀异常: ${originalUrl} from IP: ${req.ip}`);
+            return res.status(400).type('text/plain').send('Bad Request: Invalid redirect path format.');
+        }
+
+        const targetUrl = pluralPrefix + originalUrl.slice(singularPrefix.length);
+        
+        if (pluginDebugMode) {
+            console.log(`[${serviceType}Redirect] ${originalUrl} -> ${targetUrl}`);
+        }
+
+        return res.redirect(308, targetUrl);
     };
 }
 
@@ -418,6 +475,12 @@ function registerRoutes(app, pluginConfig, projectBasePath) {
         const globalImageDir = path.join(projectBasePath, 'image');
         const secureImageStatic = createSecureStaticMiddleware(globalImageDir, 'Image');
         
+        // 兼容 AI 偶尔漏写复数 s：/image/... -> /images/...
+        // 注意：这里只重定向，不提供文件；实际访问仍由 /images 路由完成完整安全校验。
+        app.use('/:pathSegmentWithKey/image',
+            createSingularPathRedirectMiddleware('image', 'images', 'Image')
+        );
+        
         app.use('/:pathSegmentWithKey/images',
             imageSecurityMonitoring,
             imageAuthMiddleware,
@@ -435,6 +498,12 @@ function registerRoutes(app, pluginConfig, projectBasePath) {
     if (serverFileKeyForAuth) {
         const globalFileDir = path.join(projectBasePath, 'file');
         const secureFileStatic = createSecureStaticMiddleware(globalFileDir, 'File');
+        
+        // 兼容 AI 偶尔漏写复数 s：/file/... -> /files/...
+        // 注意：这里只重定向，不提供文件；实际访问仍由 /files 路由完成完整安全校验。
+        app.use('/:pathSegmentWithKey/file',
+            createSingularPathRedirectMiddleware('file', 'files', 'File')
+        );
         
         app.use('/:pathSegmentWithKey/files',
             fileSecurityMonitoring,

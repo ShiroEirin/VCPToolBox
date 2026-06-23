@@ -175,6 +175,34 @@ class VCPTavern {
         return resolved;
     }
 
+  // 检测预设是否需要时间追踪（是否使用了 {{LastChatTime}} 或 {{TimeSinceLastChat}}）
+  _presetNeedsTimeTracking(preset) {
+    if (!preset || !Array.isArray(preset.rules)) return false;
+
+    const timeVarRegex = /\{\{(LastChatTime|TimeSinceLastChat)\}\}/;
+
+    for (const rule of preset.rules) {
+      if (!rule.enabled) continue;
+
+      // 提取规则内容的文本（兼容字符串和对象两种格式）
+      let textContent = "";
+      if (typeof rule.content === "string") {
+        textContent = rule.content;
+      } else if (rule.content && typeof rule.content.content === "string") {
+        textContent = rule.content.content;
+      } else if (rule.content && typeof rule.content === "object") {
+        // 兜底：序列化搜索
+        textContent = JSON.stringify(rule.content);
+      }
+
+      if (timeVarRegex.test(textContent)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
     async initialize(config) {
         this.debugMode = config.DebugMode || false;
         await this._loadPresets();
@@ -222,13 +250,42 @@ class VCPTavern {
         }
 
         // 支持解析 {{VCPTavern::PresetName::SessionID}} 格式
+        // 以及 {{VCPTavern::PresetName::blacklist:规则名}} 格式
         const triggerContent = match[1];
-        let [presetName, explicitSessionId] = triggerContent.split('::');
+        const parts = triggerContent.split('::');
+        const presetName = parts[0];
+        let explicitSessionId;
+        let blacklistRules = [];
+
+        for (let i = 1; i < parts.length; i++) {
+            const part = parts[i];
+            if (part.startsWith('blacklist:')) {
+                const listStr = part.slice('blacklist:'.length);
+                blacklistRules = listStr
+                    .split(',')
+                    .map(s => s.trim())
+                    .filter(s => s.length > 0);
+            } else {
+                explicitSessionId = part;
+            }
+        }
 
         const preset = this.presets.get(presetName);
         if (!preset || !Array.isArray(preset.rules)) {
             console.warn(`[VCPTavern] 预设 "${presetName}" 未找到或其 'rules' 格式无效。`);
             return messages;
+        }
+
+        // 根据黑名单过滤规则（静默跳过指定规则）
+        const skipRuleByName = (rule) => {
+            return blacklistRules.length > 0 && blacklistRules.includes(rule.name);
+        };
+
+        const activeRules = preset.rules.filter(r => !skipRuleByName(r));
+        const skippedRules = preset.rules.filter(r => r.enabled && skipRuleByName(r));
+
+        if (this.debugMode && skippedRules.length > 0) {
+            console.log(`[VCPTavern] 黑名单已静默规则: ${skippedRules.map(r => `"${r.name}"`).join(', ')}`);
         }
 
         // 构建全局正则，清除所有同名占位符（含可选 SessionID 部分）
@@ -254,7 +311,13 @@ class VCPTavern {
 
         if (this.debugMode) console.log(`[VCPTavern] 检测到触发器，使用预设: ${presetName}`);
 
-        // --- 计算时间间隔逻辑 ---
+    // 检测预设是否需要时间追踪（是否使用了 {{LastChatTime}} 或 {{TimeSinceLastChat}}）
+    const needsTimeTracking = this._presetNeedsTimeTracking({ ...preset, rules: activeRules });
+
+    // --- 计算时间间隔逻辑 (仅当预设使用时间变量时) ---
+    let resolveExtendedVariables;
+
+    if (needsTimeTracking) {
         const now = Date.now();
         let lastChatTimeStr = '';
         let timeSinceLastChatStr = '';
@@ -291,10 +354,7 @@ class VCPTavern {
             if (this.debugMode) console.log(`[VCPTavern] 防抖生效，跳过时间更新 (距上次仅 ${Math.round((now - lastLoggedTime) / 1000)}s)`);
         }
 
-        // 将计算出的时间变量注入到实例中，供 _resolveTimeVariables 使用
-        // 注意：这里我们需要稍微修改 _resolveTimeVariables 来支持这两个新变量
-        // 或者我们直接在这里定义一个临时的替换函数
-        const resolveExtendedVariables = (content) => {
+        resolveExtendedVariables = (content) => {
             if (!content) return content;
             
             const replaceFn = (text) => {
@@ -318,6 +378,36 @@ class VCPTavern {
             return content;
         };
 
+      if (this.debugMode)
+        console.log(
+          `[VCPTavern] 预设 "${presetName}" 已启用时间追踪 (Key: ${logKey})`
+        );
+    } else {
+      if (this.debugMode)
+        console.log(
+          `[VCPTavern] 预设 "${presetName}" 未使用时间变量，跳过时间追踪`
+        );
+
+      resolveExtendedVariables = (content) => {
+        if (!content) return content;
+        const replaceFn = (text) => {
+          if (typeof text !== "string") return text;
+          return this._resolveTimeVariables(text);
+        };
+        if (typeof content === "string") {
+          return replaceFn(content);
+        } else if (Array.isArray(content)) {
+          return content.map((part) => {
+            if (part && part.type === "text" && typeof part.text === "string") {
+              return { ...part, text: replaceFn(part.text) };
+            }
+            return part;
+          });
+        }
+        return content;
+      };
+    }
+
         // 辅助函数：确保注入内容是消息对象格式
         const ensureMessageObject = (content, defaultRole = 'system') => {
             if (typeof content === 'string') {
@@ -330,9 +420,9 @@ class VCPTavern {
 
         // 按照注入规则处理
         // 为了处理深度注入，我们先处理嵌入注入，再处理相对注入，最后处理深度注入
-        const embedRules = preset.rules.filter(r => r.enabled && r.type === 'embed');
-        const relativeRules = preset.rules.filter(r => r.enabled && r.type === 'relative').sort((a, b) => (a.position === 'before' ? -1 : 1));
-        const depthRules = preset.rules.filter(r => r.enabled && r.type === 'depth').sort((a, b) => b.depth - a.depth);
+        const embedRules = activeRules.filter(r => r.enabled && r.type === 'embed');
+        const relativeRules = activeRules.filter(r => r.enabled && r.type === 'relative').sort((a, b) => (a.position === 'before' ? -1 : 1));
+        const depthRules = activeRules.filter(r => r.enabled && r.type === 'depth').sort((a, b) => b.depth - a.depth);
 
         // 1. 嵌入注入 (直接修改现有消息内容) - 恢复兼容老版本
         for (const rule of embedRules) {

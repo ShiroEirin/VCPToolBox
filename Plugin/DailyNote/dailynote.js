@@ -22,8 +22,18 @@ const VAR_HTTP_URL = process.env.VarHttpUrl;
 // Config for 'create' command
 const CONFIGURED_EXTENSION = (process.env.DAILY_NOTE_EXTENSION || "txt").toLowerCase() === "md" ? "md" : "txt";
 
+// Tag AI helper configuration (disabled by default)
+const TAG_MASTER_ENABLED = (process.env.TagMaster || "false").toLowerCase() === "true";
+const TAG_MODEL = process.env.TagModel || 'gemini-2.5-flash-preview-09-2025-thinking';
+const TAG_MODEL_MAX_OUTPUT_TOKENS = parseInt(process.env.TagModelMaxOutPutTokens || '30000', 10);
+const TAG_MODEL_MAX_TOKENS = parseInt(process.env.TagModelMaxTokens || '40000', 10);
+const TAG_MODEL_PROMPT_FILE = process.env.TagModelPrompt || 'TagMaster.txt';
+const API_KEY = process.env.API_Key;
+const API_URL = process.env.API_URL;
+
 // Fuzzy Diff for Update Failures
 const FUZZY_DIFF_ENABLED = (process.env.DAILY_NOTE_FUZZY_DIFF || "false").toLowerCase() === "true";
+const UPDATE_FAILURE_HINT = "请检查字段或标点符号是否与原文一致；若多次失败，可尝试使用 DailyNoteManager 插件 list 对应文件夹/日期，以检索日记原文状态后再重试。";
 
 // 忽略的文件夹列表
 const IGNORED_FOLDERS = ['MusicDiary'];
@@ -123,6 +133,132 @@ function fixTagFormat(tagLine) {
 }
 
 
+function extractTagFromAIResponse(aiResponse) {
+    debugLog('Extracting tag from AI response:', aiResponse);
+
+    const match = aiResponse.match(/\[\[Tag:\s*(.+?)\]\]/i);
+    if (match && match[1]) {
+        const tagContent = match[1].trim();
+        const result = 'Tag: ' + tagContent;
+        debugLog('Extracted tag:', result);
+        return result;
+    }
+
+    debugLog('No tag found in AI response');
+    return null;
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function generateTagsWithAI(content, maxRetries = 3) {
+    debugLog('Generating tags with AI model...');
+
+    if (!TAG_MASTER_ENABLED) {
+        debugLog('TagMaster disabled, skipping AI tag generation.');
+        return null;
+    }
+
+    if (!API_KEY || !API_URL) {
+        console.error('[DailyNote] API configuration missing. Cannot generate tags.');
+        return null;
+    }
+
+    const promptFilePath = path.join(__dirname, TAG_MODEL_PROMPT_FILE);
+    let systemPrompt;
+    try {
+        systemPrompt = await fs.readFile(promptFilePath, 'utf-8');
+    } catch (err) {
+        console.error('[DailyNote] Failed to read TagMaster prompt file:', err.message);
+        return null;
+    }
+
+    const requestData = {
+        model: TAG_MODEL,
+        messages: [
+            {
+                role: 'system',
+                content: systemPrompt
+            },
+            {
+                role: 'user',
+                content: content
+            }
+        ],
+        max_tokens: TAG_MODEL_MAX_TOKENS,
+        max_output_tokens: TAG_MODEL_MAX_OUTPUT_TOKENS,
+        temperature: 0.7
+    };
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            debugLog(`Calling AI API (attempt ${attempt}/${maxRetries}) with model: ${TAG_MODEL}`);
+
+            const fetch = (await import('node-fetch')).default;
+            const response = await fetch(`${API_URL}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${API_KEY}`
+                },
+                body: JSON.stringify(requestData),
+                timeout: 60000
+            });
+
+            if (response.status === 500 || response.status === 503) {
+                const errorText = await response.text();
+                console.error(`[DailyNote] Tag AI API returned ${response.status} (attempt ${attempt}/${maxRetries}):`, errorText);
+
+                if (attempt < maxRetries) {
+                    const backoffTime = Math.pow(2, attempt - 1) * 1000;
+                    debugLog(`Retrying tag generation after ${backoffTime}ms...`);
+                    await delay(backoffTime);
+                    continue;
+                }
+
+                console.error('[DailyNote] Max retries reached. Giving up tag generation.');
+                return null;
+            }
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('[DailyNote] Tag AI API error:', response.status, errorText);
+                return null;
+            }
+
+            const result = await response.json();
+            if (result.choices && result.choices.length > 0 && result.choices[0].message) {
+                const aiResponse = result.choices[0].message.content;
+                debugLog('Tag AI response:', aiResponse);
+
+                const tagLine = extractTagFromAIResponse(aiResponse);
+                if (tagLine) {
+                    debugLog(`Successfully generated tag on attempt ${attempt}`);
+                }
+                return tagLine;
+            }
+
+            console.error('[DailyNote] Unexpected Tag AI response format:', result);
+            return null;
+        } catch (error) {
+            console.error(`[DailyNote] Tag AI error on attempt ${attempt}/${maxRetries}:`, error.message);
+
+            if (attempt < maxRetries) {
+                const backoffTime = Math.pow(2, attempt - 1) * 1000;
+                debugLog(`Retrying tag generation after ${backoffTime}ms due to error...`);
+                await delay(backoffTime);
+                continue;
+            }
+
+            console.error('[DailyNote] Max retries reached after errors. Giving up tag generation.');
+            return null;
+        }
+    }
+
+    return null;
+}
+
 async function processTags(contentText, externalTag) {
     debugLog('Processing tags...');
     const detection = detectTagLine(contentText);
@@ -145,11 +281,23 @@ async function processTags(contentText, externalTag) {
         const fixedTag = fixTagFormat(detection.lastLine);
         // Ensure there's exactly one newline before the tag.
         return detection.contentWithoutLastLine.trimEnd() + '\n' + fixedTag;
-    } else {
-        // No tag found in either place, throw an error.
-        debugLog('No tag detected in content or as an argument. Throwing error.');
-        throw new Error("Tag is missing. Please provide a 'Tag' argument or add a 'Tag:' line at the end of the 'Content'.");
     }
+
+    if (TAG_MASTER_ENABLED) {
+        debugLog('No tag detected, TagMaster enabled; generating with AI...');
+        const generatedTag = await generateTagsWithAI(contentText);
+        if (generatedTag) {
+            const fixedTag = fixTagFormat(generatedTag);
+            debugLog('Generated and appended tag:', fixedTag);
+            return contentText.trimEnd() + '\n' + fixedTag;
+        }
+
+        console.warn('[DailyNote] TagMaster enabled but failed to generate tags. Falling back to missing-tag error.');
+    }
+
+    // No tag found in either place, throw an error.
+    debugLog('No tag detected in content or as an argument. Throwing error.');
+    throw new Error("Tag is missing. Please provide a 'Tag' argument or add a 'Tag:' line at the end of the 'Content'.");
 }
 
 // --- Local File URL Processing ---
@@ -265,16 +413,24 @@ async function processLocalFiles(content) {
 
 // --- 'create' Command Logic ---
 async function handleCreateCommand(args) {
-    // 兼容 'Date'/'dateString', 'Content'/'contentText', 和 'maid'/'maidName' (case-insensitive for maid)
+    // 兼容 'Date'/'dateString', 'Content'/'contentText'/'content', 'maid'/'maidName' (case-insensitive for maid)
+    // 新增 folder 字段：用于直接指定存储目录，避免必须把目录塞进 maid 的 [文件夹]署名格式。
+    // 额外兼容 fold，降低模型误拼写导致目录未生效的概率。
     const maid = args.maid || args.maidName || args.Maid || args.MAID;
-    const dateString = args.dateString || args.Date;
-    const contentText = args.contentText || args.Content;
+    const folder = args.folder || args.Folder || args.folderName || args.FolderName || args.fold || args.Fold;
+    let dateString = args.dateString || args.Date;
+    const contentText = args.contentText || args.Content || args.content;
+    // 如果没有传入 Date，则使用系统当前日期
+    if (!dateString) {
+        const d = new Date();
+        dateString = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+    }
     const tag = args.Tag || args.tag;
     const fileName = args.fileName || args.FileName;
 
-    debugLog(`Processing 'create' for Maid: ${maid}, Date: ${dateString}, fileName: ${fileName}`);
-    if (!maid || !dateString || !contentText) {
-        return { status: "error", error: 'Invalid input for create: Missing maid/maidName, dateString/Date, or contentText/Content.' };
+    debugLog(`Processing 'create' for Maid: ${maid}, Folder: ${folder || 'Not specified'}, Date: ${dateString}, fileName: ${fileName}`);
+    if (!maid || !contentText) {
+        return { status: "error", error: 'Invalid input for create: Missing maid/maidName or contentText/Content/content.' };
     }
 
     try {
@@ -284,11 +440,14 @@ async function handleCreateCommand(args) {
         debugLog('Content after tag processing (length):', processedContent.length);
 
         const trimmedMaidName = maid.trim();
-        let folderName = trimmedMaidName;
+        const trimmedFolderName = typeof folder === 'string' ? folder.trim() : '';
+        let folderName = trimmedFolderName || trimmedMaidName;
         let actualMaidName = trimmedMaidName;
         const tagMatch = trimmedMaidName.match(/^\[(.*?)\](.*)$/);
 
-        if (tagMatch) {
+        if (trimmedFolderName) {
+            debugLog(`Explicit folder provided. Folder: ${folderName}, Actual Maid: ${actualMaidName}`);
+        } else if (tagMatch) {
             folderName = tagMatch[1].trim();
             actualMaidName = tagMatch[2].trim();
             debugLog(`Tagged note detected. Tag: ${folderName}, Actual Maid: ${actualMaidName}`);
@@ -355,10 +514,21 @@ async function handleCreateCommand(args) {
         }
 
         debugLog(`Target file path: ${filePath}`);
-        const fileContent = `[${datePart}] - ${actualMaidName}\n${processedContent}`;
+        const timeStringForContent = `${hours}:${minutes}`;
+        const contentStartsWithTimeLine = /^\s*\[\d{1,2}:\d{2}(?::\d{2})?\]\s*(?:\r?\n|$)/.test(processedContent);
+        const fileContent = contentStartsWithTimeLine
+            ? `[${datePart}] - ${actualMaidName}\n${processedContent}`
+            : `[${datePart}] - ${actualMaidName}\n[${timeStringForContent}]\n${processedContent}`;
         await fs.writeFile(filePath, fileContent);
         debugLog(`Successfully wrote file (length: ${fileContent.length})`);
-        return { status: "success", message: `Diary saved to ${filePath}` };
+        return {
+            status: "success",
+            result: {
+                message: `${actualMaidName} 的日记已保存到 ${sanitizedFolderName} 文件夹 (${finalFileName})`,
+                folder: sanitizedFolderName,
+                fileName: finalFileName
+            }
+        };
     } catch (error) {
         console.error("[DailyNote] Error during 'create' command:", error.message);
         return { status: "error", error: error.message || "An unknown error occurred during diary creation." };
@@ -667,6 +837,7 @@ async function handleUpdateCommand(args) {
     debugLog("Processing 'update' command with args:", args);
 
     const { target, replace, maid } = args;
+    const folder = args.folder || args.Folder || args.folderName || args.FolderName || args.fold || args.Fold;
 
     if (typeof target !== 'string' || typeof replace !== 'string') {
         return {
@@ -686,7 +857,7 @@ async function handleUpdateCommand(args) {
     debugLog(
         `Validated input for update. Target length: ${target.length}. Maid: ${
             maid || 'Not specified'
-        }`
+        }. Folder: ${folder || 'Not specified'}`
     );
 
     try {
@@ -715,7 +886,35 @@ async function handleUpdateCommand(args) {
             )}. Remaining directories: ${allDirs.map((d) => d.name).join(', ')}`
         );
 
-        if (maid) {
+        if (folder && typeof folder === 'string' && folder.trim()) {
+            // 显式 folder 优先级最高：格式如 folder: 小克的知识, maid: 小克
+            const priorityFolder = sanitizePathComponent(folder.trim());
+            debugLog(
+                `Explicit folder specified for update (sanitized): '${priorityFolder}'`
+            );
+
+            for (const dirEntry of allDirs) {
+                const dirPath = path.join(dailyNoteRootPath, dirEntry.name);
+
+                // 安全检查：确保路径在 dailyNoteRootPath 内
+                if (!isPathWithinBase(dirPath, dailyNoteRootPath)) {
+                    debugLog(`Skipping unsafe directory during update: ${dirPath}`);
+                    continue;
+                }
+
+                if (sanitizePathComponent(dirEntry.name) === priorityFolder) {
+                    priorityDirs.push({ name: dirEntry.name, path: dirPath });
+                } else {
+                    otherDirs.push({ name: dirEntry.name, path: dirPath });
+                }
+            }
+
+            if (priorityDirs.length === 0) {
+                debugLog(
+                    `Explicit folder '${priorityFolder}' not found, will search all folders.`
+                );
+            }
+        } else if (maid) {
             const maidRegex = /^\[(.+?)\]/;
             const match = maid.match(maidRegex);
 
@@ -899,14 +1098,28 @@ async function handleUpdateCommand(args) {
         }
 
         if (modificationDone) {
+            const finalFileName = path.basename(modifiedFilePath);
+            const folderName = path.basename(path.dirname(modifiedFilePath));
             return {
                 status: 'success',
-                result: `Successfully edited diary file: ${modifiedFilePath}`,
+                result: {
+                    result: `Successfully edited diary file: ${modifiedFilePath}`,
+                    message: `${maid || 'AI'} 已成功更新 ${folderName} 文件夹中的日记文件 (${finalFileName})`,
+                    targetFile: modifiedFilePath,
+                    folder: folderName,
+                    fileName: finalFileName
+                }
             };
         } else {
-            const errorMessage = maid
-                ? `Target content not found in any diary files for maid '${maid}'.`
+            const scopeDescription = folder
+                ? `folder '${folder}'`
+                : maid
+                    ? `maid '${maid}'`
+                    : '';
+            const baseErrorMessage = scopeDescription
+                ? `Target content not found in any diary files for ${scopeDescription}.`
                 : 'Target content not found in any diary files.';
+            const errorMessage = `${baseErrorMessage} ${UPDATE_FAILURE_HINT}`;
 
             // Layer 3: Emergency Fallback
             if (FUZZY_DIFF_ENABLED && !bestCandidate) {
@@ -994,7 +1207,32 @@ async function main() {
             const args = JSON.parse(inputData);
             const { command, ...parameters } = args;
 
-            switch (command) {
+            // 鲁棒性兼容：AI 有时会遗漏 command，或把 command 拼错。
+            // 参数形态足够明确时，优先按参数形态纠正：
+            // - 含 target + replace 时，视为 update
+            // - 含 content/contentText/Content 时，视为 create
+            // 显式且正确的 command 保持原样；显式但未知的 command 允许被参数形态覆盖。
+            const rawCommand = typeof command === 'string' ? command.trim().toLowerCase() : command;
+            const hasCreateContent =
+                typeof parameters.contentText === 'string' ||
+                typeof parameters.Content === 'string' ||
+                typeof parameters.content === 'string';
+            const hasUpdateTargetReplace =
+                typeof parameters.target === 'string' &&
+                typeof parameters.replace === 'string';
+
+            let normalizedCommand = rawCommand;
+            if (rawCommand !== 'create' && rawCommand !== 'update') {
+                if (hasUpdateTargetReplace) {
+                    normalizedCommand = 'update';
+                    debugLog(`Command '${command || ''}' is missing or invalid; inferred 'update' from target/replace arguments.`);
+                } else if (hasCreateContent) {
+                    normalizedCommand = 'create';
+                    debugLog(`Command '${command || ''}' is missing or invalid; inferred 'create' from content arguments.`);
+                }
+            }
+
+            switch (normalizedCommand) {
                 case 'create':
                     result = await handleCreateCommand(parameters);
                     break;
@@ -1002,7 +1240,7 @@ async function main() {
                     result = await handleUpdateCommand(parameters);
                     break;
                 default:
-                    result = { status: "error", error: `Unknown command: '${command}'. Use 'create' or 'update'.` };
+                    result = { status: "error", error: `Unknown command: '${normalizedCommand}'. Use 'create' or 'update'.` };
             }
         } catch (error) {
             console.error("[DailyNote] Error processing request:", error.message);

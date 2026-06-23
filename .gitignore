@@ -90,6 +90,9 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+# 但保留 AdminPanel-Vue 构建产物，让用户开箱即用
+!AdminPanel-Vue/dist/
+!AdminPanel-Vue/dist/**
 
 # Gatsby files
 .cache/
@@ -135,9 +138,7 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-# ============================================
 # Custom VCPToolBox ignores
-# ============================================
 
 # ===== 环境配置文件 =====
 # 所有插件的实际 config.env（保留 .example）
@@ -151,33 +152,26 @@ ModelRedirect.json
 agent_map.json
 preprocessor_order.json
 tag-processor-config.env
-
-# 本地开发配置
-*.local.*
-config.local.*
-/config.docker.env
-/config.env.new
-/config.env.old
-/config.env.backup_*
-
-# 配置迁移文件
-config-backups/
-migration-report.txt
-APPLY_CONFIG.md
-MIGRATION_GUIDE.md
+# 多模态识别 JSON 真相源（首启自动生成；私密提示词不应入库）
+multimodal-config.json
 
 # ===== 运行时数据 / 缓存 =====
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
 DebugLog/
-dailynote/
+dailynote/*
+!dailynote/VCP桌面知识/
+!dailynote/VCP桌面知识/**
+!dailynote/VCP开发/
+!dailynote/VCP开发/**
 ip_blacklist.json
 /VectorStore
 
 # 插件缓存文件
 Plugin/ArtistMatcher/artist_cache.json
 Plugin/DailyHot/dailyhot_cache.md
-Plugin/DailyHot/dailyhot_cache.json
-Plugin/DailyHot/*.cache
-Plugin/DailyHot/dist/cache/
 Plugin/EmojiListGenerator/generated_lists/
 Plugin/FRPSInfoProvider/frps_info_cache.txt
 Plugin/ImageProcessor/image_cache.json
@@ -191,15 +185,14 @@ Plugin/RAGDiaryPlugin/rag_tags.json
 Plugin/RAGDiaryPlugin/semantic_groups.json
 Plugin/RAGDiaryPlugin/semantic_groups.edit.json
 Plugin/RAGDiaryPlugin/semantic_vectors/
-Plugin/RAGDiaryPlugin/*.bin
 Plugin/TavilySearch/.vcptoolbox_tavily_cache.json
 Plugin/UserAuth/code.bin
 Plugin/VCPLog/log/VCPlog.txt
-Plugin/FlashDeepSearch/log/
 Plugin/WeatherReporter/weather_cache.json
 Plugin/WeatherReporter/weather_cache.txt
 Plugin/WeatherReporter/city_cache.txt
-Plugin/WeatherReporter/*.cache
+ToolConfigs/dynamic_tool_catalog.json
+ToolConfigs/dynamic_tool_categories.json
 
 # ===== 图片 / 媒体 =====
 # 忽略通用表情包目录下的所有内容...
@@ -210,6 +203,8 @@ image/通用表情包/*
 
 # 忽略 FluxGen 生成的图片
 image/fluxgen/
+# 忽略 B站截图的图片
+image/bilibili/
 
 # ===== IDE / OS 文件 =====
 .vscode/
@@ -217,39 +212,25 @@ image/fluxgen/
 **/.DS_Store
 .DS_Store?
 /.obsidian
-.history
+
+# Qwen Code / Snow 工具配置
+**/.qwen/
+**/.snow/
+helloagents/
+
+# Windows 缩略图缓存
+Thumbs.db
 
 # ===== 编译产物 =====
 rust-vexus-lite/target/
-target/
-
-# ===== Claude / AI 工具文件 =====
-.claude/
-.crush/
-.spec-workflow/
-.serena/
-.snow/
-.bmad-core/
-
-# ===== 本地Docker配置 (避免合并冲突) =====
-Dockerfile
-docker-compose.yml
-
-# ===== Plugin binary cache =====
-**/*.bin
-
-# ===== 外部工具 =====
-bfg.jar
-
-# ===== 临时 / 分析文件 =====
-*_analysis.md
-*_temp.*
-
-# ===== LLM文档目录 =====
-llmdoc/
-.ace-tool/
+Plugin/DailyNoteSearcher/src/target/
 
 # ==== 分布式开发 ====
 VCPDistributedServer
 # XiaohongshuFetch config
 Plugin/XiaohongshuFetch/config.env
+
+# ==== 插件商店 ====
+pluginStoreSources.json
+tmp/
+Plugin/.backup/

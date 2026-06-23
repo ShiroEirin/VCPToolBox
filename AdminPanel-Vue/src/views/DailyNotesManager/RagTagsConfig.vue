@@ -2,16 +2,8 @@
   <div v-if="selectedFolder" class="rag-tags-config-area card">
     <div class="rag-tags-header">
       <div class="rag-tags-title-row">
-        <h3>知识库标签列表 - {{ selectedFolder }}</h3>
+        <h3>{{ titleLabel }} - {{ selectedFolder }}</h3>
         <div class="rag-tags-actions">
-          <button
-            class="btn-secondary btn-sm"
-            title="添加常用标签"
-            @click="$emit('addCommonTags')"
-          >
-            <span class="material-symbols-outlined">add_reaction</span>
-            常用标签
-          </button>
           <button
             class="btn-danger btn-sm"
             title="清空所有标签"
@@ -23,23 +15,36 @@
         </div>
       </div>
       <p class="rag-tags-hint">
-        点击标签可编辑，悬停显示删除按钮。支持拖拽排序（待实现）
+        {{ hintText }}
       </p>
     </div>
 
     <div class="kb-entry">
-      <div class="threshold-controls">
-        <label class="switch-container">
-          <span>启用阈值:</span>
-          <label class="switch">
-            <input
-              :checked="ragTagsConfig.thresholdEnabled"
-              type="checkbox"
-              @change="$emit('toggleThreshold')"
-            />
-            <span class="slider"></span>
-          </label>
+      <div v-if="showDescription" class="description-controls">
+        <label class="description-label" for="rag-tags-description">
+          主题描述 / 门控增强文本
         </label>
+        <textarea
+          id="rag-tags-description"
+          :value="ragTagsConfig.description || ''"
+          class="description-input"
+          rows="3"
+          placeholder="用于知识库门控与增强向量，例如：该知识库覆盖 VCP 架构、插件开发、部署运维等官方资料。"
+          @input="onDescriptionInput"
+        ></textarea>
+        <p class="description-hint">
+          描述会写入 {{ targetFileName }}，并参与 《《...知识库》》 的增强向量与阈值判断。
+        </p>
+      </div>
+
+      <div class="threshold-controls">
+        <div class="switch-container">
+          <span>启用阈值:</span>
+          <AppSwitch
+            :model-value="ragTagsConfig.thresholdEnabled"
+            @change="$emit('toggleThreshold', $event)"
+          />
+        </div>
         <input
           :value="ragTagsConfig.threshold"
           type="range"
@@ -57,11 +62,11 @@
       <div class="tags-container">
         <div v-if="ragTagsConfig.tags.length === 0" class="empty-tags-hint">
           <span class="material-symbols-outlined">tag</span>
-          <p>暂无标签，点击上方"常用标签"或"添加标签"按钮添加</p>
+          <p>暂无标签，点击上方"添加标签"按钮添加</p>
         </div>
         <div
           v-for="(tag, index) in ragTagsConfig.tags"
-          :key="`${tag}-${index}`"
+          :key="index"
           class="tag-item"
         >
           <span class="tag-index">{{ index + 1 }}</span>
@@ -96,7 +101,7 @@
       <div class="rag-tags-controls">
         <button class="btn-primary" @click="$emit('saveRagTags')">
           <span class="material-symbols-outlined">save</span>
-          保存更改到 rag_tags.json
+          保存更改到 {{ targetFileName }}
         </button>
         <span
           v-if="ragTagsStatus"
@@ -109,27 +114,43 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 interface RagTagsConfig {
   thresholdEnabled: boolean;
   threshold: number;
   tags: string[];
+  description?: string;
 }
 
-defineProps<{
+const props = withDefaults(defineProps<{
   selectedFolder: string;
   ragTagsConfig: RagTagsConfig;
   ragTagsStatus: string;
   ragTagsStatusType: "info" | "success" | "error";
-}>();
+  mode?: "diary" | "knowledge";
+}>(), {
+  mode: "diary"
+});
+
+const isKnowledgeMode = computed(() => props.mode === "knowledge");
+const targetFileName = computed(() => isKnowledgeMode.value ? "tdb_tags.json" : "rag_tags.json");
+const titleLabel = computed(() => isKnowledgeMode.value ? "冷知识库标签与门控配置" : "知识库标签列表");
+const showDescription = computed(() => isKnowledgeMode.value);
+const hintText = computed(() => isKnowledgeMode.value
+  ? "编辑冷知识库的标签、阈值与主题描述。标签和描述会共同增强 《《知识库》》 门控判断。"
+  : "点击标签可编辑，悬停显示删除按钮。支持拖拽排序（待实现）"
+);
 
 const emit = defineEmits<{
-  (e: "addCommonTags"): void;
   (e: "clearAllTags"): void;
-  (e: "toggleThreshold"): void;
+  (e: "toggleThreshold", enabled: boolean): void;
   (e: "updateThreshold", value: number): void;
   (e: "addTag"): void;
   (e: "updateTag", payload: { index: number; value: string }): void;
   (e: "removeTag", index: number): void;
+  (e: "updateDescription", value: string): void;
   (e: "saveRagTags"): void;
 }>();
 
@@ -141,6 +162,11 @@ function onThresholdInput(event: Event) {
 function onTagInput(index: number, event: Event) {
   const target = event.target as HTMLInputElement;
   emit("updateTag", { index, value: target.value });
+}
+
+function onDescriptionInput(event: Event) {
+  const target = event.target as HTMLTextAreaElement;
+  emit("updateDescription", target.value);
 }
 </script>
 
@@ -180,6 +206,46 @@ function onTagInput(index: number, event: Event) {
 }
 
 .rag-tags-hint {
+  margin: 0;
+  font-size: var(--font-size-helper);
+  color: var(--secondary-text);
+}
+
+.description-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  background: var(--tertiary-bg);
+  border-radius: var(--radius-sm);
+}
+
+.description-label {
+  font-size: var(--font-size-helper);
+  color: var(--secondary-text);
+  font-weight: 600;
+}
+
+.description-input {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  padding: var(--space-3);
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--primary-text);
+  line-height: 1.6;
+}
+
+.description-input:focus-visible {
+  outline: 2px solid var(--highlight-text);
+  outline-offset: 2px;
+  background: var(--surface-overlay-soft);
+}
+
+.description-hint {
   margin: 0;
   font-size: var(--font-size-helper);
   color: var(--secondary-text);

@@ -3,6 +3,7 @@ const WebSocket = require('ws');
 const url = require('url');
 const fs = require('fs').promises;
 const path = require('path');
+const { syncDistributedMusicDiary } = require('./modules/distributedMusicDiarySync');
 
 let wssInstance;
 let pluginManager = null; // 为 PluginManager 实例占位
@@ -13,7 +14,8 @@ let shutdownPromise = null;
 
 let serverConfig = {
     debugMode: false,
-    vcpKey: null
+    vcpKey: null,
+    distributedMusicPlaylistSyncEnabled: false
 };
 
 // 用于存储不同类型的客户端
@@ -26,6 +28,30 @@ const pendingToolRequests = new Map(); // 跨服务器工具调用的待处理�
 const distributedServerIPs = new Map(); // 新增：存储分布式服务器的IP信息
 const waitingControlClients = new Map(); // 新增：存储等待页面更新的ChromeControl客户端 (clientId -> requestId)
 const VCP_ASYNC_RESULTS_DIR = path.join(__dirname, 'VCPAsyncResults');
+const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
+
+function formatDateTimeForConfiguredTimezone(date = new Date()) {
+    try {
+        const parts = new Intl.DateTimeFormat('zh-CN', {
+            timeZone: DEFAULT_TIMEZONE,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+            timeZoneName: 'longOffset'
+        }).formatToParts(date);
+
+        const getPart = (type) => parts.find(part => part.type === type)?.value;
+        const offset = (getPart('timeZoneName') || '').replace('GMT', '') || DEFAULT_TIMEZONE;
+        return `${getPart('year')}-${getPart('month')}-${getPart('day')}T${getPart('hour')}:${getPart('minute')}:${getPart('second')}${offset}`;
+    } catch (error) {
+        console.error(`[WebSocketServer] Failed to format date with timezone ${DEFAULT_TIMEZONE}:`, error.message);
+        return date.toISOString();
+    }
+}
 
 function generateClientId() {
     // 用于生成客户端ID和请求ID
@@ -194,7 +220,13 @@ function initialize(httpServer, config) {
                 if (clientType === 'DistributedServer') {
                     const serverId = `dist-${clientId}`;
                     ws.serverId = serverId;
-                    distributedServers.set(serverId, { ws, tools: [], ips: {} }); // 初始化ips字段
+                    distributedServers.set(serverId, {
+                        ws,
+                        tools: [],
+                        ips: {},
+                        connectedAt: formatDateTimeForConfiguredTimezone(),
+                        lastSeenAt: formatDateTimeForConfiguredTimezone()
+                    }); // 初始化ips字段
                     writeLog(`Distributed Server ${serverId} authenticated and connected.`);
                 } else if (clientType === 'ChromeObserver') {
                     console.log(`[WebSocketServer FORCE LOG] A client with type 'ChromeObserver' (ID: ${clientId}) has connected.`); // 强制日志
@@ -381,11 +413,14 @@ function initialize(httpServer, config) {
                         }
                     }
                 } else if (parsedMessage.type === 'tool_approval_response') {
-                    const { requestId, approved } = parsedMessage.data;
+                    const { requestId, approved, reason } = parsedMessage.data || {};
                     if (pluginManager) {
-                        const success = pluginManager.handleApprovalResponse(requestId, approved);
+                        const success = pluginManager.handleApprovalResponse(requestId, approved, reason);
                         if (serverConfig.debugMode) {
-                            console.log(`[WebSocketServer] Approval response for ${requestId}: ${approved ? 'APPROVED' : 'REJECTED'}. Handled: ${success}`);
+                            const reasonPreview = typeof reason === 'string' && reason.trim()
+                                ? ` Reason: ${reason.trim().substring(0, 200)}`
+                                : '';
+                            console.log(`[WebSocketServer] Approval response for ${requestId}: ${approved ? 'APPROVED' : 'REJECTED'}. Handled: ${success}.${reasonPreview}`);
                         }
                     }
                 } else if (ws.clientType === 'AdminPanel') {
@@ -564,8 +599,12 @@ async function handleDistributedServerMessage(serverId, message) {
                 const externalTools = message.data.tools.filter(t => t.name !== 'internal_request_file');
                 pluginManager.registerDistributedTools(serverId, externalTools);
                 serverEntry.tools = externalTools.map(t => t.name);
+                if (message.data.serverName) {
+                    serverEntry.serverName = message.data.serverName;
+                }
+                serverEntry.lastSeenAt = formatDateTimeForConfiguredTimezone();
                 distributedServers.set(serverId, serverEntry);
-                writeLog(`Registered ${externalTools.length} external tools from server ${serverId}.`);
+                writeLog(`Registered ${externalTools.length} external tools from server ${serverId}${serverEntry.serverName ? ` (${serverEntry.serverName})` : ''}.`);
             }
             break;
        case 'report_ip':
@@ -574,12 +613,17 @@ async function handleDistributedServerMessage(serverId, message) {
                const ipData = {
                    localIPs: message.data.localIPs || [],
                    publicIP: message.data.publicIP || null,
-                   serverName: message.data.serverName || serverId
+                   serverName: message.data.serverName || serverInfo.serverName || serverId
                };
                distributedServerIPs.set(serverId, ipData);
                
-               // 将 serverName 也存储在主连接对象中，以便通过名字查找
+               // 将 serverName 和 IP 信息也存储在主连接对象中，以便通过名字查找和提示词快照读取
                serverInfo.serverName = ipData.serverName;
+               serverInfo.ips = {
+                   localIPs: ipData.localIPs,
+                   publicIP: ipData.publicIP
+               };
+               serverInfo.lastSeenAt = formatDateTimeForConfiguredTimezone();
                distributedServers.set(serverId, serverInfo);
 
                // 强制日志记录，无论debug模式如何
@@ -598,6 +642,71 @@ async function handleDistributedServerMessage(serverId, message) {
                 
                 // 将分布式服务器的静态占位符更新推送到主服务器的插件管理器
                 pluginManager.updateDistributedStaticPlaceholders(serverId, serverName, placeholders);
+            }
+            break;
+        case 'music_playlist_update':
+            try {
+                const serverInfo = distributedServers.get(serverId);
+                const data = {
+                    ...(message.data || {}),
+                    serverName: message.data?.serverName || serverInfo?.serverName || serverId
+                };
+
+                if (!serverConfig.distributedMusicPlaylistSyncEnabled) {
+                    if (serverInfo) {
+                        serverInfo.serverName = data.serverName;
+                        serverInfo.lastSeenAt = formatDateTimeForConfiguredTimezone();
+                        serverInfo.musicPlaylist = {
+                            exists: data.exists === true,
+                            count: Array.isArray(data.tracks) ? data.tracks.length : 0,
+                            playlistPath: data.playlistPath || '',
+                            updatedAt: data.updatedAt || null,
+                            lastSyncedAt: null,
+                            syncResult: {
+                                skipped: true,
+                                reason: 'disabled_by_config',
+                                added: 0,
+                                removed: 0,
+                                kept: 0,
+                                desiredCount: 0
+                            }
+                        };
+                        distributedServers.set(serverId, serverInfo);
+                    }
+
+                    if (serverConfig.debugMode) {
+                        console.log(`[WebSocketServer] Distributed music playlist sync disabled by config. Received ${Array.isArray(data.tracks) ? data.tracks.length : 0} tracks from ${data.serverName}.`);
+                    }
+                    break;
+                }
+
+                const result = await syncDistributedMusicDiary(data, { logger: console });
+                if (serverInfo) {
+                    serverInfo.serverName = data.serverName;
+                    serverInfo.lastSeenAt = formatDateTimeForConfiguredTimezone();
+                    serverInfo.musicPlaylist = {
+                        exists: data.exists === true,
+                        count: Array.isArray(data.tracks) ? data.tracks.length : 0,
+                        playlistPath: data.playlistPath || '',
+                        updatedAt: data.updatedAt || null,
+                        lastSyncedAt: formatDateTimeForConfiguredTimezone(),
+                        syncResult: {
+                            skipped: result.skipped,
+                            reason: result.reason || null,
+                            added: result.added?.length || 0,
+                            removed: result.removed?.length || 0,
+                            kept: result.kept?.length || 0,
+                            desiredCount: result.desiredCount || 0
+                        }
+                    };
+                    distributedServers.set(serverId, serverInfo);
+                }
+
+                if (serverConfig.debugMode) {
+                    console.log(`[WebSocketServer] Music playlist sync from ${data.serverName}:`, result);
+                }
+            } catch (error) {
+                console.error(`[WebSocketServer] Failed to sync distributed music playlist from ${serverId}:`, error);
             }
             break;
         case 'tool_result':
@@ -674,6 +783,62 @@ function findServerByIp(ip) {
    return null;
 }
 
+function getDistributedServerSnapshot() {
+    return Array.from(distributedServers.entries()).map(([serverId, serverInfo]) => {
+        const ipInfo = distributedServerIPs.get(serverId) || {};
+        const localIPs = Array.isArray(ipInfo.localIPs)
+            ? ipInfo.localIPs
+            : (Array.isArray(serverInfo.ips?.localIPs) ? serverInfo.ips.localIPs : []);
+
+        return {
+            serverId,
+            clientId: serverInfo.ws?.clientId || null,
+            serverName: serverInfo.serverName || ipInfo.serverName || serverId,
+            localIPs,
+            publicIP: ipInfo.publicIP ?? serverInfo.ips?.publicIP ?? null,
+            tools: Array.isArray(serverInfo.tools) ? [...serverInfo.tools] : [],
+            connected: serverInfo.ws?.readyState === WebSocket.OPEN,
+            connectedAt: serverInfo.connectedAt || null,
+            lastSeenAt: serverInfo.lastSeenAt || null
+        };
+    });
+}
+
+function formatDistributedServerListForPrompt() {
+    const servers = getDistributedServerSnapshot()
+        .filter(server => server.connected)
+        .sort((a, b) => String(a.serverName).localeCompare(String(b.serverName), 'zh-CN'));
+
+    if (servers.length === 0) {
+        return [
+            '[VCP Distributed Server List]',
+            '当前没有已连接的 VCP 分布式服务器。'
+        ].join('\n');
+    }
+
+    const lines = [
+        '[VCP Distributed Server List]',
+        `当前已连接 ${servers.length} 个 VCP 分布式服务器。`,
+        '说明：serverId 可用于精确定位分布式节点；serverName 是节点自报名称；IP 信息来自节点最近一次上报。'
+    ];
+
+    for (const server of servers) {
+        lines.push(
+            [
+                `- serverName: ${server.serverName}`,
+                `  serverId: ${server.serverId}`,
+                `  clientId: ${server.clientId || 'unknown'}`,
+                `  publicIP: ${server.publicIP || 'N/A'}`,
+                `  localIPs: ${server.localIPs.length > 0 ? server.localIPs.join(', ') : 'N/A'}`,
+                `  connectedAt: ${server.connectedAt || 'unknown'}`,
+                `  lastSeenAt: ${server.lastSeenAt || 'unknown'}`
+            ].join('\n')
+        );
+    }
+
+    return lines.join('\n');
+}
+
 // 新增：专门广播给管理面板
 function broadcastToAdminPanel(data) {
     if (!wssInstance) return;
@@ -701,5 +866,7 @@ module.exports = {
     executeDistributedTool,
     handleDistributedServerMessage,
     findServerByIp,
+    getDistributedServerSnapshot,
+    formatDistributedServerListForPrompt,
     shutdown
 };

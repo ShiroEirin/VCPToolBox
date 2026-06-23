@@ -9,7 +9,7 @@ const dynamicToolRegistry = require('./dynamicToolRegistry.js');
 const sarPromptManager = require('./sarPromptManager.js');
 
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
-const REPORT_TIMEZONE = process.env.REPORT_TIMEZONE || 'Asia/Shanghai'; // 新增：用于控制 AI 报告的时间，默认回退到中国时区
+const REPORT_TIMEZONE = process.env.REPORT_TIMEZONE || DEFAULT_TIMEZONE; // 用于控制 AI 报告的时间，默认回退到根目录 config.env 的 DEFAULT_TIMEZONE
 function resolveAgentDir() {
     const configPath = process.env.AGENT_DIR_PATH;
     if (!configPath || typeof configPath !== 'string' || configPath.trim() === '') {
@@ -34,6 +34,115 @@ function resolveTvsDir() {
 const TVS_DIR = resolveTvsDir();
 const VCP_ASYNC_RESULTS_DIR = path.join(__dirname, '..', 'VCPAsyncResults');
 
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replaceFirstAliasPlaceholder(text, alias, replacementText, prefix = '') {
+    const escapedAlias = escapeRegExp(alias);
+    const escapedPrefix = prefix ? `${escapeRegExp(prefix)}:` : '';
+    const aliasPlaceholderRegex = new RegExp(`\\{\\{(?:${escapedPrefix})?${escapedAlias}\\}\\}`, 'g');
+    let hasReplacedFirst = false;
+
+    return String(text).replace(aliasPlaceholderRegex, () => {
+        if (hasReplacedFirst) {
+            return '';
+        }
+        hasReplacedFirst = true;
+        return replacementText;
+    });
+}
+
+const SYSTEM_USER_PREFIX_REGEX = /^\s*\[系统[^\]]*\]/;
+const SYSTEM_NOTIFICATION_PREFIX_REGEX = /^\s*\[系统通知[:：]?\]/;
+const SYSTEM_EMPTY_PROMPT_PREFIX_REGEX = /^\s*\[系统提示:\]无内容/;
+const SYSTEM_INVITATION_PREFIX_REGEX = /^\s*\[系统邀请指令[:：]?\]/;
+const VCP_TOOL_PAYLOAD_PREFIX_REGEX = /^\s*<!-- VCP_TOOL_PAYLOAD -->/;
+
+function extractTextFromMessageContent(content) {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        return content
+            .filter(part => part && part.type === 'text' && typeof part.text === 'string')
+            .map(part => part.text)
+            .join('\n')
+            .trim();
+    }
+    if (content && typeof content === 'object' && typeof content.text === 'string') {
+        return content.text;
+    }
+    return '';
+}
+
+function isSystemNotificationText(text) {
+    return SYSTEM_NOTIFICATION_PREFIX_REGEX.test(String(text || ''));
+}
+
+function isBetaSystemUserText(text) {
+    const normalizedText = String(text || '');
+    if (!normalizedText) return false;
+    if (isSystemNotificationText(normalizedText)) return false;
+    return SYSTEM_USER_PREFIX_REGEX.test(normalizedText);
+}
+
+function stripSystemNotificationBlocks(text) {
+    if (!text || typeof text !== 'string') return text || '';
+    return text.replace(/\[系统通知[:：]?\][\s\S]*?\[系统通知结束\]/g, '').trim();
+}
+
+function findLastRealUserMessage(messages, options = {}) {
+    if (!Array.isArray(messages)) {
+        return { index: -1, rawContent: '', sanitizedContent: '' };
+    }
+
+    const sanitizer = typeof options.sanitize === 'function' ? options.sanitize : null;
+    const skipBetaSystemUser = options.skipBetaSystemUser !== false;
+    const skipEmptySystemPrompt = options.skipEmptySystemPrompt !== false;
+    const skipSystemInvitation = options.skipSystemInvitation !== false;
+    const skipToolPayload = options.skipToolPayload !== false;
+
+    for (let index = messages.length - 1; index >= 0; index--) {
+        const message = messages[index];
+        if (!message || message.role !== 'user') continue;
+
+        const rawContent = extractTextFromMessageContent(message.content);
+        if (!rawContent || !rawContent.trim()) continue;
+
+        if (skipEmptySystemPrompt && SYSTEM_EMPTY_PROMPT_PREFIX_REGEX.test(rawContent.trim())) {
+            continue;
+        }
+
+        if (skipSystemInvitation && SYSTEM_INVITATION_PREFIX_REGEX.test(rawContent.trim())) {
+            continue;
+        }
+
+        if (skipToolPayload && VCP_TOOL_PAYLOAD_PREFIX_REGEX.test(rawContent.trim())) {
+            continue;
+        }
+
+        if (skipBetaSystemUser && isBetaSystemUserText(rawContent)) {
+            continue;
+        }
+
+        const sanitizedContent = sanitizer
+            ? sanitizer(rawContent, 'user')
+            : stripSystemNotificationBlocks(rawContent);
+
+        if (!sanitizedContent || !sanitizedContent.trim()) {
+            continue;
+        }
+
+        return {
+            index,
+            message,
+            rawContent,
+            sanitizedContent: sanitizedContent.trim()
+        };
+    }
+
+    return { index: -1, rawContent: '', sanitizedContent: '' };
+}
+
 async function resolveAllVariables(text, model, role, context, processingStack = new Set()) {
     if (text == null) return '';
     let processedText = String(text);
@@ -47,7 +156,8 @@ async function resolveAllVariables(text, model, role, context, processingStack =
     // CJK Radicals Supplement - Ideographic Description Characters 0x2E80 - 0x2FFF
     // Hiragana - CJK Unified Ideographs 0x3040 - 0x9FFF
     // 跳过标点符号 CJK Symbols and Punctuation 0x3000 - 0x303F
-    const placeholderRegex = /\{\{([a-zA-Z0-9_:\u2e80-\u2fff\u3040-\u9fff]+)\}\}/g;
+    // 扩展支持 @ 和 #%&^+-_ 符号
+    const placeholderRegex = /\{\{([a-zA-Z0-9_:@#%&^+_\-\u2e80-\u2fff\u3040-\u9fff]+)\}\}/g;
     const matches = [...processedText.matchAll(placeholderRegex)];
 
     // 提取所有潜在的别名（去除 "agent:" / "toolbox:" 前缀）
@@ -128,9 +238,7 @@ async function resolveAllVariables(text, model, role, context, processingStack =
                 );
                 processingStack.delete(stackKey);
 
-                processedText = processedText
-                    .replaceAll(`{{${alias}}}`, expandedText)
-                    .replaceAll(`{{toolbox:${alias}}}`, expandedText);
+                processedText = replaceFirstAliasPlaceholder(processedText, alias, expandedText, 'toolbox');
 
                 // 标记此 Toolbox 已展开
                 if (context.expandedToolboxes) {
@@ -145,6 +253,60 @@ async function resolveAllVariables(text, model, role, context, processingStack =
     processedText = await replaceOtherVariables(processedText, model, role, context);
 
     return processedText;
+}
+
+const STATIC_FOLD_MODE_REGEX = /\[\[VCPStaticFold::(Auto|Lite|Full)\]\]/gi;
+
+function extractStaticFoldMode(text) {
+    const rawText = String(text || '');
+    let mode = 'auto';
+    let match;
+
+    while ((match = STATIC_FOLD_MODE_REGEX.exec(rawText)) !== null) {
+        mode = String(match[1] || 'Auto').toLowerCase();
+    }
+
+    STATIC_FOLD_MODE_REGEX.lastIndex = 0;
+    return mode;
+}
+
+function removeStaticFoldModePlaceholders(text) {
+    STATIC_FOLD_MODE_REGEX.lastIndex = 0;
+    return String(text || '').replace(STATIC_FOLD_MODE_REGEX, '').trim();
+}
+
+function getNormalizedFoldBlocks(foldObj) {
+    if (!foldObj || !Array.isArray(foldObj.fold_blocks)) return [];
+    return foldObj.fold_blocks
+        .map((block, index) => ({
+            ...block,
+            _originalIndex: index,
+            threshold: Number.isFinite(Number(block?.threshold)) ? Number(block.threshold) : 0
+        }))
+        .filter(block => block && typeof block.content === 'string');
+}
+
+function resolveStaticFoldLite(foldObj) {
+    const blocks = getNormalizedFoldBlocks(foldObj);
+    if (blocks.length === 0) return '';
+
+    const sortedBlocks = [...blocks].sort((a, b) => {
+        if (a.threshold !== b.threshold) return a.threshold - b.threshold;
+        return a._originalIndex - b._originalIndex;
+    });
+
+    return sortedBlocks[0]?.content || '';
+}
+
+function resolveStaticFoldFull(foldObj) {
+    const blocks = getNormalizedFoldBlocks(foldObj);
+    if (blocks.length === 0) return '';
+
+    return blocks
+        .sort((a, b) => a._originalIndex - b._originalIndex)
+        .map(block => block.content)
+        .filter(Boolean)
+        .join('\n\n---\n\n');
 }
 
 // 🌟 新增：动态折叠协议处理器
@@ -167,30 +329,19 @@ async function resolveDynamicFoldProtocol(foldObj, context, placeholderKey) {
         }
 
         const contextMessages = context.messages || [];
-        const lastUserMessageIndex = contextMessages.findLastIndex(m => {
-            if (m.role !== 'user') return false;
-            const content = typeof m.content === 'string'
-                ? m.content
-                : (Array.isArray(m.content) ? (m.content.find(p => p.type === 'text')?.text || '') : '');
-            return !content.startsWith('[系统邀请指令:]') && !content.trim().startsWith('[系统提示:]无内容');
+        const lastUserMessage = findLastRealUserMessage(contextMessages, {
+            sanitize: typeof ragPlugin.sanitizeForEmbedding === 'function'
+                ? ragPlugin.sanitizeForEmbedding.bind(ragPlugin)
+                : null
         });
         const lastAiMessageIndex = contextMessages.findLastIndex(m => m.role === 'assistant');
 
-        let userContent = '';
+        let userContent = lastUserMessage.sanitizedContent || '';
         let aiContent = null;
-
-        if (lastUserMessageIndex > -1) {
-            const m = contextMessages[lastUserMessageIndex];
-            userContent = typeof m.content === 'string'
-                ? m.content
-                : (Array.isArray(m.content) ? (m.content.find(p => p.type === 'text')?.text || '') : '');
-        }
 
         if (lastAiMessageIndex > -1) {
             const m = contextMessages[lastAiMessageIndex];
-            aiContent = typeof m.content === 'string'
-                ? m.content
-                : (Array.isArray(m.content) ? (m.content.find(p => p.type === 'text')?.text || '') : '');
+            aiContent = extractTextFromMessageContent(m.content);
         }
 
         if (!userContent) {
@@ -199,13 +350,6 @@ async function resolveDynamicFoldProtocol(foldObj, context, placeholderKey) {
         }
 
         if (typeof ragPlugin.sanitizeForEmbedding === 'function') {
-            if (userContent) {
-                const originalUserContent = userContent;
-                userContent = ragPlugin.sanitizeForEmbedding(userContent, 'user');
-                if (context.DEBUG_MODE && originalUserContent.length !== userContent.length) {
-                    console.log('[DynamicFold] User content was sanitized via unified sanitizer.');
-                }
-            }
             if (aiContent) {
                 const originalAiContent = aiContent;
                 aiContent = ragPlugin.sanitizeForEmbedding(aiContent, 'assistant');
@@ -231,10 +375,46 @@ async function resolveDynamicFoldProtocol(foldObj, context, placeholderKey) {
 
         const config = ragPlugin.ragParams?.RAGDiaryPlugin || {};
         const mainWeights = config.mainSearchWeights || [0.7, 0.3];
+        const fuzzyConfig = ragPlugin.ragParams?.ContextFoldingV2?.fuzzyEmbedding || {};
+        const fuzzyOptions = {
+            threshold: Number.isFinite(Number(fuzzyConfig.threshold)) ? Number(fuzzyConfig.threshold) : 0.985,
+            minLength: Number.isFinite(Number(fuzzyConfig.minLength)) ? Number(fuzzyConfig.minLength) : 80,
+            maxScan: Number.isFinite(Number(fuzzyConfig.maxScan)) ? Number(fuzzyConfig.maxScan) : 200,
+            maxLengthDiffRatio: Number.isFinite(Number(fuzzyConfig.maxLengthDiffRatio)) ? Number(fuzzyConfig.maxLengthDiffRatio) : 0.02,
+            maxLengthDiffAbs: Number.isFinite(Number(fuzzyConfig.maxLengthDiffAbs)) ? Number(fuzzyConfig.maxLengthDiffAbs) : 80
+        };
+
+        // DynamicFold 专用向量获取：精确缓存 → 高阈值 fuzzy 缓存 → Embedding API。
+        // 这里常在 RAGDiaryPlugin 主链路之后运行，AI 文本可能只有极小差异；
+        // 先 fuzzy 复用可避免动态折叠再次向量化同一段 AI 输出。
+        const getDynamicFoldEmbedding = async (text, label = 'unknown') => {
+            if (!text || typeof text !== 'string' || !text.trim()) return null;
+
+            if (typeof ragPlugin._getEmbeddingFromCacheOnly === 'function') {
+                const exact = ragPlugin._getEmbeddingFromCacheOnly(text);
+                if (exact) return exact;
+            }
+
+            if (typeof ragPlugin._findFuzzyEmbeddingFromCache === 'function') {
+                const fuzzy = ragPlugin._findFuzzyEmbeddingFromCache(text, fuzzyOptions);
+
+                if (fuzzy && fuzzy.vector) {
+                    if (context.DEBUG_MODE) {
+                        console.log(
+                            `[DynamicFold] Fuzzy embedding cache hit (${label}): ` +
+                            `sim=${fuzzy.similarity.toFixed(4)}, len=${text.length}/${fuzzy.length}`
+                        );
+                    }
+                    return fuzzy.vector;
+                }
+            }
+
+            return await ragPlugin.getSingleEmbeddingCached(text);
+        };
 
         const [uVec, aVec] = await Promise.all([
-            userContent ? ragPlugin.getSingleEmbeddingCached(userContent) : Promise.resolve(null),
-            aiContent ? ragPlugin.getSingleEmbeddingCached(aiContent) : Promise.resolve(null)
+            userContent ? getDynamicFoldEmbedding(userContent, 'user_context') : Promise.resolve(null),
+            aiContent ? getDynamicFoldEmbedding(aiContent, 'assistant_context') : Promise.resolve(null)
         ]);
 
         const userVector = ragPlugin._getWeightedAverageVector([uVec, aVec], mainWeights);
@@ -369,8 +549,57 @@ async function resolveDynamicFoldProtocol(foldObj, context, placeholderKey) {
     }
 }
 
+function applyDetectorRules(text, role, context = {}) {
+    const { detectors = [], superDetectors = [] } = context;
+    if (text == null) return '';
+
+    let processedText = String(text);
+
+    if (role === 'system') {
+        for (const rule of detectors) {
+            if (typeof rule.detector === 'string' && rule.detector.length > 0 && typeof rule.output === 'string') {
+                processedText = processedText.replaceAll(rule.detector, rule.output);
+            }
+        }
+    }
+
+    for (const rule of superDetectors) {
+        if (typeof rule.detector === 'string' && rule.detector.length > 0 && typeof rule.output === 'string') {
+            processedText = processedText.replaceAll(rule.detector, rule.output);
+        }
+    }
+
+    return processedText;
+}
+
+function applyDetectorsToMessages(messages, context = {}) {
+    if (!Array.isArray(messages)) {
+        return messages;
+    }
+
+    return messages.map((message) => {
+        const newMessage = JSON.parse(JSON.stringify(message));
+
+        if (typeof newMessage.content === 'string') {
+            newMessage.content = applyDetectorRules(newMessage.content, newMessage.role, context);
+        } else if (Array.isArray(newMessage.content)) {
+            newMessage.content = newMessage.content.map((part) => {
+                if (part && part.type === 'text' && typeof part.text === 'string') {
+                    return {
+                        ...part,
+                        text: applyDetectorRules(part.text, newMessage.role, context)
+                    };
+                }
+                return part;
+            });
+        }
+
+        return newMessage;
+    });
+}
+
 async function replaceOtherVariables(text, model, role, context) {
-    const { pluginManager, cachedEmojiLists, detectors, superDetectors, DEBUG_MODE } = context;
+    const { pluginManager, cachedEmojiLists, DEBUG_MODE } = context;
     if (text == null) return '';
     let processedText = String(text);
 
@@ -440,27 +669,51 @@ async function replaceOtherVariables(text, model, role, context) {
             }
         }
 
+        if (processedText.includes('{{VCPDistributedServerList}}')) {
+            let distributedServerListText = '[VCPDistributedServerList information unavailable]';
+            try {
+                const formatter = context.webSocketServer?.formatDistributedServerListForPrompt;
+                if (typeof formatter === 'function') {
+                    distributedServerListText = formatter();
+                }
+            } catch (error) {
+                console.error('[replaceOtherVariables] Error processing {{VCPDistributedServerList}}:', error);
+            }
+            processedText = processedText.replaceAll('{{VCPDistributedServerList}}', distributedServerListText);
+        }
+
         const now = new Date();
         if (DEBUG_MODE) {
             console.log(`[TimeVar] Raw Date: ${now.toISOString()}`);
             console.log(`[TimeVar] Default Timezone (for internal use): ${DEFAULT_TIMEZONE}`);
             console.log(`[TimeVar] Report Timezone (for AI prompt): ${REPORT_TIMEZONE}`);
         }
-        // 使用 REPORT_TIMEZONE 替换时间占位符
+        // 使用 REPORT_TIMEZONE 替换时间占位符；REPORT_TIMEZONE 未配置时回退 DEFAULT_TIMEZONE
         const date = now.toLocaleDateString('zh-CN', { timeZone: REPORT_TIMEZONE });
         processedText = processedText.replace(/\{\{Date\}\}/g, date);
         const time = now.toLocaleTimeString('zh-CN', { timeZone: REPORT_TIMEZONE });
         processedText = processedText.replace(/\{\{Time\}\}/g, time);
         const today = now.toLocaleDateString('zh-CN', { weekday: 'long', timeZone: REPORT_TIMEZONE });
         processedText = processedText.replace(/\{\{Today\}\}/g, today);
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        const day = now.getDate();
+
+        // 农历/节气也必须按同一报告时区取年月日，不能使用服务器宿主机本地时区
+        const dateParts = new Intl.DateTimeFormat('zh-CN', {
+            timeZone: REPORT_TIMEZONE,
+            year: 'numeric',
+            month: 'numeric',
+            day: 'numeric'
+        }).formatToParts(now);
+        const year = Number(dateParts.find(part => part.type === 'year')?.value);
+        const month = Number(dateParts.find(part => part.type === 'month')?.value);
+        const day = Number(dateParts.find(part => part.type === 'day')?.value);
         const lunarDate = lunarCalendar.getLunar(year, month, day);
         let yearName = lunarDate.lunarYear.replace('年', '');
         let festivalInfo = `${yearName}${lunarDate.zodiac}年${lunarDate.dateStr}`;
         if (lunarDate.solarTerm) festivalInfo += ` ${lunarDate.solarTerm}`;
         processedText = processedText.replace(/\{\{Festival\}\}/g, festivalInfo);
+
+        const staticFoldMode = extractStaticFoldMode(processedText);
+        processedText = removeStaticFoldModePlaceholders(processedText);
 
         const staticPlaceholderValues = pluginManager.getAllPlaceholderValues(); // Use the getter
         if (staticPlaceholderValues && staticPlaceholderValues.size > 0) {
@@ -479,7 +732,15 @@ async function replaceOtherVariables(text, model, role, context) {
 
                 // 支持 vcp_dynamic_fold 协议
                 if (typeof valueToInject === 'object' && valueToInject !== null && valueToInject.vcp_dynamic_fold) {
-                    valueToInject = await resolveDynamicFoldProtocol(valueToInject, context, placeholder);
+                    if (staticFoldMode === 'lite') {
+                        valueToInject = resolveStaticFoldLite(valueToInject);
+                        if (DEBUG_MODE) console.log(`[StaticFold] ${placeholder} 使用 Lite 模式，跳过语义向量判定。`);
+                    } else if (staticFoldMode === 'full') {
+                        valueToInject = resolveStaticFoldFull(valueToInject);
+                        if (DEBUG_MODE) console.log(`[StaticFold] ${placeholder} 使用 Full 模式，跳过语义向量判定。`);
+                    } else {
+                        valueToInject = await resolveDynamicFoldProtocol(valueToInject, context, placeholder);
+                    }
                 }
 
                 processedText = processedText.replace(placeholderRegex, valueToInject || `[${placeholder} 信息不可用]`);
@@ -525,17 +786,6 @@ async function replaceOtherVariables(text, model, role, context) {
             processedText = processedText.replaceAll('{{Image_Key}}', effectiveImageKey);
         } else if (processedText && typeof processedText === 'string' && processedText.includes('{{Image_Key}}')) {
             if (DEBUG_MODE) console.warn('[replaceOtherVariables] {{Image_Key}} placeholder found in text, but ImageServer plugin or its Image_Key is not resolved. Placeholder will not be replaced.');
-        }
-        for (const rule of detectors) {
-            if (typeof rule.detector === 'string' && rule.detector.length > 0 && typeof rule.output === 'string') {
-                processedText = processedText.replaceAll(rule.detector, rule.output);
-            }
-        }
-    }
-
-    for (const rule of superDetectors) {
-        if (typeof rule.detector === 'string' && rule.detector.length > 0 && typeof rule.output === 'string') {
-            processedText = processedText.replaceAll(rule.detector, rule.output);
         }
     }
 
@@ -617,5 +867,12 @@ module.exports = {
     // 导出主函数，并重命名旧函数以供内部调用
     replaceAgentVariables: resolveAllVariables,
     replaceOtherVariables,
-    replacePriorityVariables
+    replacePriorityVariables,
+    applyDetectorRules,
+    applyDetectorsToMessages,
+    extractTextFromMessageContent,
+    isSystemNotificationText,
+    isBetaSystemUserText,
+    stripSystemNotificationBlocks,
+    findLastRealUserMessage
 };

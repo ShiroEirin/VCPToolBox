@@ -1,5 +1,6 @@
 // server.js
 const express = require('express');
+require('./modules/dotenvPatch.js'); // 应用 dotenv.parse 补丁以支持特殊字符
 const dotenv = require('dotenv');
 dotenv.config({ path: 'config.env' });
 const schedule = require('node-schedule');
@@ -110,6 +111,7 @@ const toolboxManager = require('./modules/toolboxManager.js');
 const dynamicToolRegistry = require('./modules/dynamicToolRegistry.js');
 const messageProcessor = require('./modules/messageProcessor.js');
 const knowledgeBaseManager = require('./KnowledgeBaseManager.js'); // 新增：引入统一知识库管理器
+const tdbKnowledgeManager = require('./TDBKnowledge.js'); // 新增：引入 TriviumDB 冷知识库管理器
 const pluginManager = require('./Plugin.js');
 const sarPromptManager = require('./modules/sarPromptManager.js');
 const taskScheduler = require('./routes/taskScheduler.js');
@@ -395,9 +397,44 @@ try {
 }
 const CHINA_MODEL_1_COT = (process.env.ChinaModel1Cot || "false").toLowerCase() === "true";
 
+// 多模态配置 JSON 真相源（multimodal-config.json）：优先级高于 config.env，支持热更新
+// 在初始化阶段先确保文件存在并加载内存配置；运行时由 chatCompletionHandler / image-processor 直接调用 store。
+const multiModalConfigStore = require('./modules/multiModalConfigStore.js');
+try {
+    multiModalConfigStore.init();
+    console.log('[Server] multimodal-config.json 配置真相源已加载，路径：', multiModalConfigStore.CONFIG_PATH);
+} catch (multiModalInitErr) {
+    console.error('[Server] 初始化 multimodal-config.json 失败：', multiModalInitErr);
+}
+
+// 纯文本模型强制翻译多模态：tag 列表，命中即无视 {{TransBase64}}/{{TransBase64+}} 占位符
+// 用于配合模型动态路由（VCPModelAuto/SemanticModelRouter），避免把 base64 多模态传给纯文本模型
+// 仅作为启动快照保留；运行时 chatCompletionHandler 会从 multiModalConfigStore 拉取最新值
+let MULTIMODAL_FORCE_TRANSLATE_MODELS = [];
+try {
+    const storeTags = multiModalConfigStore.getForceTranslateModels();
+    if (Array.isArray(storeTags) && storeTags.length > 0) {
+        MULTIMODAL_FORCE_TRANSLATE_MODELS = storeTags;
+    } else {
+        MULTIMODAL_FORCE_TRANSLATE_MODELS = (process.env.MultiModalForceTranslateModels || "")
+            .split(',')
+            .map(tag => tag.trim().toLowerCase())
+            .filter(tag => tag !== "");
+    }
+    if (MULTIMODAL_FORCE_TRANSLATE_MODELS.length > 0) {
+        console.log(`[Server] MultiModalForceTranslateModels 启动快照已加载 ${MULTIMODAL_FORCE_TRANSLATE_MODELS.length} 个 tag: [${MULTIMODAL_FORCE_TRANSLATE_MODELS.join(', ')}]`);
+    }
+} catch (e) {
+    console.error("Failed to parse MultiModalForceTranslateModels:", e);
+}
+
 // 新增：模型重定向功能
 const ModelRedirectHandler = require('./modelRedirectHandler.js');
 const modelRedirectHandler = new ModelRedirectHandler();
+
+// 语义任务智能模型路由器
+const SemanticModelRouter = require('./modules/semanticModelRouter.js');
+const semanticModelRouter = new SemanticModelRouter();
 
 // ensureDebugLogDir is now ensureDebugLogDirSync and called by initializeServerLogger
 // writeDebugLog remains for specific debug purposes, it uses fs.promises.
@@ -840,6 +877,27 @@ app.use((req, res, next) => {
 
 app.get('/v1/models', async (req, res) => {
     const { default: fetch } = await import('node-fetch');
+    const appendSemanticRouterModels = (modelsData) => {
+        const virtualModels = semanticModelRouter.getVirtualModels();
+        if (!virtualModels.length) return modelsData;
+
+        if (!modelsData || typeof modelsData !== 'object') {
+            modelsData = { object: 'list', data: [] };
+        }
+        if (!Array.isArray(modelsData.data)) {
+            modelsData.data = [];
+        }
+
+        const existingIds = new Set(modelsData.data.map(model => model && model.id).filter(Boolean));
+        for (const virtualModel of virtualModels) {
+            if (!existingIds.has(virtualModel.id)) {
+                modelsData.data.push(virtualModel);
+                existingIds.add(virtualModel.id);
+            }
+        }
+        return modelsData;
+    };
+
     try {
         const modelsApiUrl = `${apiUrl}/v1/models`;
         const apiResponse = await fetch(modelsApiUrl, {
@@ -851,27 +909,30 @@ app.get('/v1/models', async (req, res) => {
             },
         });
 
-        // 新增：如果启用了模型重定向，需要处理模型列表响应
-        if (modelRedirectHandler.isEnabled() && apiResponse.ok) {
+        if (apiResponse.ok) {
             const responseText = await apiResponse.text();
             try {
-                const modelsData = JSON.parse(responseText);
+                let modelsData = JSON.parse(responseText);
 
-                // 替换模型列表中的内部模型名为公开模型名
-                if (modelsData.data && Array.isArray(modelsData.data)) {
-                    modelsData.data = modelsData.data.map(model => {
-                        if (model.id) {
-                            const publicModelName = modelRedirectHandler.redirectModelForClient(model.id);
-                            if (publicModelName !== model.id) {
-                                if (DEBUG_MODE) {
-                                    console.log(`[ModelRedirect] 模型列表重定向: ${model.id} -> ${publicModelName}`);
+                // 新增：如果启用了模型重定向，需要处理模型列表响应
+                if (modelRedirectHandler.isEnabled()) {
+                    if (modelsData.data && Array.isArray(modelsData.data)) {
+                        modelsData.data = modelsData.data.map(model => {
+                            if (model.id) {
+                                const publicModelName = modelRedirectHandler.redirectModelForClient(model.id);
+                                if (publicModelName !== model.id) {
+                                    if (DEBUG_MODE) {
+                                        console.log(`[ModelRedirect] 模型列表重定向: ${model.id} -> ${publicModelName}`);
+                                    }
+                                    return { ...model, id: publicModelName };
                                 }
-                                return { ...model, id: publicModelName };
                             }
-                        }
-                        return model;
-                    });
+                            return model;
+                        });
+                    }
                 }
+
+                modelsData = appendSemanticRouterModels(modelsData);
 
                 // 设置响应头
                 res.status(apiResponse.status);
@@ -885,22 +946,24 @@ app.get('/v1/models', async (req, res) => {
                 res.json(modelsData);
                 return;
             } catch (parseError) {
-                console.warn('[ModelRedirect] 解析模型列表响应失败，使用原始响应:', parseError.message);
-                // 如果解析失败，回退到原始流式转发
+                console.warn('[Models] 解析模型列表响应失败，返回语义路由虚拟模型列表:', parseError.message);
+                const fallbackModelsData = appendSemanticRouterModels({ object: 'list', data: [] });
+                if (fallbackModelsData.data.length > 0) {
+                    return res.status(200).json(fallbackModelsData);
+                }
+                // 如果解析失败且没有虚拟模型，回退到错误响应
             }
         }
 
-        // 原始的流式转发逻辑（当模型重定向未启用或解析失败时使用）
-        res.status(apiResponse.status);
-        apiResponse.headers.forEach((value, name) => {
-            // Avoid forwarding hop-by-hop headers
-            if (!['content-encoding', 'transfer-encoding', 'connection', 'content-length', 'keep-alive'].includes(name.toLowerCase())) {
-                res.setHeader(name, value);
-            }
-        });
+        // 上游模型列表不可用时，仍返回语义路由虚拟模型，避免前端无法选择 VCPModelAuto。
+        const fallbackModelsData = appendSemanticRouterModels({ object: 'list', data: [] });
+        if (fallbackModelsData.data.length > 0) {
+            return res.status(200).json(fallbackModelsData);
+        }
 
-        // Stream the response body back to the client
-        apiResponse.body.pipe(res);
+        res.status(apiResponse.status);
+        const errorText = await apiResponse.text();
+        res.type('text/plain').send(errorText);
 
     } catch (error) {
         console.error('转发 /v1/models 请求时出错:', error.message, error.stack);
@@ -1132,7 +1195,9 @@ const chatCompletionHandler = new ChatCompletionHandler({
     detectors,
     superDetectors,
     chinaModel1: CHINA_MODEL_1,
-    chinaModel1Cot: CHINA_MODEL_1_COT
+    chinaModel1Cot: CHINA_MODEL_1_COT,
+    semanticModelRouter,
+    multiModalForceTranslateModels: MULTIMODAL_FORCE_TRANSLATE_MODELS // 纯文本模型 tag 命中后强制翻译多模态
 });
 
 // Route for standard chat completions. VCP info is shown based on the .env config.
@@ -1162,6 +1227,11 @@ app.post('/v1/chatvcp/completions', async (req, res) => {
         }
     }
 });
+
+// 协议桥接路由：支持 OpenAI Responses API、Anthropic Messages、Gemini GenerateContent
+// 将这些协议格式的请求转换为标准 messages 数组后内部转发到 /v1/chat/completions
+const protocolBridge = require('./routes/protocolBridge');
+app.use(protocolBridge);
 
 // 新增：人类直接调用工具的端点
 app.post('/v1/human/tool', async (req, res) => {
@@ -1338,12 +1408,18 @@ async function handleDiaryFromAIResponse(responseText) {
 // Define dailyNoteRootPath here as it's needed by the adminPanelRoutes module
 // and was previously defined within the moved block.
 const dailyNoteRootPath = process.env.KNOWLEDGEBASE_ROOT_PATH || path.join(__dirname, 'dailynote');
+const knowledgeRootPath = process.env.TDB_KNOWLEDGE_ROOT_PATH
+    ? (path.isAbsolute(process.env.TDB_KNOWLEDGE_ROOT_PATH)
+        ? process.env.TDB_KNOWLEDGE_ROOT_PATH
+        : path.resolve(__dirname, process.env.TDB_KNOWLEDGE_ROOT_PATH))
+    : path.join(__dirname, 'knowledge');
 
 // Import and use the admin panel routes, passing the getter for currentServerLogPath
 const adminPanelRoutes = require('./routes/adminPanelRoutes')(
     DEBUG_MODE,
     dailyNoteRootPath,
     pluginManager,
+    knowledgeRootPath,
     logger.getServerLogPath, // Pass the getter function
     knowledgeBaseManager, // Pass the knowledgeBaseManager instance
     AGENT_DIR, // Pass the Agent directory path
@@ -1355,7 +1431,11 @@ const adminPanelRoutes = require('./routes/adminPanelRoutes')(
             console.error('[Server] Fatal error during graceful restart:', err);
             process.exit(code);
         });
-    }
+    },
+    semanticModelRouter,
+    modelRedirectHandler,
+    apiUrl,
+    apiKey
 );
 
 // 新增：引入 VCP 论坛 API 路由
@@ -1426,8 +1506,13 @@ async function initialize() {
     await knowledgeBaseManager.initialize(); // 在加载插件之前启动，确保服务就绪
     console.log('向量数据库初始化完成。');
 
+    console.log('开始初始化 TDB 冷知识库...');
+    await tdbKnowledgeManager.initialize();
+    console.log('TDB 冷知识库初始化完成。');
+
     pluginManager.setProjectBasePath(__dirname);
     pluginManager.setVectorDBManager(knowledgeBaseManager); // 注入 knowledgeBaseManager
+    pluginManager.setTdbKnowledgeManager(tdbKnowledgeManager); // 注入冷知识库管理器
     await dynamicToolRegistry.initialize({
         pluginManager,
         projectBasePath: __dirname,
@@ -1456,6 +1541,7 @@ async function initialize() {
     try {
         const dependencies = {
             knowledgeBaseManager,
+            tdbKnowledgeManager,
             vcpLogFunctions: pluginManager.getVCPLogFunctions()
         };
         if (DEBUG_MODE) console.log('[Server] Injecting dependencies into plugins...');
@@ -1542,6 +1628,10 @@ async function startServer() {
     await modelRedirectHandler.loadModelRedirectConfig(path.join(__dirname, 'ModelRedirect.json'));
     console.log('模型重定向配置加载完成。');
 
+    console.log('正在加载语义模型路由配置...');
+    await semanticModelRouter.initialize(path.join(__dirname, 'SemanticModelRouter.json'), DEBUG_MODE);
+    console.log('语义模型路由配置加载完成。');
+
     // 新增：初始化Agent管理器
     console.log('正在初始化Agent管理器...');
     agentManager.setAgentDir(AGENT_DIR);
@@ -1598,7 +1688,12 @@ async function startServer() {
         // Initialize the new WebSocketServer
         if (DEBUG_MODE) console.log('[Server] Initializing WebSocketServer...');
         const vcpKeyValue = pluginManager.getResolvedPluginConfigValue('VCPLog', 'VCP_Key') || process.env.VCP_Key;
-        webSocketServer.initialize(server, { debugMode: DEBUG_MODE, vcpKey: vcpKeyValue });
+        const distributedMusicPlaylistSyncEnabled = (process.env.DISTRIBUTED_MUSIC_PLAYLIST_SYNC_ENABLED || 'false').toLowerCase() === 'true';
+        webSocketServer.initialize(server, {
+            debugMode: DEBUG_MODE,
+            vcpKey: vcpKeyValue,
+            distributedMusicPlaylistSyncEnabled
+        });
 
         // --- 注入依赖 ---
         webSocketServer.setPluginManager(pluginManager);
@@ -1692,6 +1787,14 @@ async function gracefulShutdown(exitCode = 0, reason = 'signal') {
                 console.log(`[Server][ShutdownTrace] Phase 8/10 - pluginManager.shutdownAllPlugins done`);
             } else {
                 console.log(`[Server][ShutdownTrace] Phase 8/10 - pluginManager shutdown skipped`);
+            }
+
+            if (tdbKnowledgeManager) {
+                console.log(`[Server][ShutdownTrace] Phase 9/10 - tdbKnowledgeManager.shutdown start`);
+                await tdbKnowledgeManager.shutdown();
+                console.log(`[Server][ShutdownTrace] Phase 9/10 - tdbKnowledgeManager.shutdown done`);
+            } else {
+                console.log(`[Server][ShutdownTrace] Phase 9/10 - tdbKnowledgeManager shutdown skipped`);
             }
 
             if (knowledgeBaseManager) {

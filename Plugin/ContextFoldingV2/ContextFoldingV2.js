@@ -6,6 +6,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const dotenv = require('dotenv');
 const chokidar = require('chokidar');
+const { findLastRealUserMessage } = require('../../modules/messageProcessor.js');
 
 const FOLDING_PREFIX = '[VCP上下文语义折叠-本层摘要:';
 // 使用 [\s\S]+? 而非 .+? 以兼容模型输出多行摘要的情况
@@ -13,6 +14,9 @@ const FOLDING_REGEX = /\[VCP上下文语义折叠-本层摘要:([\s\S]+?)\]/;
 // 支持两种激活格式：双花括号（可能被 messageProcessor 替换）和双方括号（最安全）
 const ACTIVATION_PLACEHOLDER = '{{ContextFoldingV2}}';
 const ACTIVATION_PLACEHOLDER_BRACKET = '[[ContextFoldingV2]]';
+
+const ONERING_TAIL_REGEX = /\s*\[OneRing通知:[\s\S]*?\]\s*$/g;
+const VCP_RAG_BLOCK_REGEX = /<!--\s*VCP_RAG_BLOCK_START\b[\s\S]*?<!--\s*VCP_RAG_BLOCK_END\s*-->/gi;
 
 class ContextFoldingV2 {
     constructor() {
@@ -34,7 +38,14 @@ class ContextFoldingV2 {
             thresholdRange: [0.40, 0.60],
             lWeight: 0.05,
             sWeight: 0.05,
-            contextWeights: [0.7, 0.3] // user : assistant 加权比例，与 RAGDiaryPlugin.mainSearchWeights 对齐
+            contextWeights: [0.7, 0.3], // user : assistant 加权比例，与 RAGDiaryPlugin.mainSearchWeights 对齐
+            fuzzyEmbedding: {
+                threshold: 0.985,
+                minLength: 80,
+                maxScan: 200,
+                maxLengthDiffRatio: 0.02,
+                maxLengthDiffAbs: 80
+            }
         };
         this._ragParamsWatcher = null;
 
@@ -115,7 +126,11 @@ class ContextFoldingV2 {
             const allParams = JSON.parse(data);
             if (allParams.ContextFoldingV2) {
                 this.hotParams = { ...this.hotParams, ...allParams.ContextFoldingV2 };
-                console.log(`[ContextFoldingV2] 热参数已加载: 基准=${this.hotParams.thresholdBase}, 范围=[${this.hotParams.thresholdRange}], L系数=${this.hotParams.lWeight}, S系数=${this.hotParams.sWeight}`);
+                console.log(
+                    `[ContextFoldingV2] 热参数已加载: 基准=${this.hotParams.thresholdBase}, ` +
+                    `范围=[${this.hotParams.thresholdRange}], L系数=${this.hotParams.lWeight}, ` +
+                    `S系数=${this.hotParams.sWeight}, Fuzzy=${JSON.stringify(this._getFuzzyEmbeddingOptions())}`
+                );
             }
         } catch (e) {
             console.warn(`[ContextFoldingV2] 读取 rag_params.json 失败，使用默认值: ${e.message}`);
@@ -159,7 +174,7 @@ class ContextFoldingV2 {
             for (let i = 0; i < messages.length; i++) {
                 if (messages[i].role === 'system') {
                     const systemText = this._getContent(messages[i]);
-                    const match = systemText.match(activationRegex);
+                    const match = this._stripVcpRagBlocks(systemText).match(activationRegex);
                     if (match) {
                         activated = true;
                         activationIndex = i;
@@ -187,9 +202,11 @@ class ContextFoldingV2 {
             if (activationIndex >= 0 && matchedPlaceholder) {
                 this._setContent(
                     newMessages[activationIndex],
-                    this._getContent(newMessages[activationIndex])
-                        .replace(matchedPlaceholder, '')
-                        .trim()
+                    this._replaceOutsideVcpRagBlocks(
+                        this._getContent(newMessages[activationIndex]),
+                        matchedPlaceholder,
+                        ''
+                    ).trim()
                 );
             }
 
@@ -220,25 +237,22 @@ class ContextFoldingV2 {
                 if (content.startsWith(FOLDING_PREFIX)) continue;
 
                 // 净化并计算哈希
-                const sanitized = bridge.sanitize(content, 'assistant');
+                // OneRing 会在消息尾部追加 [OneRing通知:...] 来源标记；折叠查询/哈希/向量化时必须先剥离，
+                // 否则同一正文会因尾部时间戳/前端来源变化而无法命中 FoldingStore。
+                const sanitized = bridge.sanitize(this._sanitizeOneRingMarkers(content), 'assistant');
                 if (!sanitized || sanitized.length < 10) continue;
 
                 const hash = store.hashContent(sanitized);
 
-                // 获取块向量（store → bridge缓存 → embedding API）
+                // 获取块向量（store → 精确缓存 → fuzzy缓存 → embedding API）
+                // 与上下文参考向量使用同一条折叠专用向量化路径，避免候选 assistant 块因微小文本差异重复向量化。
                 let blockVector = null;
                 const entry = store.getEntry(hash);
 
                 if (entry && entry.vector) {
                     blockVector = entry.vector;
                 } else {
-                    // 尝试从 bridge 缓存获取
-                    blockVector = bridge.getEmbeddingFromCache(sanitized);
-                    if (!blockVector) {
-                        // 调用 embedding API
-                        blockVector = await bridge.embedText(sanitized);
-                    }
-                    // 写入 store（无论是否有向量）
+                    blockVector = await this._embedTextForFolding(sanitized, bridge, 'assistant_candidate');
                     if (blockVector) {
                         store.upsertVector(hash, {
                             textPreview: sanitized.substring(0, 80),
@@ -310,38 +324,37 @@ class ContextFoldingV2 {
     }
 
     /**
-     * 获取上下文参考向量（最新 user + 最新 AI 消息的加权平均）
+     * 获取上下文参考向量（最新真实 user + 最新 AI 消息的加权平均）
      */
     async _getContextVector(messages, bridge) {
-        // 查找最新的 user 和 assistant 消息
-        let lastUserContent = null;
-        let lastAiContent = null;
+        // 复用中央管线的真实 user 定位规则，避免 ContextFoldingV2 与 messageProcessor 后续规则漂移。
+        // OneRing 尾部来源标记不参与上下文参考向量，避免时间戳/前端来源扰动折叠决策。
+        const lastUserMessage = findLastRealUserMessage(messages, {
+            sanitize: (text, role) => bridge.sanitize(this._sanitizeOneRingMarkers(text), role)
+        });
 
+        if (!lastUserMessage.sanitizedContent) return null;
+
+        // 查找最新的 assistant 消息
+        let lastAiContent = null;
         for (let i = messages.length - 1; i >= 0; i--) {
             const msg = messages[i];
-            if (msg.role === 'user' && !lastUserContent) {
-                const c = this._getContent(msg);
-                // 跳过系统邀请指令
-                if (!c.startsWith('[系统邀请指令:]') && !c.trim().startsWith('[系统提示:]无内容')) {
-                    lastUserContent = c;
-                }
-            }
-            if (msg.role === 'assistant' && !lastAiContent) {
+            if (msg.role === 'assistant') {
                 lastAiContent = this._getContent(msg);
+                break;
             }
-            if (lastUserContent && lastAiContent) break;
         }
 
-        if (!lastUserContent) return null;
-
         // 净化
-        const sanitizedUser = bridge.sanitize(lastUserContent, 'user');
-        const sanitizedAi = lastAiContent ? bridge.sanitize(lastAiContent, 'assistant') : null;
+        const sanitizedUser = lastUserMessage.sanitizedContent;
+        const sanitizedAi = lastAiContent ? bridge.sanitize(this._sanitizeOneRingMarkers(lastAiContent), 'assistant') : null;
 
         // 向量化
+        // ContextFoldingV2 在 RAGDiaryPlugin 之后执行：先尝试精确缓存，再尝试高阈值 fuzzy 复用 RAG 刚生成的近似向量，
+        // 最后才触发 Embedding API，避免“最新 AI 发言仅有微小文本差异却重复向量化”。
         const [userVec, aiVec] = await Promise.all([
-            sanitizedUser ? bridge.embedText(sanitizedUser) : null,
-            sanitizedAi ? bridge.embedText(sanitizedAi) : null
+            sanitizedUser ? this._embedTextForFolding(sanitizedUser, bridge, 'user_context') : null,
+            sanitizedAi ? this._embedTextForFolding(sanitizedAi, bridge, 'assistant_context') : null
         ]);
 
         // 加权平均（默认 user 0.7, AI 0.3，可通过 rag_params.json 的 ContextFoldingV2.contextWeights 调整）
@@ -350,6 +363,50 @@ class ContextFoldingV2 {
             [userVec, aiVec].filter(Boolean),
             userVec && aiVec ? weights : [1.0]
         );
+    }
+
+    async _embedTextForFolding(text, bridge, label = 'unknown') {
+        if (!text || typeof text !== 'string' || !bridge) return null;
+
+        if (typeof bridge.getEmbeddingFromCache === 'function') {
+            const exact = bridge.getEmbeddingFromCache(text);
+            if (exact) return exact;
+        }
+
+        // 仅在折叠链路中启用高阈值 fuzzy 复用，不影响 RAG 主检索精度。
+        // 参数由 rag_params.json 的 ContextFoldingV2.fuzzyEmbedding 热管理。
+        if (typeof bridge.getFuzzyEmbeddingFromCache === 'function') {
+            const fuzzy = bridge.getFuzzyEmbeddingFromCache(text, this._getFuzzyEmbeddingOptions());
+
+            if (fuzzy && fuzzy.vector) {
+                console.log(
+                    `[ContextFoldingV2] Fuzzy embedding cache hit (${label}): ` +
+                    `sim=${fuzzy.similarity.toFixed(4)}, len=${text.length}/${fuzzy.length}`
+                );
+                return fuzzy.vector;
+            }
+        }
+
+        if (typeof bridge.embedText !== 'function') return null;
+        return await bridge.embedText(text);
+    }
+
+    _getFuzzyEmbeddingOptions() {
+        const defaults = {
+            threshold: 0.985,
+            minLength: 80,
+            maxScan: 200,
+            maxLengthDiffRatio: 0.02,
+            maxLengthDiffAbs: 80
+        };
+        const configured = this.hotParams?.fuzzyEmbedding || {};
+        return {
+            threshold: Number.isFinite(Number(configured.threshold)) ? Number(configured.threshold) : defaults.threshold,
+            minLength: Number.isFinite(Number(configured.minLength)) ? Number(configured.minLength) : defaults.minLength,
+            maxScan: Number.isFinite(Number(configured.maxScan)) ? Number(configured.maxScan) : defaults.maxScan,
+            maxLengthDiffRatio: Number.isFinite(Number(configured.maxLengthDiffRatio)) ? Number(configured.maxLengthDiffRatio) : defaults.maxLengthDiffRatio,
+            maxLengthDiffAbs: Number.isFinite(Number(configured.maxLengthDiffAbs)) ? Number(configured.maxLengthDiffAbs) : defaults.maxLengthDiffAbs
+        };
     }
 
     /**
@@ -569,6 +626,49 @@ class ContextFoldingV2 {
     // ═══════════════════════════════════════════════════
     // 工具方法
     // ═══════════════════════════════════════════════════
+
+    /**
+     * 剥离 VCP_RAG_BLOCK 记忆块。
+     * 用于系统提示词占位符扫描，确保记忆块内部的触发符不会激活/清理预处理器。
+     */
+    _stripVcpRagBlocks(text) {
+        return typeof text === 'string' ? text.replace(VCP_RAG_BLOCK_REGEX, '') : text;
+    }
+
+    _getVcpRagBlockRanges(text) {
+        if (typeof text !== 'string') return [];
+        const ranges = [];
+        const re = new RegExp(VCP_RAG_BLOCK_REGEX.source, VCP_RAG_BLOCK_REGEX.flags);
+        let match;
+        while ((match = re.exec(text)) !== null) {
+            ranges.push({ start: match.index, end: match.index + match[0].length });
+        }
+        return ranges;
+    }
+
+    _replaceOutsideVcpRagBlocks(text, search, replacement) {
+        if (typeof text !== 'string' || !search) return text;
+        const ranges = this._getVcpRagBlockRanges(text);
+        let idx = text.indexOf(search);
+        while (idx >= 0) {
+            const end = idx + search.length;
+            const insideRagBlock = ranges.some(range => idx < range.end && end > range.start);
+            if (!insideRagBlock) {
+                return text.slice(0, idx) + replacement + text.slice(end);
+            }
+            idx = text.indexOf(search, idx + 1);
+        }
+        return text;
+    }
+
+    /**
+     * 剥离 OneRing 尾部来源标记。
+     * 仅用于 ContextFoldingV2 的查询/哈希/向量化净化链路，不修改真实消息内容。
+     */
+    _sanitizeOneRingMarkers(text) {
+        if (typeof text !== 'string') return text;
+        return text.replace(ONERING_TAIL_REGEX, '').trim();
+    }
 
     /**
      * 从消息中提取文本内容（兼容字符串和多模态数组格式）

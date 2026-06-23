@@ -9,6 +9,8 @@ const fs = require('fs/promises');
 const { v4: uuidv4 } = require('uuid');
 const { Readability } = require('@mozilla/readability');
 const { JSDOM } = require('jsdom');
+const https = require('https');
+const http = require('http');
 
 // 图片扩展名常量
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif'];
@@ -23,6 +25,11 @@ const PROJECT_BASE_PATH = process.env.PROJECT_BASE_PATH;
 const SERVER_PORT = process.env.SERVER_PORT;
 const IMAGESERVER_IMAGE_KEY = process.env.IMAGESERVER_IMAGE_KEY;
 const VAR_HTTP_URL = process.env.VarHttpUrl; // Read VarHttpUrl from env
+const JINA_API_KEY = process.env.JINA_API_KEY;
+const JINA_READER_TIMEOUT_MS = Number(process.env.JINA_READER_TIMEOUT_MS || 20000);
+const DIRECT_FETCH_TIMEOUT_MS = Number(process.env.DIRECT_FETCH_TIMEOUT_MS || 12000);
+const DIRECT_FETCH_MAX_BYTES = Number(process.env.DIRECT_FETCH_MAX_BYTES || 5 * 1024 * 1024);
+const KNOWLEDGE_BASE_DIR = path.resolve(PROJECT_BASE_PATH || process.cwd(), 'knowledge');
 
 puppeteer.use(StealthPlugin());
 puppeteer.use(AnonymizeUAPlugin());
@@ -34,6 +41,126 @@ const AD_SELECTORS = [
     '.popup', '[class*="popup"]', '[id*="popup"]', 'nav', 'aside', 'footer',
     '[aria-hidden="true"]'
 ];
+
+const BLOCK_TAGS = new Set([
+    'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'BR', 'DD', 'DETAILS', 'DIALOG',
+    'DIV', 'DL', 'DT', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM', 'H1', 'H2', 'H3',
+    'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE',
+    'SECTION', 'TABLE', 'TBODY', 'TD', 'TFOOT', 'TH', 'THEAD', 'TR', 'UL'
+]);
+
+const HEADING_TAGS = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+
+function normalizeInlineText(text) {
+    return (text || '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[ \t\r\f\v]+/g, ' ')
+        .replace(/\s*\n\s*/g, '\n')
+        .trim();
+}
+
+function getListDepth(element) {
+    let depth = 0;
+    let current = element.parentElement;
+    while (current) {
+        if (current.tagName === 'UL' || current.tagName === 'OL') {
+            depth++;
+        }
+        current = current.parentElement;
+    }
+    return Math.max(0, depth - 1);
+}
+
+function appendTextWithSpacing(output, text) {
+    if (!text) return;
+
+    const lastIndex = output.length - 1;
+    const previous = lastIndex >= 0 ? output[lastIndex] : '';
+    const needsSpace = previous &&
+        !previous.endsWith('\n') &&
+        !previous.endsWith(' ') &&
+        !/^[,.;:!?，。；：！？、）)]/.test(text) &&
+        !/[（(]$/.test(previous);
+
+    output.push(needsSpace ? ` ${text}` : text);
+}
+
+function renderNodeAsText(node, output) {
+    if (!node) return;
+
+    if (node.nodeType === 3) {
+        appendTextWithSpacing(output, normalizeInlineText(node.textContent));
+        return;
+    }
+
+    if (node.nodeType !== 1) return;
+
+    const tagName = node.tagName;
+    if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'CANVAS'].includes(tagName)) return;
+
+    if (tagName === 'BR') {
+        output.push('\n');
+        return;
+    }
+
+    const isBlock = BLOCK_TAGS.has(tagName);
+    const isHeading = HEADING_TAGS.has(tagName);
+
+    if (isBlock) {
+        output.push('\n');
+        if (isHeading || tagName === 'HR') {
+            output.push('\n');
+        }
+    }
+
+    if (tagName === 'LI') {
+        const depth = getListDepth(node);
+        output.push(`${'  '.repeat(depth)}- `);
+    }
+
+    for (const child of node.childNodes) {
+        renderNodeAsText(child, output);
+    }
+
+    if (isBlock) {
+        output.push('\n');
+        if (isHeading || tagName === 'P' || tagName === 'BLOCKQUOTE' || tagName === 'PRE' || tagName === 'TABLE') {
+            output.push('\n');
+        }
+    }
+}
+
+function formatExtractedArticleContent(article) {
+    if (!article) return '';
+
+    let rawText = '';
+    if (article.content) {
+        const articleDom = new JSDOM(article.content);
+        const output = [];
+
+        for (const selector of AD_SELECTORS) {
+            articleDom.window.document.querySelectorAll(selector).forEach(el => el.remove());
+        }
+
+        renderNodeAsText(articleDom.window.document.body, output);
+        rawText = output.join('');
+    }
+
+    if (!rawText && article.textContent) {
+        rawText = article.textContent;
+    }
+
+    return rawText
+        .replace(/\u00a0/g, ' ')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n[ \t]+/g, '\n')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .split('\n')
+        .map(line => line.trimEnd())
+        .join('\n')
+        .trim();
+}
 
 // A more robust auto-scroll function to handle lazy-loading content
 async function autoScroll(page, mode = 'text') {
@@ -117,6 +244,327 @@ function isImageUrl(url) {
     } catch {
         return false;
     }
+}
+
+function sanitizeKnowledgeSubfolderName(folderName) {
+    const normalized = String(folderName || '').trim();
+    if (!normalized) {
+        throw new Error("缺少必需的参数: knowledgeFolder（knowledge 根目录下的子文件夹名）");
+    }
+
+    if (
+        normalized.includes('/') ||
+        normalized.includes('\\') ||
+        normalized.includes('..') ||
+        path.isAbsolute(normalized) ||
+        /[\x00-\x1f<>:"|?*]/.test(normalized)
+    ) {
+        throw new Error("knowledgeFolder 只能是 knowledge 根目录下的单层子文件夹名，不能包含路径分隔符、.. 或非法文件名字符。");
+    }
+
+    return normalized;
+}
+
+function sanitizeMarkdownFileName(fileName) {
+    const normalized = String(fileName || '').trim()
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/[\x00-\x1f]/g, '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 120)
+        .trim();
+
+    if (!normalized) return '';
+
+    return normalized.toLowerCase().endsWith('.md') ? normalized : `${normalized}.md`;
+}
+
+function extractTitleFromFetchedMarkdown(content, url) {
+    const text = String(content || '');
+    const headingMatch = text.match(/^#\s+(.+)$/m);
+    if (headingMatch) return headingMatch[1].trim();
+
+    const titleLineMatch = text.match(/^(?:标题|Title):\s*(.+)$/mi);
+    if (titleLineMatch) return titleLineMatch[1].trim();
+
+    try {
+        const urlObj = new URL(url);
+        const lastSegment = decodeURIComponent(urlObj.pathname.split('/').filter(Boolean).pop() || '');
+        return lastSegment || urlObj.hostname;
+    } catch {
+        return 'webpage';
+    }
+}
+
+function buildSafeMarkdownFileName(content, url, requestedFileName = '') {
+    const explicitName = sanitizeMarkdownFileName(requestedFileName);
+    if (explicitName) return explicitName;
+
+    const title = extractTitleFromFetchedMarkdown(content, url);
+    const slug = String(title || 'webpage')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/[\x00-\x1f]/g, '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 80)
+        .trim() || 'webpage';
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${slug}_${timestamp}.md`;
+}
+
+function wrapMarkdownArchiveContent(content, url, sourceMode) {
+    const fetchedAt = new Date().toISOString();
+    const body = String(content || '').trim();
+
+    return [
+        '---',
+        `source_url: ${JSON.stringify(url)}`,
+        `fetched_at: ${JSON.stringify(fetchedAt)}`,
+        `fetch_mode: ${JSON.stringify(sourceMode)}`,
+        '---',
+        '',
+        body
+    ].join('\n');
+}
+
+async function getAvailableMarkdownPath(targetDir, safeFileName) {
+    const parsed = path.parse(safeFileName);
+    const baseName = parsed.name || 'webpage';
+    const extName = parsed.ext || '.md';
+
+    for (let index = 0; index < 1000; index++) {
+        const candidateFileName = index === 0 ? `${baseName}${extName}` : `${baseName}(${index})${extName}`;
+        const candidatePath = path.resolve(targetDir, candidateFileName);
+
+        if (!candidatePath.startsWith(targetDir + path.sep)) {
+            throw new Error("目标文件路径越界，已拒绝写入。");
+        }
+
+        try {
+            const handle = await fs.open(candidatePath, 'wx');
+            return { handle, filePath: candidatePath, fileName: candidateFileName };
+        } catch (error) {
+            if (error && error.code === 'EEXIST') {
+                continue;
+            }
+            throw error;
+        }
+    }
+
+    throw new Error("同名文件过多，已拒绝继续自动生成尾缀。");
+}
+
+async function saveMarkdownToKnowledgeFolder({ url, content, knowledgeFolder, fileName, sourceMode }) {
+    const safeFolderName = sanitizeKnowledgeSubfolderName(knowledgeFolder);
+    const targetDir = path.resolve(KNOWLEDGE_BASE_DIR, safeFolderName);
+
+    if (!targetDir.startsWith(KNOWLEDGE_BASE_DIR + path.sep) && targetDir !== KNOWLEDGE_BASE_DIR) {
+        throw new Error("目标目录越界，已拒绝写入。");
+    }
+
+    const safeFileName = buildSafeMarkdownFileName(content, url, fileName);
+    const markdownContent = wrapMarkdownArchiveContent(content, url, sourceMode);
+    await fs.mkdir(targetDir, { recursive: true });
+
+    const { handle, filePath: targetPath, fileName: finalFileName } = await getAvailableMarkdownPath(targetDir, safeFileName);
+    try {
+        await handle.writeFile(markdownContent, 'utf8');
+    } finally {
+        await handle.close();
+    }
+
+    return {
+        content: [{
+            type: 'text',
+            text: `已成功下载网页并保存为 Markdown。\n- 来源URL: ${url}\n- 提取模式: ${sourceMode}\n- knowledge子文件夹: ${safeFolderName}\n- 文件名: ${finalFileName}\n- 保存路径: ${targetPath}\n- 字符数: ${markdownContent.length}`
+        }],
+        details: {
+            sourceUrl: url,
+            sourceMode,
+            knowledgeFolder: safeFolderName,
+            fileName: finalFileName,
+            requestedFileName: safeFileName,
+            filePath: targetPath,
+            relativePath: path.relative(PROJECT_BASE_PATH || process.cwd(), targetPath).replace(/\\/g, '/')
+        }
+    };
+}
+
+function isUsableJinaApiKey(apiKey) {
+    return typeof apiKey === 'string' &&
+        apiKey.trim() &&
+        !/^YOUR_/i.test(apiKey.trim()) &&
+        !/你的API_KEY|your[_-]?api[_-]?key/i.test(apiKey.trim());
+}
+
+function requestJinaReader(targetUrl, apiKey = null) {
+    return new Promise((resolve, reject) => {
+        const jinaUrl = `https://r.jina.ai/${targetUrl}`;
+        const headers = {
+            'Accept': 'text/markdown, text/plain;q=0.9, */*;q=0.8',
+            'User-Agent': 'VCPToolBox-UrlFetch/0.3'
+        };
+
+        if (apiKey) {
+            headers.Authorization = `Bearer ${apiKey}`;
+        }
+
+        const req = https.get(jinaUrl, { headers, timeout: JINA_READER_TIMEOUT_MS }, (res) => {
+            const chunks = [];
+
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => {
+                const body = Buffer.concat(chunks).toString('utf8');
+                const statusCode = res.statusCode || 0;
+
+                if (statusCode >= 200 && statusCode < 300 && body.trim()) {
+                    resolve(body.trim());
+                    return;
+                }
+
+                const message = body.trim().slice(0, 500) || `HTTP ${statusCode}`;
+                reject(new Error(`Jina Reader 请求失败: ${message}`));
+            });
+        });
+
+        req.on('timeout', () => {
+            req.destroy(new Error(`Jina Reader 请求超时: ${JINA_READER_TIMEOUT_MS}ms`));
+        });
+
+        req.on('error', reject);
+    });
+}
+
+async function fetchWithJinaReader(url) {
+    const apiKey = isUsableJinaApiKey(JINA_API_KEY) ? JINA_API_KEY.trim() : null;
+    const errors = [];
+
+    if (apiKey) {
+        try {
+            return await requestJinaReader(url, apiKey);
+        } catch (error) {
+            errors.push(`鉴权模式失败: ${error.message}`);
+        }
+    }
+
+    try {
+        return await requestJinaReader(url);
+    } catch (error) {
+        errors.push(`免费模式失败: ${error.message}`);
+    }
+
+    throw new Error(errors.join('；'));
+}
+
+function requestDirectHttp(targetUrl, redirectCount = 0) {
+    return new Promise((resolve, reject) => {
+        if (redirectCount > 5) {
+            reject(new Error('直接读取失败: 重定向次数过多'));
+            return;
+        }
+
+        let urlObj;
+        try {
+            urlObj = new URL(targetUrl);
+        } catch {
+            reject(new Error(`直接读取失败: URL 无效: ${targetUrl}`));
+            return;
+        }
+
+        const transport = urlObj.protocol === 'https:' ? https : http;
+        const req = transport.get(urlObj, {
+            timeout: DIRECT_FETCH_TIMEOUT_MS,
+            headers: {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        }, (res) => {
+            const statusCode = res.statusCode || 0;
+            const location = res.headers.location;
+
+            if ([301, 302, 303, 307, 308].includes(statusCode) && location) {
+                res.resume();
+                const nextUrl = new URL(location, urlObj).toString();
+                requestDirectHttp(nextUrl, redirectCount + 1).then(resolve, reject);
+                return;
+            }
+
+            if (statusCode < 200 || statusCode >= 300) {
+                res.resume();
+                reject(new Error(`直接读取失败: HTTP ${statusCode}`));
+                return;
+            }
+
+            const contentType = String(res.headers['content-type'] || '').toLowerCase();
+            if (contentType && !contentType.includes('text/') && !contentType.includes('html') && !contentType.includes('xml')) {
+                res.resume();
+                reject(new Error(`直接读取失败: 非文本响应 ${contentType}`));
+                return;
+            }
+
+            const chunks = [];
+            let totalBytes = 0;
+
+            res.on('data', chunk => {
+                totalBytes += chunk.length;
+                if (totalBytes > DIRECT_FETCH_MAX_BYTES) {
+                    req.destroy(new Error(`直接读取失败: 响应超过 ${(DIRECT_FETCH_MAX_BYTES / 1024 / 1024).toFixed(1)}MB 限制`));
+                    return;
+                }
+                chunks.push(chunk);
+            });
+
+            res.on('end', () => {
+                const body = Buffer.concat(chunks).toString('utf8');
+                if (!body.trim()) {
+                    reject(new Error('直接读取失败: 响应为空'));
+                    return;
+                }
+
+                resolve({
+                    body,
+                    contentType,
+                    finalUrl: urlObj.toString()
+                });
+            });
+        });
+
+        req.on('timeout', () => {
+            req.destroy(new Error(`直接读取超时: ${DIRECT_FETCH_TIMEOUT_MS}ms`));
+        });
+
+        req.on('error', reject);
+    });
+}
+
+async function fetchWithDirectHttp(url) {
+    const { body, contentType, finalUrl } = await requestDirectHttp(url);
+
+    if (contentType.includes('text/plain') || !/<html[\s>]/i.test(body)) {
+        const text = body.trim();
+        if (text.length < 80) {
+            throw new Error('直接读取失败: 文本内容过短');
+        }
+        return text;
+    }
+
+    const doc = new JSDOM(body, { url: finalUrl });
+    const reader = new Readability(doc.window.document);
+    const article = reader.parse();
+
+    if (article && (article.content || article.textContent)) {
+        const formattedContent = formatExtractedArticleContent(article);
+        if (formattedContent && formattedContent.length >= 80) {
+            return `标题: ${article.title || doc.window.document.title || finalUrl}\n\n${formattedContent}`;
+        }
+    }
+
+    const fallbackText = normalizeInlineText(doc.window.document.body?.textContent || '');
+    if (fallbackText.length >= 80) {
+        return `标题: ${doc.window.document.title || finalUrl}\n\n${fallbackText}`;
+    }
+
+    throw new Error('直接读取失败: 无法提取有效正文');
 }
 
 async function fetchWithPuppeteer(url, mode = 'text', proxyPort = null) {
@@ -441,9 +889,10 @@ async function fetchWithPuppeteer(url, mode = 'text', proxyPort = null) {
             const reader = new Readability(doc.window.document);
             const article = reader.parse();
 
-            if (article && article.textContent) {
-                // Format the output with title and content
-                const result = `标题: ${article.title}\n\n${article.textContent.trim()}`;
+            if (article && (article.content || article.textContent)) {
+                // Format the output with title and content while preserving paragraph/list/heading boundaries.
+                const formattedContent = formatExtractedArticleContent(article);
+                const result = `标题: ${article.title}\n\n${formattedContent}`;
                 return result;
             } else {
                 // Fallback if Readability fails to extract content
@@ -474,7 +923,10 @@ async function main() {
 
             const data = JSON.parse(inputData);
             const url = data.url;
-            let mode = data.mode || 'text'; // 'text', 'snapshot', or 'image'
+            let mode = data.mode || 'text'; // 'text', 'snapshot', 'image', 'jina', or 'download'
+            const knowledgeFolder = data.knowledgeFolder || data.folder || data.knowledge_subfolder;
+            const outputFileName = data.fileName || data.filename || data.outputFileName;
+            const downloadSourceMode = data.sourceMode || data.fetchMode || 'jina';
 
             if (!url) {
                 throw new Error("缺少必需的参数: url");
@@ -503,10 +955,60 @@ async function main() {
                 }
 
                 try {
-                    fetchedData = await fetchWithPuppeteer(url, mode);
+                    if (mode === 'download') {
+                        const effectiveSourceMode = downloadSourceMode === 'text' ? 'text' : 'jina';
+                        if (effectiveSourceMode === 'jina') {
+                            try {
+                                fetchedData = await fetchWithJinaReader(url);
+                            } catch (jinaError) {
+                                console.error(`Jina 下载路径失败，回退 text: ${jinaError.message}`);
+                                try {
+                                    fetchedData = await fetchWithDirectHttp(url);
+                                } catch (directError) {
+                                    console.error(`直接读取快速路径失败，回退 Puppeteer: ${directError.message}`);
+                                    fetchedData = await fetchWithPuppeteer(url, 'text');
+                                }
+                            }
+                        } else {
+                            try {
+                                fetchedData = await fetchWithDirectHttp(url);
+                            } catch (directError) {
+                                console.error(`直接读取快速路径失败，回退 Puppeteer: ${directError.message}`);
+                                fetchedData = await fetchWithPuppeteer(url, 'text');
+                            }
+                        }
+
+                        if (typeof fetchedData !== 'string' || !fetchedData.trim()) {
+                            throw new Error("下载模式未提取到可写入的 Markdown 文本。");
+                        }
+
+                        output = {
+                            status: "success",
+                            result: await saveMarkdownToKnowledgeFolder({
+                                url,
+                                content: fetchedData,
+                                knowledgeFolder,
+                                fileName: outputFileName,
+                                sourceMode: effectiveSourceMode
+                            })
+                        };
+                        process.stdout.write(JSON.stringify(output, null, 2));
+                        return;
+                    } else if (mode === 'jina') {
+                        fetchedData = await fetchWithJinaReader(url);
+                    } else if (mode === 'text') {
+                        try {
+                            fetchedData = await fetchWithDirectHttp(url);
+                        } catch (directError) {
+                            console.error(`直接读取快速路径失败，回退 Puppeteer: ${directError.message}`);
+                            fetchedData = await fetchWithPuppeteer(url, mode);
+                        }
+                    } else {
+                        fetchedData = await fetchWithPuppeteer(url, mode);
+                    }
                 } catch (e) {
                     const proxyPort = process.env.FETCH_PROXY_PORT;
-                    if (proxyPort) {
+                    if (proxyPort && mode !== 'download') {
                         try {
                             fetchedData = await fetchWithPuppeteer(url, mode, proxyPort);
                         } catch (proxyError) {

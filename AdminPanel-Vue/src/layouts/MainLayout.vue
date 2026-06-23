@@ -6,6 +6,8 @@
       'sidebar-collapsed': isSidebarCollapsed,
     }"
   >
+    <a class="skip-link" href="#config-details-container">跳到主要内容</a>
+
     <SolarSystemBg />
 
     <!-- 顶栏组件（包裹在过渡容器中） -->
@@ -33,9 +35,11 @@
           :is-hovering-sidebar="isHoveringSidebar"
           :is-hover-enabled="isHoverEnabled"
           :recent-visits="recentVisits"
+          :sidebar-search-query="sidebarSearchQuery"
           @navigate-to="navigateTo"
           @open-command-palette="openCommandPalette"
           @update:is-hovering-sidebar="isHoveringSidebar = $event"
+          @update:sidebarSearchQuery="sidebarSearchQuery = $event"
         />
       </div>
 
@@ -48,9 +52,6 @@
 
       <!-- 主内容区 -->
       <main ref="contentRef" class="content" id="config-details-container">
-        <!-- 面包屑组件 -->
-        <Breadcrumb />
-
         <section class="unified-page-header">
           <h1>{{ currentPageTitle }}</h1>
         </section>
@@ -70,7 +71,7 @@
         <!-- 路由视图 -->
         <router-view v-slot="{ Component, route }">
           <transition name="fade" mode="out-in">
-            <component :is="Component" :key="route.fullPath" />
+            <component :is="Component" :key="route.fullPath" :data-page="String(route.name || '')" />
           </transition>
         </router-view>
       </main>
@@ -118,7 +119,6 @@ import SolarSystemBg from "@/components/SolarSystemBg.vue";
 import GlobalCommandPalette from "@/components/layout/GlobalCommandPalette.vue";
 import TopBar from "@/components/layout/TopBar.vue";
 import Sidebar from "@/components/layout/Sidebar.vue";
-import Breadcrumb from "@/components/layout/Breadcrumb.vue";
 import { useMainLayoutState } from "@/composables/useMainLayoutState";
 import { useAppStore } from "@/stores/app";
 
@@ -133,6 +133,7 @@ const {
   isSystemMenuOpen,
   isUserMenuOpen,
   hasNotifications,
+  sidebarSearchQuery,
   showBackToTop,
   contentRef,
   recentVisits,
@@ -170,23 +171,43 @@ void contentRef;
     color var(--transition-normal);
 }
 
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 12px;
+  z-index: 10004;
+  padding: 10px 20px;
+  background: var(--button-bg);
+  color: var(--on-accent-text);
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: var(--font-size-helper);
+  text-decoration: none;
+  transition: top 0.2s ease;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
 .container {
   display: flex;
   position: relative;
   z-index: 1;
   height: calc(
-    var(--app-viewport-height, 100vh) - var(--app-top-bar-height, 60px)
+    var(--app-viewport-height, 100vh) - var(--app-top-bar-height, 48px)
   );
-  margin-top: var(--app-top-bar-height, 60px);
+  margin-top: var(--app-top-bar-height, 48px);
   transition: opacity 1.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .content {
   flex-grow: 1;
-  padding: 30px 40px;
+  padding: 24px 32px;
   box-sizing: border-box;
   overflow-y: auto;
   height: 100%;
+  /* 透明：露出底层 SolarSystemBg 星空 */
   /* 不在默认态设置 identity transform，避免创建 stacking context */
   opacity: 1;
   transition:

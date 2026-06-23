@@ -888,10 +888,18 @@ async processToolCall(toolName, toolArgs, requestIp = null) {
         if (typeof serviceModule.processToolCall !== 'function') {
             throw new Error(`Plugin "${toolName}" does not have processToolCall function.`);
         }
-        return await serviceModule.processToolCall(toolArgs);
+        return await this._executeDirectToolCallWithTimeout(
+            plugin,
+            toolName,
+            serviceModule,
+            toolArgs,
+            { requestIp, pluginName: toolName }
+        );
     }
 }
 ```
+
+`_executeDirectToolCallWithTimeout()` 使用 `communication.timeout`（默认 60000ms）约束 `processToolCall()`，避免 direct 模块内部 Promise 卡住整个工具调用。
 
 ### 6.3 distributed 模式
 
@@ -1202,17 +1210,19 @@ fn main(mut cx: ModuleContext) -> NeonResult<()> {
 | EmojiListGenerator | static | 表情包列表 |
 | ProjectAnalyst | synchronous | 项目分析 |
 
-### 9.4 系统控制 (10 个)
+### 9.4 系统控制 (12 个)
 
 | 插件名 | 类型 | 功能 |
 |--------|------|------|
-| LinuxShellExecutor | synchronous | Linux Shell 执行 |
+| LinuxShellExecutor | hybridservice | Linux Shell direct 工具入口；常驻模块执行本地/远程命令，受 manifest direct timeout 约束，默认 hosts 模板时仅保留本地执行 |
+| SSHManagerService | service | 常驻 SSH 连接池服务，通过 UDS 提供 RPC；默认 hosts 模板或无有效 SSH 资产时不启动并清理全局 IPC 指针，退出由主进程 gracefulShutdown 统一调用 shutdown |
 | PowerShellExecutor | synchronous | PowerShell 执行 |
 | ChromeBridge | hybridservice | Chrome 浏览器控制 |
 | CapturePreprocessor | messagePreprocessor | 屏幕截图 |
 | PyScreenshot | synchronous | Python 截图 |
 | PyCameraCapture | synchronous | 摄像头捕获 |
-| LinuxLogMonitor | service | Linux 日志监控 |
+| LinuxLogMonitor | hybridservice | Linux 日志监控 direct 工具入口；VCP 加载时仅 readonly 初始化，`start` 时进入 full 监控模式并复用 `LinuxLogMonitorServer` UDS 代理或 legacy fallback |
+| LinuxLogMonitorServer | service | 常驻日志监控服务，持有 watcher 状态与自定义规则；after-context 默认 5 秒超时刷新告警，查询 fallback 支持 `partial/fallbackError`，并按 legacy 契约适配结果 |
 | ScheduleManager | service | 日程管理 |
 | ScheduleBriefing | static | 日程摘要 |
 | FRPSInfoProvider | static | FRP 状态 |

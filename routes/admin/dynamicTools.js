@@ -1,6 +1,8 @@
 const express = require('express');
 const dynamicToolRegistry = require('../../modules/dynamicToolRegistry.js');
 
+const REBUILD_MODES = new Set(['classification', 'catalog', 'all']);
+
 module.exports = function(options) {
     const router = express.Router();
     const { pluginManager } = options;
@@ -50,6 +52,18 @@ module.exports = function(options) {
                         .filter(([key, value]) => typeof key === 'string' && typeof value === 'string')
                         .map(([key, value]) => [key, value])
                 )
+                : {},
+            descriptionOverrides: overrides.descriptionOverrides && typeof overrides.descriptionOverrides === 'object'
+                ? Object.fromEntries(
+                    Object.entries(overrides.descriptionOverrides)
+                        .filter(([key, value]) => typeof key === 'string' && value && typeof value === 'object')
+                        .map(([key, value]) => [key, {
+                            brief: typeof value.brief === 'string' ? value.brief : '',
+                            fullDescription: typeof value.fullDescription === 'string' ? value.fullDescription : '',
+                            categories: Array.isArray(value.categories) ? value.categories.map(String).filter(Boolean) : [],
+                            keywords: Array.isArray(value.keywords) ? value.keywords.map(String).filter(Boolean) : []
+                        }])
+                )
                 : {}
         };
     }
@@ -89,6 +103,12 @@ module.exports = function(options) {
                 await dynamicToolRegistry.syncFromPluginManager('admin_rebuild');
             }
             const mode = typeof req.body?.mode === 'string' ? req.body.mode : 'classification';
+            if (!REBUILD_MODES.has(mode)) {
+                return res.status(400).json({
+                    error: 'Invalid dynamic tools rebuild mode',
+                    details: `mode must be one of: ${Array.from(REBUILD_MODES).join(', ')}`
+                });
+            }
             const wait = req.body?.wait !== false;
             const state = await dynamicToolRegistry.forceRebuild({ mode, wait });
             res.json({ status: 'success', state });
@@ -108,7 +128,8 @@ module.exports = function(options) {
                 pinnedOriginKeys: Array.isArray(current.manualOverrides?.pinnedOriginKeys)
                     ? [...current.manualOverrides.pinnedOriginKeys]
                     : [],
-                categoryAliases: current.manualOverrides?.categoryAliases || {}
+                categoryAliases: current.manualOverrides?.categoryAliases || {},
+                descriptionOverrides: current.manualOverrides?.descriptionOverrides || {}
             };
 
             const originKey = typeof req.body?.originKey === 'string' ? req.body.originKey : '';
@@ -126,6 +147,7 @@ module.exports = function(options) {
                 overrides.excludedOriginKeys = manual.excludedOriginKeys;
                 overrides.pinnedOriginKeys = manual.pinnedOriginKeys;
                 overrides.categoryAliases = manual.categoryAliases;
+                overrides.descriptionOverrides = manual.descriptionOverrides;
             }
 
             const config = await dynamicToolRegistry.updateConfig({ manualOverrides: overrides });

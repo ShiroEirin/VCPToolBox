@@ -10,7 +10,7 @@ class EPAModule {
         this.config = {
             maxBasisDim: config.maxBasisDim || 64,
             minVarianceRatio: config.minVarianceRatio || 0.01,
-            clusterCount: config.clusterCount || 32,
+            clusterCount: config.clusterCount || 64,
             dimension: config.dimension || 3072,
             strictOrthogonalization: config.strictOrthogonalization !== undefined ? config.strictOrthogonalization : true,
             vexusIndex: config.vexusIndex || null,
@@ -21,6 +21,7 @@ class EPAModule {
         this.basisMean = null;       // 🌟 新增：全局加权平均向量 (用于中心化)
         this.basisLabels = null;     // 基底标签
         this.basisEnergies = null;   // 特征值 (方差贡献)
+        this._flattenedBasisCache = null; // Rust 投影复用的扁平化基底，避免每次查询重新分配
 
         this.initialized = false;
     }
@@ -38,24 +39,39 @@ class EPAModule {
             const tags = this.db.prepare(`SELECT id, name, vector FROM tags WHERE vector IS NOT NULL`).all();
             if (tags.length < 8) return false;
 
-            // 1. 鲁棒 K-Means 聚类 (提取加权质心)
-            const clusterData = this._clusterTags(tags, Math.min(tags.length, this.config.clusterCount));
+            let loadedFromRust = false;
 
-            // 2. 🌟 计算 SVD (加权中心化 PCA)
-            // 相比之前的纯 SVD，这里先去中心化，再加权，更能提取差异特征
-            const svdResult = this._computeWeightedPCA(clusterData);
+            if (this.config.deferRustRecompute) {
+                console.log('[EPA] 🕒 No cached basis; Rust recompute deferred until post-startup refresh window.');
+                return false;
+            }
 
-            const { U, S, meanVector, labels } = svdResult;
+            if (this.config.vexusIndex && typeof this.config.vexusIndex.computeEpaBasis === 'function') {
+                loadedFromRust = await this._recomputeWithRust(tags.length);
+            }
 
-            // 3. 选择主成分
-            const K = this._selectBasisDimension(S);
+            if (!loadedFromRust) {
+                // 1. 鲁棒 K-Means 聚类 (提取加权质心)
+                const clusterData = this._clusterTags(tags, Math.min(tags.length, this.config.clusterCount));
 
-            this.orthoBasis = U.slice(0, K);
-            this.basisEnergies = S.slice(0, K);
-            this.basisMean = meanVector; // 保存平均向量用于投影时的去中心化
-            this.basisLabels = labels ? labels.slice(0, K) : clusterData.labels.slice(0, K);
+                // 2. 🌟 计算 SVD (加权中心化 PCA)
+                // 相比之前的纯 SVD，这里先去中心化，再加权，更能提取差异特征
+                const svdResult = this._computeWeightedPCA(clusterData);
 
-            await this._saveToCache();
+                const { U, S, meanVector, labels } = svdResult;
+
+                // 3. 选择主成分
+                const K = this._selectBasisDimension(S);
+
+                this.orthoBasis = U.slice(0, K);
+                this.basisEnergies = S.slice(0, K);
+                this.basisMean = meanVector; // 保存平均向量用于投影时的去中心化
+                this.basisLabels = labels ? labels.slice(0, K) : clusterData.labels.slice(0, K);
+                this._refreshFlattenedBasisCache();
+
+                await this._saveToCache();
+            }
+
             this.initialized = true;
             return true;
         } catch (e) {
@@ -80,11 +96,7 @@ class EPAModule {
         // 🌟 优先使用 Rust 高性能投影
         if (this.config.vexusIndex && typeof this.config.vexusIndex.project === 'function') {
             try {
-                // 扁平化基底
-                const flattenedBasis = new Float32Array(K * dim);
-                for (let k = 0; k < K; k++) {
-                    flattenedBasis.set(this.orthoBasis[k], k * dim);
-                }
+                const flattenedBasis = this._getFlattenedBasis();
 
                 const result = this.config.vexusIndex.project(
                     vec,
@@ -202,10 +214,241 @@ class EPAModule {
 
     // --- 数学核心优化 ---
 
+    _shouldLogRustSummary(scope) {
+        const raw = (process.env.RUST_LOG_SUMMARY_WHITELIST || 'epa.compute,epa.publish').trim();
+        if (!raw || raw.toLowerCase() === 'false' || raw === '0') return false;
+        if (raw === '*' || raw.toLowerCase() === 'all') return true;
+        return raw.split(',')
+            .map(item => item.trim().toLowerCase())
+            .filter(Boolean)
+            .includes(scope.toLowerCase());
+    }
+
+    _logRustEpaSummary(scope, result) {
+        if (!this._shouldLogRustSummary(scope) || !result) return;
+        const summary = result.phaseSummary || result.phase_summary || 'n/a';
+        const algorithm = result.algorithm || 'unknown';
+        const anchors = result.anchorCount ?? result.anchor_count ?? 0;
+        const samples = result.representativeSampleCount ?? result.representative_sample_count ?? result.clusterCount ?? 0;
+        const buckets = result.densityBucketCount ?? result.density_bucket_count ?? 0;
+        const publishElapsed = result.publishElapsedMs ?? result.publish_elapsed_ms ?? 0;
+        console.log(
+            `[EPA] 🦀 Rust summary [${scope}]: algorithm=${algorithm}, ` +
+            `tags=${result.tagCount ?? result.tag_count ?? 0}, buckets=${buckets}, anchors=${anchors}, ` +
+            `samples=${samples}, basis=${result.basisCount ?? result.basis_count ?? 0}, ` +
+            `elapsed=${Number(result.elapsedMs ?? result.elapsed_ms ?? 0).toFixed(2)}ms, ` +
+            `publish=${Number(publishElapsed).toFixed(2)}ms, phases=${summary}`
+        );
+    }
+
+    async _recomputeWithRust(tagCount) {
+        console.log(
+            `[EPA] 🦀 computeEpaBasis JS call starting without write lease: db=${this.db.name}, ` +
+            `tagCount=${tagCount}, clusters=${this.config.clusterCount}, maxBasis=${this.config.maxBasisDim}`
+        );
+
+        let taskPromise;
+        try {
+            taskPromise = this.config.vexusIndex.computeEpaBasis(
+                this.db.name,
+                this.config.clusterCount,
+                this.config.maxBasisDim
+            );
+        } catch (e) {
+            console.error('[EPA] 🦀 computeEpaBasis JS call threw synchronously before returning AsyncTask:', e.message || e);
+            throw e;
+        }
+
+        console.log('[EPA] 🦀 computeEpaBasis JS call returned; awaiting Rust read-only compute result...');
+        const result = await taskPromise;
+        console.log('[EPA] 🦀 computeEpaBasis read-only compute resolved.');
+        this._logRustEpaSummary('epa.compute', result);
+
+        if (!result || !result.success) {
+            console.warn(`[EPA] Rust basis recompute skipped/failed: ${result?.message || 'unknown reason'}`);
+            return false;
+        }
+
+        if (typeof this.config.vexusIndex.publishEpaBasisCache !== 'function') {
+            console.warn('[EPA] Rust basis compute finished but publishEpaBasisCache is unavailable; rebuild rust-vexus-lite.');
+            return false;
+        }
+
+        const publish = async () => {
+            console.log('[EPA] 🦀 Publishing Rust EPA basis cache under short write lease...');
+            const publishResult = this.config.vexusIndex.publishEpaBasisCache(this.db.name);
+            this._logRustEpaSummary('epa.publish', publishResult);
+            if (!publishResult || !publishResult.success) {
+                console.warn(`[EPA] Rust EPA cache publish skipped/failed: ${publishResult?.message || 'unknown reason'}`);
+                return false;
+            }
+            if (this.config.afterRustWrite) {
+                this.config.afterRustWrite('epa basis');
+            }
+            return publishResult;
+        };
+
+        const publishResult = this.config.withRustWriteLease
+            ? await this.config.withRustWriteLease('tagmemo:epa-basis-publish', publish, {
+                pendingThreshold: 0,
+                ttlMs: 60 * 1000
+            })
+            : await publish();
+
+        if (!publishResult) return false;
+
+        if (await this._loadFromCache({ expectedTagCount: tagCount })) {
+            console.log(
+                `[EPA] 🦀 Rust basis ready: tags=${publishResult.tagCount}, clusters=${publishResult.clusterCount}, ` +
+                `basis=${publishResult.basisCount}, elapsed=${publishResult.elapsedMs.toFixed(2)}ms`
+            );
+            return true;
+        }
+
+        console.warn('[EPA] Rust basis publish finished but cache reload failed; falling back to JS.');
+        return false;
+    }
+
+    async refreshInBackground() {
+        try {
+            const tagCount = this.db.prepare(`SELECT COUNT(*) as count FROM tags WHERE vector IS NOT NULL`).get()?.count || 0;
+            if (tagCount < 8) {
+                console.log('[EPA] Background refresh skipped: not enough tag vectors.');
+                return false;
+            }
+
+            // 🛡️ P0: 已确认卡死点在 post-startup 的 tagmemo:epa-basis Rust 写租约之后。
+            // EPA 已在 initialize() 命中缓存时，运行期后台刷新不是必需项；默认跳过，避免 Rust computeEpaBasis
+            // 在 10–30 分钟窗口内概率进入无日志长运行/卡死。需要强制刷新时显式设置：
+            // KNOWLEDGEBASE_EPA_BACKGROUND_RECOMPUTE=true
+            const allowBackgroundRecompute = (process.env.KNOWLEDGEBASE_EPA_BACKGROUND_RECOMPUTE || 'false').toLowerCase() === 'true';
+            if (!allowBackgroundRecompute && this.initialized) {
+                console.log(`[EPA] 🛡️ Background basis refresh skipped: cached EPA basis is active (tagCount=${tagCount}). Set KNOWLEDGEBASE_EPA_BACKGROUND_RECOMPUTE=true to force recompute.`);
+                return true;
+            }
+
+            // 🛡️ P0: 运行一段时间后“无日志卡死”的主要嫌疑点。
+            // 旧逻辑会在 post-startup derived refresh 中把所有 tag 向量拉到 JS，
+            // 然后用 JS K-Means/PCA 做 50 轮 tags × clusters × dim 级同步计算。
+            // 大库下 Node 主线程会长时间被纯 CPU 循环占满，表现为 HTTP/日志/定时器全停。
+            // Rust EPA 已拆成：长耗时只读计算（无写租约） + 短写发布（tagmemo:epa-basis-publish）。
+            if (this.config.vexusIndex && typeof this.config.vexusIndex.computeEpaBasis === 'function') {
+                const loadedFromRust = await this._recomputeWithRust(tagCount);
+                if (loadedFromRust) {
+                    this.initialized = true;
+                    console.log('[EPA] ✅ Background basis refresh complete via Rust async compute.');
+                    return true;
+                }
+                console.warn('[EPA] ⚠️ Rust background refresh failed; falling back to bounded JS snapshot compute.');
+            }
+
+            const maxJsTags = parseInt(process.env.EPA_JS_FALLBACK_MAX_TAGS, 10) || 2000;
+            const tags = this._loadBoundedTagSnapshot(maxJsTags);
+            if (tags.length < 8) {
+                console.log('[EPA] Background JS fallback skipped: bounded snapshot has not enough tag vectors.');
+                return false;
+            }
+
+            console.warn(
+                `[EPA] 🧯 Running bounded JS EPA fallback with ${tags.length}/${tagCount} tag vectors. ` +
+                `Set EPA_JS_FALLBACK_MAX_TAGS to tune; rebuild Rust module to avoid JS CPU stalls.`
+            );
+
+            const startedAt = Date.now();
+            const computed = this._computeBasisFromSnapshot(tags);
+            if (!computed) return false;
+
+            await this._publishBasisCacheWithLease();
+
+            this.initialized = true;
+            console.log(`[EPA] ✅ Background basis refresh complete via bounded JS fallback in ${Date.now() - startedAt}ms.`);
+            return true;
+        } catch (e) {
+            console.warn('[EPA] ⚠️ Background refresh failed:', e.message || e);
+            return false;
+        }
+    }
+
+    _loadBoundedTagSnapshot(limit) {
+        const rows = this.db.prepare(`
+            SELECT id, name, vector
+            FROM tags
+            WHERE vector IS NOT NULL
+            ORDER BY id
+        `).all();
+
+        if (rows.length <= limit) return rows;
+
+        // 稳定均匀采样，避免随机采样导致每次后台刷新结果剧烈波动。
+        const sampled = [];
+        const step = rows.length / limit;
+        for (let i = 0; i < limit; i++) {
+            sampled.push(rows[Math.floor(i * step)]);
+        }
+        return sampled;
+    }
+
+    _computeBasisFromSnapshot(tags) {
+        const startedAt = Date.now();
+        console.log(`[EPA] 🧮 JS basis snapshot compute started: tags=${tags.length}, dim=${this.config.dimension}, clusters=${Math.min(tags.length, this.config.clusterCount)}`);
+        const clusterData = this._clusterTags(tags, Math.min(tags.length, this.config.clusterCount));
+        const svdResult = this._computeWeightedPCA(clusterData);
+        const { U, S, meanVector, labels } = svdResult;
+        const K = this._selectBasisDimension(S);
+
+        this.orthoBasis = U.slice(0, K);
+        this.basisEnergies = S.slice(0, K);
+        this.basisMean = meanVector;
+        this.basisLabels = labels ? labels.slice(0, K) : clusterData.labels.slice(0, K);
+        this._refreshFlattenedBasisCache();
+        console.log(`[EPA] 🧮 JS basis snapshot compute finished: basis=${K}, elapsed=${Date.now() - startedAt}ms`);
+        return true;
+    }
+
+    async _publishBasisCacheWithLease() {
+        const publish = async () => {
+            await this._saveToCache();
+            return true;
+        };
+
+        if (this.config.withRustWriteLease) {
+            return await this.config.withRustWriteLease('tagmemo:epa-basis-publish', publish, {
+                pendingThreshold: 0,
+                ttlMs: 60 * 1000
+            });
+        }
+
+        return await publish();
+    }
+
+    _refreshFlattenedBasisCache() {
+        if (!this.orthoBasis || this.orthoBasis.length === 0) {
+            this._flattenedBasisCache = null;
+            return null;
+        }
+
+        const K = this.orthoBasis.length;
+        const dim = this.orthoBasis[0].length;
+        const flattened = new Float32Array(K * dim);
+        for (let k = 0; k < K; k++) {
+            flattened.set(this.orthoBasis[k], k * dim);
+        }
+        this._flattenedBasisCache = flattened;
+        return flattened;
+    }
+
+    _getFlattenedBasis() {
+        if (!this._flattenedBasisCache) {
+            return this._refreshFlattenedBasisCache();
+        }
+        return this._flattenedBasisCache;
+    }
+
     /**
      * 🌟 优化：带收敛检测和权重的 K-Means
      */
     _clusterTags(tags, k) {
+        const startedAt = Date.now();
         const dim = this.config.dimension;
         const vectors = tags.map(t => {
             const buf = t.vector;
@@ -225,6 +468,9 @@ class EPAModule {
         const tolerance = 1e-4; // 收敛阈值
 
         for (let iter = 0; iter < maxIter; iter++) {
+            if (iter === 0 || (iter + 1) % 10 === 0) {
+                console.log(`[EPA] 🧮 JS K-Means progress: iter=${iter + 1}/${maxIter}, tags=${vectors.length}, clusters=${k}, elapsed=${Date.now() - startedAt}ms`);
+            }
             const clusters = Array.from({ length: k }, () => []);
             let movement = 0;
 
@@ -269,6 +515,8 @@ class EPAModule {
             }
         }
 
+        console.log(`[EPA] 🧮 JS K-Means assignment complete: elapsed=${Date.now() - startedAt}ms`);
+
         // 命名逻辑不变
         const labels = centroids.map(c => {
             let maxSim = -Infinity, closest = 'Unknown';
@@ -293,9 +541,11 @@ class EPAModule {
      * 4. Power Iteration 提取特征向量
      */
     _computeWeightedPCA(clusterData) {
+        const startedAt = Date.now();
         const { vectors, weights } = clusterData;
         const n = vectors.length;
         const dim = this.config.dimension;
+        console.log(`[EPA] 🧮 JS weighted PCA started: clusters=${n}, dim=${dim}, maxBasis=${this.config.maxBasisDim}`);
         const totalWeight = weights.reduce((a, b) => a + b, 0);
 
         // 1. 计算全局加权平均向量
@@ -340,6 +590,9 @@ class EPAModule {
         const maxBasis = Math.min(n, this.config.maxBasisDim);
 
         for (let k = 0; k < maxBasis; k++) {
+            if (k === 0 || (k + 1) % 8 === 0) {
+                console.log(`[EPA] 🧮 JS weighted PCA progress: basis=${k + 1}/${maxBasis}, elapsed=${Date.now() - startedAt}ms`);
+            }
             const { vector: v, value } = this._powerIteration(gramCopy, n, eigenvectors);
             if (value < 1e-6) break; // 特征值太小
 
@@ -379,6 +632,7 @@ class EPAModule {
             return basis;
         });
 
+        console.log(`[EPA] 🧮 JS weighted PCA finished: basis=${U.length}, elapsed=${Date.now() - startedAt}ms`);
         return { U, S: eigenvalues, meanVector, labels: clusterData.labels };
     }
 
@@ -453,7 +707,7 @@ class EPAModule {
         } catch (e) { console.error('[EPA] Save cache error:', e); }
     }
 
-    async _loadFromCache() {
+    async _loadFromCache(options = {}) {
         try {
             const row = this.db.prepare("SELECT value FROM kv_store WHERE key = ?").get('epa_basis_cache');
             if (!row) return false;
@@ -461,6 +715,7 @@ class EPAModule {
 
             // 简单校验
             if (!data.mean) return false; // 旧缓存格式不兼容
+            if (options.expectedTagCount && data.tagCount && data.tagCount !== options.expectedTagCount) return false;
 
             this.orthoBasis = data.basis.map(b64 => {
                 const buf = Buffer.from(b64, 'base64');
@@ -474,6 +729,7 @@ class EPAModule {
 
             this.basisEnergies = new Float32Array(data.energies);
             this.basisLabels = data.labels;
+            this._refreshFlattenedBasisCache();
             return true;
         } catch (e) { return false; }
     }

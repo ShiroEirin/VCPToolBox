@@ -84,6 +84,190 @@ export interface ServerLogQuery {
   offset?: number;
 }
 
+export interface FinalContextAttachmentSummary {
+  type: string;
+  mediaType: string;
+  filename?: string;
+  tokenCount?: number;
+  tokenMethod?: string;
+  byteLength?: number;
+}
+
+export interface FinalContextBlockSummary {
+  index: number;
+  role: string;
+  contentType: string;
+  text: string;
+  textLength: number;
+  textTokenCount?: number;
+  attachmentTokenCount?: number;
+  tokenCount: number;
+  tokenMethod?: string;
+  attachments: FinalContextAttachmentSummary[];
+  attachmentCounts?: Record<string, number>;
+  parts?: Array<Record<string, unknown>>;
+}
+
+export interface FinalContextSnapshot {
+  id?: number;
+  capturedAt: string;
+  metadata: Record<string, unknown>;
+  body: Record<string, unknown> & {
+    model?: string;
+    stream?: boolean;
+    messages?: unknown[];
+  };
+  summary: {
+    model: string | null;
+    stream: boolean;
+    messageCount: number;
+    totalTextLength: number;
+    totalTextTokenCount?: number;
+    totalAttachmentTokenCount?: number;
+    totalTokenCount: number;
+    tokenMethod?: string;
+    roleCounts: Record<string, number>;
+    blocks: FinalContextBlockSummary[];
+  };
+}
+
+export interface FinalContextListItem {
+  id: number;
+  capturedAt: string;
+  metadata: Record<string, unknown>;
+  summary: {
+    model: string | null;
+    stream: boolean;
+    messageCount: number;
+    totalTokenCount: number;
+    totalTextTokenCount?: number;
+    totalAttachmentTokenCount?: number;
+    tokenMethod?: string | null;
+    roleCounts: Record<string, number>;
+  };
+}
+
+export interface FinalContextResponse {
+  available: boolean;
+  message?: string;
+  snapshot?: FinalContextSnapshot;
+  list?: FinalContextListItem[];
+  maxSnapshots?: number;
+}
+
+export interface FinalContextListResponse {
+  success?: boolean;
+  list: FinalContextListItem[];
+  maxSnapshots: number;
+}
+
+export interface MultiModalConfig {
+  MultiModalModel: string;
+  MultiModalPrompt: string;
+  MediaInsertPrompt: string;
+  MultiModalModelOutputMaxTokens: number;
+  MultiModalModelContent: number;
+  MultiModalModelThinkingBudget: number;
+  MultiModalModelAsynchronousLimit: number;
+  MultiModalForceTranslateModels: string[];
+}
+
+export interface MultiModalConfigResponse {
+  success?: boolean;
+  config: MultiModalConfig;
+  path?: string;
+  watcherActive?: boolean;
+  lastLoadError?: string | null;
+  message?: string;
+}
+
+export interface OneRingConfig {
+  enabled: boolean;
+  tailTagPlacement: 'inline' | 'system_user_block';
+  maxContextBlocks: number;
+  timeInsert: boolean;
+}
+
+export interface BridgeHijackConfig {
+  port: number;
+  upstreamUrl: string;
+  upstreamKey: string;
+  upstreamType: 'chat' | 'anthropic' | 'gemini';
+  defaultModel: string;
+  systemPrompt: string;
+  hijackMode: 'off' | 'replace' | 'prepend' | 'append' | 'merge';
+  modelMap: Record<string, string>;
+  debugMode: boolean;
+  defaultProfile: string;
+}
+
+export interface BridgeProfile {
+  name: string;
+  displayName: string;
+  systemPrompt: string;
+  hijackMode: 'off' | 'replace' | 'prepend' | 'append' | 'merge';
+  modelOverride: string;
+  description: string;
+}
+
+export interface BridgeProfilesResponse {
+  success?: boolean;
+  profiles: BridgeProfile[];
+  activeDefault: string;
+  profilesDir: string;
+  count: number;
+  message?: string;
+}
+
+export interface BridgeProfileResponse {
+  success?: boolean;
+  profile: BridgeProfile;
+  created?: boolean;
+  message?: string;
+}
+
+export interface BridgeProfileDeleteResponse {
+  success?: boolean;
+  message?: string;
+}
+
+export interface BridgeProfileActivateResponse {
+  success?: boolean;
+  activeDefault: string;
+  message?: string;
+}
+
+export interface OneRingConfigResponse {
+  success?: boolean;
+  config: OneRingConfig;
+  raw?: Record<string, unknown>;
+  path?: string;
+  message?: string;
+}
+
+export interface OneRingConfigSaveResponse {
+  success?: boolean;
+  config: OneRingConfig;
+  path?: string;
+  message?: string;
+}
+
+export interface BridgeHijackConfigResponse {
+  success?: boolean;
+  config: BridgeHijackConfig;
+  path?: string;
+  description?: Partial<Record<keyof BridgeHijackConfig, string>>;
+  message?: string;
+}
+
+export interface BridgeHijackConfigSaveResponse {
+  success?: boolean;
+  config: BridgeHijackConfig;
+  path?: string;
+  description?: Partial<Record<keyof BridgeHijackConfig, string>>;
+  message?: string;
+}
+
 export interface SystemMonitorResponse {
   system: SystemResources;
   pm2?: PM2Process[];

@@ -76,6 +76,7 @@ class LightMemoPlugin {
     constructor() {
         this.name = 'LightMemo';
         this.vectorDBManager = null;
+        this.tdbKnowledgeManager = null; // 冷知识库（TriviumDB）检索管理器
         this.getSingleEmbedding = null;
         this.projectBasePath = '';
         this.dailyNoteRootPath = '';
@@ -105,6 +106,10 @@ class LightMemoPlugin {
 
         if (dependencies.vectorDBManager) {
             this.vectorDBManager = dependencies.vectorDBManager;
+        }
+        if (dependencies.tdbKnowledgeManager) {
+            this.tdbKnowledgeManager = dependencies.tdbKnowledgeManager;
+            console.log('[LightMemo] TDBKnowledgeManager injected. Cold knowledge base search enabled.');
         }
         if (dependencies.getSingleEmbedding) {
             this.getSingleEmbedding = dependencies.getSingleEmbedding;
@@ -146,8 +151,23 @@ class LightMemoPlugin {
             search_all_knowledge_bases = false,
             tag_boost: rawTagBoost = 0.5,
             core_tags = [],
-            core_boost_factor = 1.33
+            core_boost_factor = 1.33,
+            knowledge_base = null
         } = args;
+
+        // 🧊 冷知识库（TriviumDB）检索分流：
+        //   - query 中带 [知识库] 或 [知识库:库名1,库名2] 语法
+        //   - 或显式提供 knowledge_base 参数
+        // 命中后走 TDBKnowledge 的 BM25+向量+图扩散混合检索，不进入 dailynote/TagMemo 流程。
+        const coldRoute = this._detectColdKnowledgeRoute(query, knowledge_base);
+        if (coldRoute) {
+            return await this._handleColdKnowledgeSearch({
+                query: coldRoute.query,
+                libraries: coldRoute.libraries,
+                k,
+                rerank
+            });
+        }
 
         // 🌟 Wave v8: 解析 tag_boost 的 "+" 后缀
         // tag_boost:「始」0.6「末」  → 正常浪潮 (tagBoost=0.6, geodesic=false)
@@ -155,13 +175,24 @@ class LightMemoPlugin {
         let useGeodesicRerank = false;
         let tag_boost = rawTagBoost;
         if (typeof rawTagBoost === 'string') {
-            if (rawTagBoost.endsWith('+')) {
+            const trimmedTagBoost = rawTagBoost.trim();
+            if (trimmedTagBoost.endsWith('+')) {
                 useGeodesicRerank = true;
-                tag_boost = parseFloat(rawTagBoost.slice(0, -1)) || 0;
+                tag_boost = this._parseNumber(trimmedTagBoost.slice(0, -1), 0);
             } else {
-                tag_boost = parseFloat(rawTagBoost) || 0;
+                tag_boost = this._parseNumber(trimmedTagBoost, 0);
             }
+        } else {
+            tag_boost = this._parseNumber(rawTagBoost, 0);
         }
+
+        const normalizedK = Math.max(1, Math.floor(this._parseNumber(k, 5)));
+        const normalizedCoreTags = this._parseStringArray(core_tags);
+        const normalizedCoreBoostFactor = this._parseNumber(core_boost_factor, 1.33);
+
+        const parsedMaidScope = this._parseMaidScopedFolder(maid);
+        const scopedMaid = parsedMaidScope.maid;
+        const combinedFolder = this._mergeFolderScopes(folder, parsedMaidScope.folder);
 
         let isMusicSearch = false;
         let actualQuery = query || "";
@@ -203,16 +234,18 @@ class LightMemoPlugin {
         }
 
         if (!actualQuery && timeRange) {
-            actualQuery = maid || folder || "记录"; // 如果只有时间约束，给予默认查询词避免向量化报错
+            actualQuery = scopedMaid || combinedFolder || "记录"; // 如果只有时间约束，给予默认查询词避免向量化报错
         }
 
-        if (!isMusicSearch && (!query || (!maid && !folder))) {
+        if (!isMusicSearch && (!query || (!scopedMaid && !combinedFolder))) {
             throw new Error("参数 'query' 是必需的，且必须提供 'maid' 或 'folder'。");
         }
 
-        const effectiveFolder = isMusicSearch ? 'MusicDiary' : folder;
-        const effectiveMaid = isMusicSearch ? null : maid;
-        const effectiveSearchAll = isMusicSearch ? false : search_all_knowledge_bases;
+        const normalizedSearchAll = this._parseBoolean(search_all_knowledge_bases, false);
+
+        const effectiveFolder = isMusicSearch ? 'MusicDiary' : combinedFolder;
+        const effectiveMaid = isMusicSearch ? null : scopedMaid;
+        const effectiveSearchAll = isMusicSearch ? false : normalizedSearchAll;
 
         // 从所有日记本中收集候选chunks
         const candidates = await this._gatherCandidateChunks({
@@ -265,15 +298,15 @@ class LightMemoPlugin {
             topByKeyword = scoredCandidates
                 .filter(c => c.bm25Score > 0)
                 .sort((a, b) => b.bm25Score - a.bm25Score)
-                .slice(0, k * 5); // 增加候选数量
+                .slice(0, normalizedK * 5); // 增加候选数量
 
             // 如果关键词匹配太少，补充一些向量相似度高的（这里先取前 N 个作为兜底候选）
-            if (topByKeyword.length < k) {
+            if (topByKeyword.length < normalizedK) {
                 console.log(`[LightMemo] BM25 results insufficient (${topByKeyword.length}), adding fallback candidates.`);
                 const existingIds = new Set(topByKeyword.map(c => c.label));
                 const fallbacks = scoredCandidates
                     .filter(c => !existingIds.has(c.label))
-                    .slice(0, k * 2);
+                    .slice(0, normalizedK * 2);
                 topByKeyword = [...topByKeyword, ...fallbacks];
             }
         }
@@ -289,7 +322,7 @@ class LightMemoPlugin {
         let tagBoostInfo = null;
         // 🚀【新步骤】如果启用了 TagMemo，则调用 KBM 的功能来增强向量
         if (tag_boost > 0 && this.vectorDBManager && typeof this.vectorDBManager.applyTagBoost === 'function') {
-            const hasCore = Array.isArray(core_tags) && core_tags.length > 0;
+            const hasCore = normalizedCoreTags.length > 0;
             const waveLabel = useGeodesicRerank ? 'TagMemo+ (Wave v8)' : 'TagMemo V6';
             console.log(`[LightMemo] Applying ${waveLabel} boost (Factor: ${tag_boost}${hasCore ? `, CoreTags: ${core_tags.length}` : ''})`);
 
@@ -297,8 +330,8 @@ class LightMemoPlugin {
             const boostResult = this.vectorDBManager.applyTagBoost(
                 new Float32Array(queryVector),
                 tag_boost,
-                core_tags,
-                core_boost_factor
+                normalizedCoreTags,
+                normalizedCoreBoostFactor
             );
 
             if (boostResult && boostResult.vector) {
@@ -363,8 +396,8 @@ class LightMemoPlugin {
 
             const geoConfig = this.vectorDBManager.ragParams?.KnowledgeBaseManager?.geodesicRerank || {};
             const reranked = this.vectorDBManager.geodesicRerank(geoInput, {
-                alpha: geoConfig.alpha ?? 0.3,
-                minGeoSamples: geoConfig.minGeoSamples ?? 4
+                alpha: geoConfig.alpha,
+                minGeoSamples: geoConfig.minGeoSamples
             });
 
             // Map results back with geodesic metadata
@@ -380,7 +413,7 @@ class LightMemoPlugin {
         }
 
         // 取top K
-        let finalResults = rankedCandidates.slice(0, k);
+        let finalResults = rankedCandidates.slice(0, normalizedK);
 
         // --- 第三阶段：Rerank（可选） ---
         // 🌟 Rerank+ (RRF): rerank 参数支持多种形式
@@ -425,10 +458,170 @@ class LightMemoPlugin {
         if (useRerank && finalResults.length > 0) {
             // 🌟 Rerank+: 注入检索排位 (retrieval_rank) 用于 RRF 融合
             finalResults.forEach((doc, idx) => { doc.retrieval_rank = idx + 1; });
-            finalResults = await this._rerankDocuments(actualQuery, finalResults, k, rrfOptions);
+            finalResults = await this._rerankDocuments(actualQuery, finalResults, normalizedK, rrfOptions);
         }
 
         return this.formatResults(finalResults, query);
+    }
+
+    /**
+     * 🧊 检测冷知识库检索路由。
+     * 支持两种触发方式：
+     *   1. query 中包含 [知识库] 或 [知识库:库名1,库名2] / [知识库：库名] 语法
+     *   2. 显式传入 knowledge_base 参数（字符串/数组），库名用逗号分隔
+     * @returns {{ query: string, libraries: string[] }|null}
+     */
+    _detectColdKnowledgeRoute(query, knowledgeBaseArg) {
+        if (!this.tdbKnowledgeManager) return null;
+
+        let libraries = [];
+        let cleanedQuery = typeof query === 'string' ? query : '';
+
+        // 语法：[知识库] 或 [知识库:库名] 或 [知识库：库名1,库名2]
+        const kbRegex = /\[\s*知识库\s*(?:[:：]\s*([^\]]+))?\s*\]/;
+        const match = cleanedQuery.match(kbRegex);
+        if (match) {
+            if (match[1]) {
+                libraries.push(...this._parseStringArray(match[1]));
+            }
+            cleanedQuery = cleanedQuery.replace(match[0], '').trim();
+        }
+
+        // 显式 knowledge_base 参数
+        if (knowledgeBaseArg) {
+            libraries.push(...this._parseStringArray(knowledgeBaseArg));
+        }
+
+        // 既没有 [知识库] 语法，也没有显式参数 → 不分流
+        if (!match && (!knowledgeBaseArg || libraries.length === 0)) {
+            return null;
+        }
+
+        // 去重
+        libraries = [...new Set(libraries)];
+
+        return { query: cleanedQuery || query || '', libraries };
+    }
+
+    /**
+     * 🧊 处理冷知识库（TriviumDB）检索。
+     * 走 TDBKnowledge 的 search_hybrid（BM25 稀疏 + 向量稠密 + 图扩散），
+     * 可选叠加 LightMemo 自带的 Rerank 精排。
+     */
+    async _handleColdKnowledgeSearch({ query, libraries, k, rerank }) {
+        if (!this.tdbKnowledgeManager) {
+            return '冷知识库（TDBKnowledge）未启用或未注入，无法检索。';
+        }
+        if (!query || !query.trim()) {
+            throw new Error("冷知识库检索的 'query' 不能为空。");
+        }
+
+        const normalizedK = Math.max(1, Math.floor(this._parseNumber(k, 5)));
+        // Rerank 阶段会重排，因此初筛多取一些候选
+        const fetchK = rerank ? normalizedK * 3 : normalizedK;
+
+        console.log(`[LightMemo] 🧊 Cold knowledge search: query="${query}", libraries=[${libraries.join(', ') || 'ALL'}], k=${normalizedK}`);
+
+        let hits = [];
+        try {
+            hits = await this.tdbKnowledgeManager.search(query, {
+                libraries: libraries.length > 0 ? libraries : undefined,
+                topK: fetchK,
+                expandDepth: 1,
+                minScore: 0.1,
+                hybridAlpha: 0.65
+            });
+        } catch (error) {
+            console.error('[LightMemo] Cold knowledge search failed:', error.message);
+            return `冷知识库检索出错: ${error.message}`;
+        }
+
+        if (!hits || hits.length === 0) {
+            const scope = libraries.length > 0 ? libraries.join(', ') : '全部知识库';
+            return `关于"${query}"，在冷知识库（${scope}）中没有找到相关内容。`;
+        }
+
+        // 映射成 LightMemo Rerank/格式化所需的统一结构
+        let docs = hits.map(h => ({
+            dbName: h.library || '知识库',
+            label: h.id,
+            text: h.text || h.payload?.text_preview || '',
+            sourceFile: h.sourceFile || h.payload?.source_path || '',
+            vectorScore: typeof h.score === 'number' ? h.score : 0,
+            hybridScore: typeof h.score === 'number' ? h.score : 0
+        })).filter(d => d.text);
+
+        // 可选 Rerank 精排（复用现有 rerank 解析与执行逻辑）
+        let useRerank = false;
+        let rrfOptions = null;
+        if (rerank === true) {
+            useRerank = true;
+        } else if (typeof rerank === 'number' && rerank > 0 && rerank <= 1.0) {
+            useRerank = true;
+            rrfOptions = { alpha: rerank };
+        } else if (typeof rerank === 'string') {
+            const lower = rerank.toLowerCase().trim();
+            if (lower.startsWith('rrf')) {
+                useRerank = true;
+                const m = lower.match(/rrf(\d+\.?\d*)/);
+                rrfOptions = { alpha: m ? Math.min(1.0, Math.max(0.0, parseFloat(m[1]))) : 0.5 };
+            } else {
+                const numericAlpha = parseFloat(lower);
+                if (!isNaN(numericAlpha) && numericAlpha > 0 && numericAlpha <= 1.0) {
+                    useRerank = true;
+                    rrfOptions = { alpha: numericAlpha };
+                } else if (lower === 'true') {
+                    useRerank = true;
+                }
+            }
+        }
+
+        if (useRerank && docs.length > 0) {
+            docs.forEach((doc, idx) => { doc.retrieval_rank = idx + 1; });
+            docs = await this._rerankDocuments(query, docs, normalizedK, rrfOptions);
+        } else {
+            docs = docs.slice(0, normalizedK);
+        }
+
+        return this._formatColdKnowledgeResults(docs, query, libraries);
+    }
+
+    _formatColdKnowledgeResults(results, query, libraries) {
+        if (!results || results.length === 0) {
+            const scope = libraries.length > 0 ? libraries.join(', ') : '全部知识库';
+            return `关于"${query}"，在冷知识库（${scope}）中没有找到相关内容。`;
+        }
+
+        const searchedLibs = [...new Set(results.map(r => r.dbName))];
+        let content = `\n[--- TDB 冷知识库检索 ---]\n`;
+        content += `[查询内容: "${query}"]\n`;
+        content += `[知识库范围: ${searchedLibs.join(', ')}]\n\n`;
+        content += `[找到 ${results.length} 条相关知识片段:]\n`;
+
+        results.forEach((r) => {
+            let scoreValue = 0;
+            let scoreType = '';
+            if (typeof r.rerank_score === 'number' && !isNaN(r.rerank_score)) {
+                scoreValue = r.rerank_score;
+                scoreType = r.rerank_failed ? '混合' : 'Rerank';
+            } else if (typeof r.hybridScore === 'number' && !isNaN(r.hybridScore)) {
+                scoreValue = r.hybridScore;
+                scoreType = '混合';
+            } else if (typeof r.vectorScore === 'number' && !isNaN(r.vectorScore)) {
+                scoreValue = r.vectorScore;
+                scoreType = 'TDB';
+            }
+            const scoreDisplay = scoreValue > 0 ? `${(scoreValue * 100).toFixed(1)}%(${scoreType})` : 'N/A';
+
+            content += `--- (来源: ${r.dbName}, 相关性: ${scoreDisplay})\n`;
+            if (r.sourceFile) {
+                content += `    [路径: ${r.sourceFile}]\n`;
+            }
+            content += `${(r.text || '').trim()}\n`;
+        });
+
+        content += `\n[--- 知识库检索结束 ---]\n`;
+        return content;
     }
 
     formatResults(results, query) {
@@ -649,6 +842,119 @@ class LightMemoPlugin {
     }
 
     /**
+     * 将工具协议传入的布尔值参数规范化。
+     * VCP 工具参数常以字符串形式传入，字符串 "false" 在 JS 中是真值，
+     * 如果不转换会导致 search_all_knowledge_bases 被误判为开启。
+     */
+    _parseBoolean(value, defaultValue = false) {
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'number') return value !== 0;
+        if (typeof value !== 'string') return defaultValue;
+
+        const normalized = value.trim().toLowerCase();
+        if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+        if (['false', '0', 'no', 'n', 'off', ''].includes(normalized)) return false;
+
+        return defaultValue;
+    }
+
+    /**
+     * 将工具协议传入的数字参数规范化。
+     */
+    _parseNumber(value, defaultValue = 0) {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'boolean') return value ? 1 : 0;
+        if (typeof value !== 'string') return defaultValue;
+
+        const parsed = parseFloat(value.trim());
+        return Number.isFinite(parsed) ? parsed : defaultValue;
+    }
+
+    /**
+     * 将工具协议传入的数组参数规范化。
+     * 兼容真实数组、JSON数组字符串，以及逗号/中文逗号/顿号/竖线分隔字符串。
+     */
+    _parseStringArray(value) {
+        if (Array.isArray(value)) {
+            return value
+                .map(v => typeof v === 'string' ? v.trim() : String(v ?? '').trim())
+                .filter(Boolean);
+        }
+
+        if (typeof value !== 'string') return [];
+
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) {
+                    return parsed
+                        .map(v => typeof v === 'string' ? v.trim() : String(v ?? '').trim())
+                        .filter(Boolean);
+                }
+            } catch (e) {
+                // 非 JSON 数组时继续按分隔符解析
+            }
+        }
+
+        return trimmed
+            .split(/[,，、|｜]/)
+            .map(v => v.trim())
+            .filter(Boolean);
+    }
+
+    /**
+     * 解析 maid 中的作用域语法：[文件夹]署名
+     * 示例：[小吉的地缘政治]小吉 => folder: 小吉的地缘政治, maid: 小吉
+     * 文件夹部分支持用中文逗号、英文逗号或 | 分隔多个文件夹。
+     */
+    _parseMaidScopedFolder(maid) {
+        if (typeof maid !== 'string') {
+            return { maid, folder: null };
+        }
+
+        const trimmedMaid = maid.trim();
+        const scopedMatch = trimmedMaid.match(/^\[([^\]]+)\](.*)$/);
+        if (!scopedMatch) {
+            return { maid: trimmedMaid, folder: null };
+        }
+
+        const scopedFolder = scopedMatch[1].trim();
+        const scopedMaid = scopedMatch[2].trim();
+
+        return {
+            maid: scopedMaid || null,
+            folder: scopedFolder || null
+        };
+    }
+
+    /**
+     * 合并显式 folder 参数与 maid 作用域文件夹，兼容中文逗号、英文逗号和 | 分隔的多文件夹写法
+     */
+    _mergeFolderScopes(folder, scopedFolder) {
+        const folders = [];
+
+        const appendFolders = (value) => {
+            if (typeof value !== 'string') return;
+            value.split(/[,，|]/)
+                .map(f => f.trim())
+                .filter(Boolean)
+                .forEach(f => {
+                    if (!folders.includes(f)) {
+                        folders.push(f);
+                    }
+                });
+        };
+
+        appendFolders(folder);
+        appendFolders(scopedFolder);
+
+        return folders.length > 0 ? folders.join(',') : null;
+    }
+
+    /**
      * 改用jieba分词（保留词组）
      */
     _tokenize(text) {
@@ -684,7 +990,7 @@ class LightMemoPlugin {
         }
 
         const candidates = [];
-        const targetFolders = folder ? folder.split(/[,，]/).map(f => f.trim()).filter(Boolean) : [];
+        const targetFolders = folder ? folder.split(/[,，|]/).map(f => f.trim()).filter(Boolean) : [];
 
         try {
             // 🚀 优化：使用 SQL 过滤减少 JS 端的处理压力

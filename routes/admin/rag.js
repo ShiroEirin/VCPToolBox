@@ -6,24 +6,50 @@ module.exports = function(options) {
     const router = express.Router();
     const { dailyNoteRootPath, vectorDBManager } = options;
 
-    router.get('/rag-tags', async (req, res) => {
-        const ragTagsPath = path.join(__dirname, '..', '..', 'Plugin', 'RAGDiaryPlugin', 'rag_tags.json');
+    const readJsonFile = async (filePath, fallback = {}) => {
         try {
-            const content = await fs.readFile(ragTagsPath, 'utf-8');
-            res.json(JSON.parse(content));
+            const content = await fs.readFile(filePath, 'utf-8');
+            return JSON.parse(content);
         } catch (error) {
-            if (error.code === 'ENOENT') res.json({});
-            else res.status(500).json({ error: 'Failed' });
+            if (error.code === 'ENOENT') return fallback;
+            throw error;
         }
-    });
+    };
 
-    router.post('/rag-tags', async (req, res) => {
-        const ragTagsPath = path.join(__dirname, '..', '..', 'Plugin', 'RAGDiaryPlugin', 'rag_tags.json');
-        try {
-            await fs.writeFile(ragTagsPath, JSON.stringify(req.body, null, 2), 'utf-8');
-            res.json({ message: 'Saved' });
-        } catch (error) { res.status(500).json({ error: 'Failed' }); }
-    });
+    const saveMergedJsonFile = async (filePath, body) => {
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            const err = new Error('Invalid request body');
+            err.statusCode = 400;
+            throw err;
+        }
+
+        const existing = await readJsonFile(filePath, {});
+        await fs.writeFile(filePath, JSON.stringify({ ...existing, ...body }, null, 2), 'utf-8');
+    };
+
+    const createJsonConfigRoutes = (routePath, fileName) => {
+        const configPath = path.join(__dirname, '..', '..', 'Plugin', 'RAGDiaryPlugin', fileName);
+
+        router.get(routePath, async (req, res) => {
+            try {
+                res.json(await readJsonFile(configPath, {}));
+            } catch (error) {
+                res.status(500).json({ error: 'Failed' });
+            }
+        });
+
+        router.post(routePath, async (req, res) => {
+            try {
+                await saveMergedJsonFile(configPath, req.body);
+                res.json({ message: 'Saved' });
+            } catch (error) {
+                res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed' });
+            }
+        });
+    };
+
+    createJsonConfigRoutes('/rag-tags', 'rag_tags.json');
+    createJsonConfigRoutes('/tdb-tags', 'tdb_tags.json');
 
     router.get('/rag-params', async (req, res) => {
         const ragParamsPath = path.join(__dirname, '..', '..', 'rag_params.json');

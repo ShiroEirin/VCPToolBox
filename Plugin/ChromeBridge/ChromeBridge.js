@@ -78,13 +78,57 @@ function handleClientMessage(clientId, message) {
     }
 }
 
+function buildCommandFromParams(params, suffix = '') {
+    const cmd = {
+        command: params[`command${suffix}`],
+        target: params[`target${suffix}`],
+        text: params[`text${suffix}`],
+        url: params[`url${suffix}`],
+        urlIncludes: params[`urlIncludes${suffix}`],
+        cdpRequestId: params[`requestId${suffix}`] || params[`cdpRequestId${suffix}`],
+        query: params[`query${suffix}`],
+        scope: params[`scope${suffix}`],
+        useRegex: params[`useRegex${suffix}`],
+        caseSensitive: params[`caseSensitive${suffix}`],
+        contextChars: params[`contextChars${suffix}`],
+        maxResults: params[`maxResults${suffix}`],
+        scriptName: params[`scriptName${suffix}`],
+        direction: params[`direction${suffix}`],
+        amount: params[`amount${suffix}`],
+        x: params[`x${suffix}`],
+        y: params[`y${suffix}`],
+        behavior: params[`behavior${suffix}`],
+        expression: params[`expression${suffix}`],
+        selector: params[`selector${suffix}`],
+        nodeId: params[`nodeId${suffix}`],
+        depth: params[`depth${suffix}`],
+        pierce: params[`pierce${suffix}`],
+        headers: params[`headers${suffix}`],
+        userAgent: params[`userAgent${suffix}`],
+        acceptLanguage: params[`acceptLanguage${suffix}`],
+        platform: params[`platform${suffix}`],
+        timezoneId: params[`timezoneId${suffix}`],
+        locale: params[`locale${suffix}`],
+        width: params[`width${suffix}`],
+        height: params[`height${suffix}`],
+        deviceScaleFactor: params[`deviceScaleFactor${suffix}`],
+        mobile: params[`mobile${suffix}`],
+        origin: params[`origin${suffix}`],
+        storageTypes: params[`storageTypes${suffix}`],
+        cdpParams: params[`cdpParams${suffix}`]
+    };
+
+    Object.keys(cmd).forEach(key => cmd[key] === undefined && delete cmd[key]);
+    return cmd;
+}
+
 // 执行单个命令的辅助函数（内部使用）
 async function executeSingleCommand(chromeWs, cmdParams, waitForPageInfo = false, isInCommandChain = false) {
     const bridgeRequestId = `cb-req-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const { command } = cmdParams;
     
     // 只有会导致页面导航/交互变化的命令才默认等待页面信息；CDP/查询/脚本执行类指令直接返回结构化结果
-    const pageChangingCommands = new Set(['open_url', 'click', 'type']);
+    const pageChangingCommands = new Set(['open_url', 'click', 'type', 'scroll']);
     const needsPageLoad = (command === 'open_url' && isInCommandChain);
     const actualWaitForPageInfo = (waitForPageInfo && pageChangingCommands.has(command)) || needsPageLoad || cmdParams.wait_for_page_info === true;
     
@@ -164,6 +208,9 @@ async function executeSingleCommand(chromeWs, cmdParams, waitForPageInfo = false
 }
 
 // Direct调用接口（hybridservice 使用 processToolCall）
+const fs = require('fs');
+const path = require('path');
+
 async function processToolCall(params) {
     // 检查是否有连接的Chrome客户端
     if (connectedChromes.size === 0) {
@@ -179,32 +226,13 @@ async function processToolCall(params) {
     
     // 检查是否有编号的命令（command1, command2, ...）
     while (params[`command${commandIndex}`]) {
-        const cmd = {
-            command: params[`command${commandIndex}`],
-            target: params[`target${commandIndex}`],
-            text: params[`text${commandIndex}`],
-            url: params[`url${commandIndex}`],
-            urlIncludes: params[`urlIncludes${commandIndex}`],
-            cdpRequestId: params[`requestId${commandIndex}`] || params[`cdpRequestId${commandIndex}`]
-        };
-        // 移除未定义的参数
-        Object.keys(cmd).forEach(key => cmd[key] === undefined && delete cmd[key]);
-        commands.push(cmd);
+        commands.push(buildCommandFromParams(params, String(commandIndex)));
         commandIndex++;
     }
     
     // 如果没有编号命令，检查单个命令
     if (commands.length === 0 && params.command) {
-        const cmd = {
-            command: params.command,
-            target: params.target,
-            text: params.text,
-            url: params.url,
-            urlIncludes: params.urlIncludes,
-            cdpRequestId: params.requestId || params.cdpRequestId
-        };
-        Object.keys(cmd).forEach(key => cmd[key] === undefined && delete cmd[key]);
-        commands.push(cmd);
+        commands.push(buildCommandFromParams(params));
     }
     
     if (commands.length === 0) {
@@ -221,6 +249,36 @@ async function processToolCall(params) {
         const isLastCommand = (i === commands.length - 1);
         
         console.log(`[ChromeBridge] 执行命令 ${i + 1}/${commands.length}: ${cmd.command}`);
+        
+        // 如果是执行持久化脚本命令，先在服务端读取脚本内容
+        if (cmd.command === 'execute_saved_script') {
+            if (!cmd.scriptName) {
+                throw new Error('execute_saved_script 缺少 scriptName 参数');
+            }
+            
+            // 确保文件名安全，防止路径穿越
+            const safeScriptName = path.basename(cmd.scriptName);
+            const scriptsDir = path.join(__dirname, 'ChromeScripts');
+            const scriptPath = path.join(scriptsDir, safeScriptName);
+            
+            try {
+                if (!fs.existsSync(scriptsDir)) {
+                    fs.mkdirSync(scriptsDir, { recursive: true });
+                }
+                
+                if (!fs.existsSync(scriptPath)) {
+                    throw new Error(`持久化脚本文件不存在: ${safeScriptName}，请确保它存放在 Plugin/ChromeBridge/ChromeScripts 目录下。`);
+                }
+                
+                const scriptContent = fs.readFileSync(scriptPath, 'utf8');
+                // 转换为 execute_script 命令，并将脚本内容填入 text 参数
+                cmd.command = 'execute_script';
+                cmd.text = scriptContent;
+                console.log(`[ChromeBridge] 📄 成功读取持久化脚本: ${safeScriptName}，转换为 execute_script 执行`);
+            } catch (err) {
+                throw new Error(`读取持久化脚本失败: ${err.message}`);
+            }
+        }
         
         // 最后一个命令需要等待并返回页面信息
         // open_url 在命令链中时总是需要等待页面加载完成（通过 isInCommandChain 参数）
