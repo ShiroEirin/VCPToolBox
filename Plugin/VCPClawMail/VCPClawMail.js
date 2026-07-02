@@ -15,7 +15,23 @@ let mammoth = null;
 let pdfParse = null;
 let ExcelJS = null;
 try { mammoth = require('mammoth'); } catch (_) {}
-try { pdfParse = require('pdf-parse'); } catch (_) {}
+try {
+  const pdfParseModule = require('pdf-parse');
+  if (typeof pdfParseModule === 'function') {
+    pdfParse = async buffer => pdfParseModule(buffer);
+  } else if (typeof pdfParseModule?.default === 'function') {
+    pdfParse = async buffer => pdfParseModule.default(buffer);
+  } else if (typeof pdfParseModule?.PDFParse === 'function') {
+    pdfParse = async buffer => {
+      const parser = new pdfParseModule.PDFParse({ data: buffer });
+      try {
+        return await parser.getText();
+      } finally {
+        await parser.destroy().catch(() => {});
+      }
+    };
+  }
+} catch (_) {}
 try { ExcelJS = require('exceljs'); } catch (_) {}
 
 let MailClient;
@@ -38,6 +54,10 @@ const MIN_FALLBACK_POLL_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_POLL_LIMIT = 20;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const WS_RECONNECT_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000];
+const INJECTED_PROMPT_START = '<<<[VCP_CLAWMAIL_INJECTED_PROMPT]>>>';
+const INJECTED_PROMPT_END = '<<<[END_VCP_CLAWMAIL_INJECTED_PROMPT]>>>';
+const MAIL_CONTENT_START = '<<<[VCP_CLAWMAIL_MAIL_CONTENT]>>>';
+const MAIL_CONTENT_END = '<<<[END_VCP_CLAWMAIL_MAIL_CONTENT]>>>';
 
 let config = {};
 let dependencies = {};
@@ -916,7 +936,10 @@ async function parseDocumentAttachment(buffer, filename, contentType) {
     return truncateForPrompt(result.value || '');
   }
 
-  if ((ext === '.pdf' || type.includes('pdf')) && pdfParse) {
+  if (ext === '.pdf' || type.includes('pdf')) {
+    if (!pdfParse) {
+      throw new Error('PDF 附件解析需要安装 pdf-parse。请在 Plugin/VCPClawMail 目录运行 npm install。');
+    }
     const result = await pdfParse(buffer);
     return truncateForPrompt(result.text || '');
   }
@@ -1695,7 +1718,18 @@ function buildAutoAgentPrompt(subMail, readResult, mailId) {
     : [];
 
   return [
-    { type: 'text', text: `${header}${mailText}` },
+    {
+      type: 'text',
+      text: [
+        INJECTED_PROMPT_START,
+        header.trimEnd(),
+        INJECTED_PROMPT_END,
+        '',
+        MAIL_CONTENT_START,
+        mailText,
+        MAIL_CONTENT_END
+      ].join('\n')
+    },
     ...mediaParts
   ];
 }

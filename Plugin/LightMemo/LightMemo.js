@@ -78,6 +78,7 @@ class LightMemoPlugin {
         this.vectorDBManager = null;
         this.tdbKnowledgeManager = null; // 冷知识库（TriviumDB）检索管理器
         this.getSingleEmbedding = null;
+        this.getBatchEmbeddings = null;
         this.projectBasePath = '';
         this.dailyNoteRootPath = '';
         this.rerankConfig = {};
@@ -114,6 +115,9 @@ class LightMemoPlugin {
         if (dependencies.getSingleEmbedding) {
             this.getSingleEmbedding = dependencies.getSingleEmbedding;
         }
+        if (dependencies.getBatchEmbeddings) {
+            this.getBatchEmbeddings = dependencies.getBatchEmbeddings;
+        }
 
         this.loadConfig(); // Load config after dependencies are set
         this.loadSemanticGroups();
@@ -136,12 +140,42 @@ class LightMemoPlugin {
 
     async processToolCall(args) {
         try {
-            return await this.handleSearch(args);
+            const result = this._isMappingRequest(args)
+                ? await this.handleMapping(args)
+                : await this.handleSearch(args);
+
+            return this._normalizeToolResult(result);
         } catch (error) {
             console.error('[LightMemo] Error processing tool call:', error);
             // Return an error structure that Plugin.js can understand
             return { plugin_error: error.message || 'An unknown error occurred in LightMemo.' };
         }
+    }
+
+    _normalizeToolResult(result) {
+        if (typeof result === 'string') {
+            return this._buildAiFriendlyTextResult(result);
+        }
+
+        if (
+            result &&
+            typeof result === 'object' &&
+            result.status === 'success' &&
+            result.result &&
+            typeof result.result === 'object' &&
+            Array.isArray(result.result.content)
+        ) {
+            return result;
+        }
+
+        if (result && typeof result === 'object' && Array.isArray(result.content)) {
+            return {
+                status: 'success',
+                result
+            };
+        }
+
+        return result;
     }
 
     async handleSearch(args) {
@@ -152,8 +186,21 @@ class LightMemoPlugin {
             tag_boost: rawTagBoost = 0.5,
             core_tags = [],
             core_boost_factor = 1.33,
-            knowledge_base = null
+            knowledge_base = null,
+            BM25: rawBM25Upper,
+            bm25: rawBM25Lower,
+            use_bm25: rawUseBM25
         } = args;
+
+        const useBM25 = this._parseBooleanAlias(
+            [
+                ['BM25', rawBM25Upper],
+                ['bm25', rawBM25Lower],
+                ['use_bm25', rawUseBM25]
+            ],
+            true,
+            'BM25'
+        );
 
         // 🧊 冷知识库（TriviumDB）检索分流：
         //   - query 中带 [知识库] 或 [知识库:库名1,库名2] 语法
@@ -268,6 +315,9 @@ class LightMemoPlugin {
         if (isMusicSearch) {
             console.log(`[LightMemo] [音乐检索] 触发，跳过BM25关键词检索。`);
             topByKeyword = candidates; // 直接所有进入下一阶段
+        } else if (!useBM25) {
+            console.log('[LightMemo] BM25 keyword retrieval disabled by request. Using vector-only candidate pool.');
+            topByKeyword = candidates;
         } else {
             // --- 第一阶段：关键词初筛（BM25） ---
             const queryTokens = this._tokenize(actualQuery);
@@ -320,6 +370,7 @@ class LightMemoPlugin {
         }
 
         let tagBoostInfo = null;
+        let tagBoostEnergyField = null;
         // 🚀【新步骤】如果启用了 TagMemo，则调用 KBM 的功能来增强向量
         if (tag_boost > 0 && this.vectorDBManager && typeof this.vectorDBManager.applyTagBoost === 'function') {
             const hasCore = normalizedCoreTags.length > 0;
@@ -337,6 +388,7 @@ class LightMemoPlugin {
             if (boostResult && boostResult.vector) {
                 queryVector = boostResult.vector;
                 tagBoostInfo = boostResult.info;
+                tagBoostEnergyField = boostResult.energyField || null;
 
                 if (tagBoostInfo) {
                     const matched = tagBoostInfo.matchedTags || [];
@@ -360,7 +412,7 @@ class LightMemoPlugin {
         // 混合BM25和向量分数
         // 🚀 优化：动态调整权重。如果有 BM25 分数，则关键词权重高；如果没有，则全靠向量。
         const hybridScored = vectorScoredCandidates.map(c => {
-            if (isMusicSearch) {
+            if (isMusicSearch || !useBM25) {
                 return {
                     ...c,
                     hybridScore: c.vectorScore, // 完全依赖向量分数
@@ -397,7 +449,8 @@ class LightMemoPlugin {
             const geoConfig = this.vectorDBManager.ragParams?.KnowledgeBaseManager?.geodesicRerank || {};
             const reranked = this.vectorDBManager.geodesicRerank(geoInput, {
                 alpha: geoConfig.alpha,
-                minGeoSamples: geoConfig.minGeoSamples
+                minGeoSamples: geoConfig.minGeoSamples,
+                energyField: tagBoostEnergyField
             });
 
             // Map results back with geodesic metadata
@@ -462,6 +515,223 @@ class LightMemoPlugin {
         }
 
         return this.formatResults(finalResults, query);
+    }
+
+    /**
+     * 🧭 判断是否为开发测绘请求。
+     * 支持 command/mode/action = map_distance/MapDistance/测绘，
+     * 或显式 mapping/map_distance/map_develop 为真。
+     */
+    _isMappingRequest(args = {}) {
+        const command = String(args.command || args.mode || args.action || '').trim().toLowerCase();
+        if (['mapdistance', 'map_distance', 'mapping', 'tagmemo_map', 'wave_map', '测绘', '开发测绘'].includes(command)) {
+            return true;
+        }
+
+        return this._parseBooleanAlias(
+            [
+                ['mapping', args.mapping],
+                ['map_distance', args.map_distance],
+                ['map_develop', args.map_develop]
+            ],
+            false,
+            'mapping'
+        );
+    }
+
+    /**
+     * 🧭 LightMemo 开发测绘：比较起点 A 到一个或多个目标的三类距离。
+     * - 纯 KNN 距离: 1 - cos(A, B)
+     * - 浪潮 TagMemo 距离: 1 - cos(TagBoost(A), TagBoost(B))
+     * - 测地线 v8 加权距离: (1 - alpha) * 纯KNN + alpha * Tag 能量场距离
+     */
+    async handleMapping(args = {}) {
+        const startText = args.start || args.origin || args.a || args.start_query || args.query;
+        const targets = this._parseStringArray(args.targets || args.target || args.b || args.goal || args.goals);
+        const rawTagBoost = args.tag_boost ?? 0.6;
+        const tagBoost = this._parseNumber(typeof rawTagBoost === 'string' ? rawTagBoost.replace(/\+$/, '') : rawTagBoost, 0.6);
+        const coreTags = this._parseStringArray(args.core_tags || args.coreTags);
+        const coreBoostFactor = this._parseNumber(args.core_boost_factor, 1.33);
+        const geoConfig = this.vectorDBManager?.ragParams?.KnowledgeBaseManager?.geodesicRerank || {};
+        const alpha = Math.max(0, Math.min(1, this._parseNumber(args.geo_alpha ?? args.alpha, geoConfig.alpha ?? 0.35)));
+
+        if (!startText || !String(startText).trim()) {
+            throw new Error("测绘模式需要提供起点参数 start/origin/a/start_query/query。");
+        }
+        if (targets.length === 0) {
+            throw new Error("测绘模式需要提供目标参数 targets/target/b/goal/goals，可用逗号、中文逗号、顿号或 | 分隔多个目标。");
+        }
+        if (!this.getBatchEmbeddings && !this.getSingleEmbedding) {
+            throw new Error("测绘模式无法执行：Embedding 依赖未注入。");
+        }
+
+        const mappingTexts = [String(startText), ...targets];
+        const mappingVectors = await this._getMappingEmbeddings(mappingTexts);
+        const startVector = mappingVectors[0];
+        if (!startVector) {
+            throw new Error("起点 A 向量化失败。");
+        }
+
+        const startBoost = this._applyMappingTagBoost(startVector, tagBoost, coreTags, coreBoostFactor);
+        const rows = [];
+
+        for (let targetIndex = 0; targetIndex < targets.length; targetIndex++) {
+            const targetText = targets[targetIndex];
+            const targetVector = mappingVectors[targetIndex + 1];
+            if (!targetVector) {
+                rows.push({
+                    target: targetText,
+                    error: '目标向量化失败'
+                });
+                continue;
+            }
+
+            const targetBoost = this._applyMappingTagBoost(targetVector, tagBoost, coreTags, coreBoostFactor);
+            const pureKnnSim = this._cosineSimilarity(startVector, targetVector);
+            const waveSim = this._cosineSimilarity(startBoost.vector, targetBoost.vector);
+            const geoFieldSim = this._energyFieldSimilarity(startBoost.energyField, targetBoost.energyField);
+            const weightedGeoSim = (1 - alpha) * pureKnnSim + alpha * geoFieldSim;
+
+            rows.push({
+                target: targetText,
+                pureKnnSim,
+                pureKnnDistance: 1 - pureKnnSim,
+                waveSim,
+                waveDistance: 1 - waveSim,
+                geoFieldSim,
+                weightedGeoSim,
+                weightedGeoDistance: 1 - weightedGeoSim,
+                startTags: startBoost.info?.matchedTags || [],
+                targetTags: targetBoost.info?.matchedTags || []
+            });
+        }
+
+        const reportText = this._formatMappingResults({
+            startText: String(startText),
+            rows,
+            tagBoost,
+            alpha,
+            coreTags
+        });
+
+        return this._buildAiFriendlyTextResult(reportText);
+    }
+
+    async _getMappingEmbeddings(texts) {
+        if (!Array.isArray(texts) || texts.length === 0) return [];
+        const normalizedTexts = texts.map(text => String(text || '').trim());
+
+        if (this.getBatchEmbeddings) {
+            console.log(`[LightMemo] Mapping batch embedding: ${normalizedTexts.length} texts in one batched pipeline.`);
+            const vectors = await this.getBatchEmbeddings(normalizedTexts);
+            if (Array.isArray(vectors) && vectors.length === normalizedTexts.length) {
+                return vectors;
+            }
+            console.warn(
+                `[LightMemo] Mapping batch embedding returned invalid length ` +
+                `(${Array.isArray(vectors) ? vectors.length : 'non-array'}), falling back to single embedding.`
+            );
+        }
+
+        console.warn('[LightMemo] Mapping batch embedding unavailable. Falling back to sequential single embedding.');
+        const vectors = [];
+        for (const text of normalizedTexts) {
+            vectors.push(text ? await this.getSingleEmbedding(text) : null);
+        }
+        return vectors;
+    }
+
+    _applyMappingTagBoost(vector, tagBoost, coreTags, coreBoostFactor) {
+        const baseVector = vector instanceof Float32Array ? vector : new Float32Array(vector);
+        if (tagBoost > 0 && this.vectorDBManager && typeof this.vectorDBManager.applyTagBoost === 'function') {
+            const boostResult = this.vectorDBManager.applyTagBoost(
+                new Float32Array(baseVector),
+                tagBoost,
+                coreTags,
+                coreBoostFactor
+            );
+
+            if (boostResult && boostResult.vector) {
+                return {
+                    vector: boostResult.vector instanceof Float32Array ? boostResult.vector : new Float32Array(boostResult.vector),
+                    info: boostResult.info || null,
+                    energyField: boostResult.energyField || null
+                };
+            }
+        }
+
+        return { vector: baseVector, info: null, energyField: null };
+    }
+
+    _energyFieldSimilarity(fieldA, fieldB) {
+        if (!(fieldA instanceof Map) || !(fieldB instanceof Map) || fieldA.size === 0 || fieldB.size === 0) {
+            return 0;
+        }
+
+        let dot = 0;
+        let normA = 0;
+        let normB = 0;
+
+        for (const value of fieldA.values()) {
+            const n = Number(value) || 0;
+            normA += n * n;
+        }
+        for (const value of fieldB.values()) {
+            const n = Number(value) || 0;
+            normB += n * n;
+        }
+        if (normA <= 0 || normB <= 0) return 0;
+
+        const [small, large] = fieldA.size <= fieldB.size ? [fieldA, fieldB] : [fieldB, fieldA];
+        for (const [tagId, value] of small.entries()) {
+            if (!large.has(tagId)) continue;
+            dot += (Number(value) || 0) * (Number(large.get(tagId)) || 0);
+        }
+
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    _buildAiFriendlyTextResult(reportText) {
+        return {
+            status: 'success',
+            result: {
+                content: [
+                    { type: 'text', text: reportText }
+                ]
+            }
+        };
+    }
+
+    _formatMappingResults({ startText, rows, tagBoost, alpha, coreTags }) {
+        const fmt = (value) => Number.isFinite(value) ? value.toFixed(4) : 'N/A';
+        const fmtTags = (tags) => Array.isArray(tags) && tags.length > 0
+            ? tags.slice(0, 5).join(', ')
+            : '—';
+
+        let content = `\n[--- LightMemo 开发测绘 / TagMemo Geodesic Map ---]\n`;
+        content += `起点 A: ${startText}\n`;
+        content += `参数: tag_boost=${tagBoost}, geodesic_alpha=${alpha}${coreTags.length > 0 ? `, core_tags=${coreTags.join(', ')}` : ''}\n\n`;
+        content += `| # | 目标 | 纯KNN距离 | 纯KNN相似度 | 浪潮TagMemo距离 | 浪潮TagMemo相似度 | 测地线v8加权距离 | 测地线v8加权相似度 | Tag能量场相似度 | A命中Tag | 目标命中Tag |\n`;
+        content += `|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---|\n`;
+
+        rows.forEach((row, index) => {
+            if (row.error) {
+                content += `| ${index + 1} | ${this._escapeMarkdownCell(row.target)} | N/A | N/A | N/A | N/A | N/A | N/A | N/A | ${row.error} | — |\n`;
+                return;
+            }
+
+            content += `| ${index + 1} | ${this._escapeMarkdownCell(row.target)} | ${fmt(row.pureKnnDistance)} | ${fmt(row.pureKnnSim)} | ${fmt(row.waveDistance)} | ${fmt(row.waveSim)} | ${fmt(row.weightedGeoDistance)} | ${fmt(row.weightedGeoSim)} | ${fmt(row.geoFieldSim)} | ${this._escapeMarkdownCell(fmtTags(row.startTags))} | ${this._escapeMarkdownCell(fmtTags(row.targetTags))} |\n`;
+        });
+
+        content += `\n说明: 距离越小表示越近；纯KNN为原始向量余弦距离，浪潮TagMemo为两端都经过TagMemo增强后的向量距离，测地线v8加权距离使用 A/B 的Tag能量场余弦相似度与纯KNN按 alpha 融合，便于开发时观察语义拓扑与原始向量空间的偏差。\n`;
+        content += `[--- 测绘结束 ---]\n`;
+        return content;
+    }
+
+    _escapeMarkdownCell(value) {
+        return String(value ?? '')
+            .replace(/\|/g, '\\|')
+            .replace(/\r?\n/g, '<br>');
     }
 
     /**
@@ -852,10 +1122,36 @@ class LightMemoPlugin {
         if (typeof value !== 'string') return defaultValue;
 
         const normalized = value.trim().toLowerCase();
-        if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
-        if (['false', '0', 'no', 'n', 'off', ''].includes(normalized)) return false;
+        if (['true', '1', 'yes', 'y', 'on', 'enable', 'enabled', '开启', '启用', '是'].includes(normalized)) return true;
+        if (['false', '0', 'no', 'n', 'off', '', 'disable', 'disabled', '关闭', '禁用', '否'].includes(normalized)) return false;
 
         return defaultValue;
+    }
+
+    /**
+     * 从多个别名参数中解析布尔开关。
+     * 后出现的显式可解析值优先生效，未提供或不可解析时保留默认值。
+     */
+    _parseBooleanAlias(namedValues, defaultValue = false, label = 'boolean option') {
+        let result = defaultValue;
+        let matchedName = null;
+
+        for (const [name, value] of namedValues) {
+            if (value === undefined || value === null) continue;
+            const parsed = this._parseBoolean(value, null);
+            if (parsed === null) {
+                console.warn(`[LightMemo] Ignoring invalid ${label} value from ${name}: ${value}`);
+                continue;
+            }
+            result = parsed;
+            matchedName = name;
+        }
+
+        if (matchedName) {
+            console.log(`[LightMemo] ${label} resolved from ${matchedName}: ${result}`);
+        }
+
+        return result;
     }
 
     /**
@@ -954,6 +1250,10 @@ class LightMemoPlugin {
         return folders.length > 0 ? folders.join(',') : null;
     }
 
+    _isBM25TokenLikeWord(token) {
+        return /[\p{Script=Han}a-z0-9_]/iu.test(String(token || ''));
+    }
+
     /**
      * 改用jieba分词（保留词组）
      */
@@ -967,6 +1267,7 @@ class LightMemoPlugin {
             return text.split(/\s+/)
                 .map(w => w.toLowerCase().trim())
                 .filter(w => w.length >= 1) // 允许单字，提高搜索召回率（特别是姓名）
+                .filter(w => this._isBM25TokenLikeWord(w))
                 .filter(w => !this.stopWords.has(w));
         }
 
@@ -975,6 +1276,7 @@ class LightMemoPlugin {
         return words
             .map(w => w.toLowerCase().trim())
             .filter(w => w.length >= 1) // 允许单字，提高搜索召回率（特别是姓名）
+            .filter(w => this._isBM25TokenLikeWord(w))
             .filter(w => !this.stopWords.has(w))
             .filter(w => w.length > 0);
     }

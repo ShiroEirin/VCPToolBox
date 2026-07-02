@@ -1,29 +1,34 @@
 <template>
   <section class="config-section active-section rag-lab">
-    <header class="rag-lab__hero card">
-      <div class="rag-lab__hero-copy">
-        <span class="eyebrow rag-lab__eyebrow">Wave RAG Parameter Lab</span>
-        <h2>浪潮 RAG 参数调优工作台</h2>
-        <p class="description">
-          集中查看和调整浪潮 RAG 的核心参数，支持按模块浏览、快速定位高影响项，并对虫洞脉冲路由等复杂参数进入独立控制舱进行细化编辑。
-        </p>
-      </div>
-
-      <div class="rag-lab__hero-stats">
-        <div class="hero-stat">
-          <span class="hero-stat__value">{{ groupSections.length }}</span>
-          <span class="hero-stat__label">参数组</span>
-        </div>
-        <div class="hero-stat">
-          <span class="hero-stat__value">{{ totalLeafCount }}</span>
-          <span class="hero-stat__label">可调节点</span>
-        </div>
-        <div class="hero-stat" :class="{ 'hero-stat--warning': isDirty }">
-          <span class="hero-stat__value">{{ changedLeafCount }}</span>
-          <span class="hero-stat__label">未保存修改</span>
-        </div>
-      </div>
-    </header>
+    <Teleport to="#page-header-actions">
+      <UiPageActions>
+        <UiDirtyIndicator
+          label="未保存"
+          :is-dirty="isDirty"
+        />
+        <UiButton
+          variant="secondary"
+          :disabled="isThemeLoading"
+          @click="loadThemes"
+        >
+          {{ isThemeLoading ? "刷新中…" : "刷新预设" }}
+        </UiButton>
+        <UiButton
+          variant="secondary"
+          :disabled="!isDirty"
+          @click="resetParams"
+        >
+          重置修改
+        </UiButton>
+        <UiButton
+          type="submit"
+          :form="formId"
+          :disabled="isSaving || !hasParams || !isDirty"
+        >
+          {{ isSaving ? "保存中…" : "保存参数配置" }}
+        </UiButton>
+      </UiPageActions>
+    </Teleport>
 
     <div v-if="isLoading" class="rag-lab__state card">
       <span class="material-symbols-outlined">hourglass_top</span>
@@ -39,26 +44,194 @@
         <strong>参数加载失败</strong>
         <p>{{ loadError }}</p>
       </div>
-      <button type="button" class="btn-secondary" @click="loadParams">重新加载</button>
+      <UiButton variant="secondary" @click="loadParams">重新加载</UiButton>
     </div>
 
-    <form v-else :id="formId" class="rag-lab__workspace" :class="{ 'is-aside-collapsed': asideCollapsed }" @submit.prevent="saveParams">
+    <form v-else :id="formId" class="rag-lab__workspace" @submit.prevent="saveParams">
+      <aside class="rag-lab__aside">
+        <div
+          class="rag-console"
+          aria-label="RAG 调优操作台"
+        >
+            <div class="rag-console__section rag-console__section--themes">
+              <div class="rag-console__themes-header">
+                <div>
+                  <span class="rag-console__label">参数预设</span>
+                  <p>以 <code>rag_params_模型名.json</code> 保存不同向量模型方案。</p>
+                </div>
+              </div>
+
+              <label class="theme-field">
+                <span>选择预设</span>
+                <UiSelect v-model="selectedThemeName" :disabled="isThemeLoading || isThemeSaving">
+                  <option value="">未选择预设</option>
+                  <option
+                    v-for="theme in ragParamThemes"
+                    :key="theme.fileName"
+                    :value="theme.name"
+                  >
+                    {{ theme.name }}
+                  </option>
+                </UiSelect>
+              </label>
+
+              <div class="rag-console__actions rag-console__theme-actions">
+                <UiButton
+                  variant="secondary"
+                  :disabled="!selectedThemeName || isThemeLoading || isThemeSaving"
+                  @click="openSelectedTheme"
+                >
+                  打开预设调参
+                </UiButton>
+                <UiButton
+                  variant="secondary"
+                  :disabled="!selectedThemeName || isThemeLoading || isThemeSaving || !hasParams"
+                  @click="saveCurrentToSelectedTheme"
+                >
+                  保存到所选预设
+                </UiButton>
+                <UiButton
+                  :disabled="!selectedThemeName || isThemeLoading || isThemeSaving"
+                  @click="applySelectedTheme"
+                >
+                  应用所选预设
+                </UiButton>
+              </div>
+
+              <UiBadge
+                v-if="statusMessage"
+                class="rag-console__status"
+                :variant="statusBadgeVariant"
+                role="status"
+                aria-live="polite"
+              >
+                {{ statusMessage }}
+              </UiBadge>
+
+              <label class="theme-field">
+                <span>新预设名称 / 向量模型名</span>
+                <UiInput
+                  v-model.trim="newThemeName"
+                  type="text"
+                  placeholder="例如 gemini-embedding-2-preview"
+                  :disabled="isThemeSaving"
+                />
+              </label>
+
+              <UiButton
+                :disabled="!canSaveNewTheme"
+                block
+                @click="saveCurrentAsNewTheme"
+              >
+                {{ isThemeSaving ? "保存预设中…" : "保存当前为新预设" }}
+              </UiButton>
+            </div>
+
+            <div class="rag-console__section rag-console__section--simulation">
+              <span class="rag-console__label">语义沙盘</span>
+              <div class="semantic-sim-card">
+                <div class="semantic-sim-card__copy">
+                  <strong>浪潮语义地形模拟器</strong>
+                  <p>预览 KNN 击中、顺逆流、虫洞跃迁与测地线能量场。</p>
+                </div>
+                <UiButton @click="openSemanticSimulation">
+                  打开沙盘
+                </UiButton>
+              </div>
+            </div>
+
+            <div class="rag-console__section rag-console__section--training">
+              <span class="rag-console__label">主动自学习</span>
+              <div class="active-training-card">
+                <div class="active-training-card__copy">
+                  <strong>全量重训练</strong>
+                  <p>立即触发浪潮引擎原本由 1% 新标签阈值触发的全量训练，并重置阈值计数。</p>
+                </div>
+                <UiButton
+                  variant="secondary"
+                  :disabled="isActiveTraining"
+                  @click="triggerActiveFullTraining"
+                >
+                  {{ isActiveTraining ? "训练已排队…" : "触发全量自学习" }}
+                </UiButton>
+              </div>
+            </div>
+
+            <div class="rag-console__section">
+              <span class="rag-console__label">快速跳转</span>
+              <div class="rag-console__jump-list">
+                <UiButton
+                  v-for="section in groupSections"
+                  :key="`${section.name}-jump`"
+                  variant="ghost"
+                  class="rag-console__jump-btn"
+                  @click="scrollToGroup(section.anchor)"
+                >
+                  <span>{{ section.meta.title }}</span>
+                  <small>{{ section.changedLeaves }}/{{ section.totalLeaves }}</small>
+                </UiButton>
+              </div>
+            </div>
+
+            <div class="rag-console__section">
+              <span class="rag-console__label">风险提示</span>
+              <ul class="rag-console__tips">
+                <li>高风险参数建议单独修改并观察效果。</li>
+                <li>虫洞路由参数耦合较强，不建议一次联动改太多项。</li>
+                <li>
+                  召回漂移时优先回看 <code>tensionThreshold</code>、
+                  <code>baseMomentum</code> 和 <code>dynamicBoostRange</code>。
+                </li>
+              </ul>
+            </div>
+        </div>
+      </aside>
+
       <div class="rag-lab__main">
+        <header class="rag-lab__summary">
+          <div class="rag-lab__summary-copy">
+            <h2>浪潮 RAG 参数调优工作台</h2>
+            <p>
+              按模块浏览和调整核心参数；复杂的虫洞脉冲、有序共现与语义地形模拟可进入独立控制舱细化。
+            </p>
+          </div>
+
+          <div class="rag-lab__summary-stats">
+            <div class="hero-stat">
+              <span class="hero-stat__value">{{ groupSections.length }}</span>
+              <span class="hero-stat__label">参数组</span>
+            </div>
+            <div class="hero-stat">
+              <span class="hero-stat__value">{{ totalLeafCount }}</span>
+              <span class="hero-stat__label">可调节点</span>
+            </div>
+            <div class="hero-stat" :class="{ 'hero-stat--warning': isDirty }">
+              <span class="hero-stat__value">{{ changedLeafCount }}</span>
+              <span class="hero-stat__label">未保存修改</span>
+            </div>
+          </div>
+        </header>
+
         <article
           v-for="section in groupSections"
           :id="section.anchor"
           :key="section.name"
-          class="group-panel card"
+          :class="[
+            'group-panel',
+            `group-panel--${section.name}`,
+          ]"
           :style="{ '--group-accent': section.meta.accent }"
         >
           <header class="group-panel__header">
             <div class="group-panel__header-main">
-              <span class="group-panel__badge">{{ section.meta.badge }}</span>
               <div class="group-panel__title-row">
                 <span class="material-symbols-outlined">{{ section.meta.icon }}</span>
-                <div>
+                <div class="group-panel__title-copy">
                   <h3>{{ section.meta.title }}</h3>
-                  <p class="group-panel__name">{{ section.name }}</p>
+                  <div class="group-panel__meta-row">
+                    <UiBadge class="group-panel__badge" variant="outline">{{ section.meta.badge }}</UiBadge>
+                    <span class="group-panel__name">{{ section.name }}</span>
+                  </div>
                 </div>
               </div>
               <p class="group-panel__description">{{ section.meta.description }}</p>
@@ -97,19 +270,25 @@
                     <div class="param-row__heading">
                       <div class="param-row__title-block">
                         <h4>{{ entry.meta.label }}</h4>
+                        <details v-if="entry.meta.logic" class="param-row__details param-row__details--inline">
+                          <summary>展开调优逻辑</summary>
+                          <div class="param-row__details-body">
+                            <p>{{ entry.meta.logic }}</p>
+                          </div>
+                        </details>
                         <p class="param-row__key">{{ entry.key }}</p>
                       </div>
 
                       <div class="param-row__pills">
-                        <span class="mini-pill mini-pill--critical">
+                        <UiBadge :variant="getToneBadgeVariant(entry.meta.tone)">
                           {{ getToneLabel(entry.meta.tone) }}
-                        </span>
-                        <span
+                        </UiBadge>
+                        <UiBadge
                           v-if="entry.changedLeaves > 0"
-                          class="mini-pill mini-pill--changed"
+                          variant="info"
                         >
                           已修改 {{ entry.changedLeaves }}
-                        </span>
+                        </UiBadge>
                       </div>
                     </div>
 
@@ -120,12 +299,6 @@
                       {{ entry.meta.range }}
                     </p>
 
-                    <details v-if="entry.meta.logic" class="param-row__details">
-                      <summary>展开调优逻辑</summary>
-                      <div class="param-row__details-body">
-                        <p>{{ entry.meta.logic }}</p>
-                      </div>
-                    </details>
                   </div>
 
                   <div class="wormhole-launchpad__control">
@@ -141,9 +314,9 @@
                     </div>
 
                     <div class="wormhole-launchpad__footer">
-                      <button type="button" class="btn-primary" @click="openWormholeModal">
+                      <UiButton @click="openWormholeModal">
                         打开虫洞控制舱
-                      </button>
+                      </UiButton>
                     </div>
                   </div>
                 </div>
@@ -155,19 +328,25 @@
                     <div class="param-row__heading">
                       <div class="param-row__title-block">
                         <h4>{{ entry.meta.label }}</h4>
+                        <details v-if="entry.meta.logic" class="param-row__details param-row__details--inline">
+                          <summary>展开 V8.2 调优逻辑</summary>
+                          <div class="param-row__details-body">
+                            <p>{{ entry.meta.logic }}</p>
+                          </div>
+                        </details>
                         <p class="param-row__key">{{ entry.key }}</p>
                       </div>
 
                       <div class="param-row__pills">
-                        <span class="mini-pill mini-pill--critical">
+                        <UiBadge :variant="getToneBadgeVariant(entry.meta.tone)">
                           {{ getToneLabel(entry.meta.tone) }}
-                        </span>
-                        <span
+                        </UiBadge>
+                        <UiBadge
                           v-if="entry.changedLeaves > 0"
-                          class="mini-pill mini-pill--changed"
+                          variant="info"
                         >
                           已修改 {{ entry.changedLeaves }}
-                        </span>
+                        </UiBadge>
                       </div>
                     </div>
 
@@ -178,12 +357,6 @@
                       {{ entry.meta.range }}
                     </p>
 
-                    <details v-if="entry.meta.logic" class="param-row__details">
-                      <summary>展开 V8.2 调优逻辑</summary>
-                      <div class="param-row__details-body">
-                        <p>{{ entry.meta.logic }}</p>
-                      </div>
-                    </details>
                   </div>
 
                   <div class="wormhole-launchpad__control ordered-launchpad__control">
@@ -210,9 +383,9 @@
                     </div>
 
                     <div class="wormhole-launchpad__footer">
-                      <button type="button" class="btn-primary" @click="openOrderedCooccurrenceModal">
+                      <UiButton @click="openOrderedCooccurrenceModal">
                         打开 V8.2 流形舱
-                      </button>
+                      </UiButton>
                     </div>
                   </div>
                 </div>
@@ -223,19 +396,25 @@
                   <div class="param-row__heading">
                     <div class="param-row__title-block">
                       <h4>{{ entry.meta.label }}</h4>
+                      <details v-if="entry.meta.logic" class="param-row__details param-row__details--inline">
+                        <summary>展开测地线融合逻辑</summary>
+                        <div class="param-row__details-body">
+                          <p>{{ entry.meta.logic }}</p>
+                        </div>
+                      </details>
                       <p class="param-row__key">{{ entry.key }}</p>
                     </div>
 
                     <div class="param-row__pills">
-                      <span class="mini-pill mini-pill--sensitive">
+                      <UiBadge :variant="getToneBadgeVariant(entry.meta.tone)">
                         {{ getToneLabel(entry.meta.tone) }}
-                      </span>
-                      <span
+                      </UiBadge>
+                      <UiBadge
                         v-if="entry.changedLeaves > 0"
-                        class="mini-pill mini-pill--changed"
+                        variant="info"
                       >
                         已修改 {{ entry.changedLeaves }}
-                      </span>
+                      </UiBadge>
                     </div>
                   </div>
 
@@ -246,12 +425,6 @@
                     {{ entry.meta.range }}
                   </p>
 
-                  <details v-if="entry.meta.logic" class="param-row__details">
-                    <summary>展开测地线融合逻辑</summary>
-                    <div class="param-row__details-body">
-                      <p>{{ entry.meta.logic }}</p>
-                    </div>
-                  </details>
                 </div>
 
                 <div class="geodesic-launchpad__control">
@@ -296,7 +469,7 @@
                         :max="getSubParamRange(`${entry.key}.${subKey}`, (section.raw[entry.key] as Record<string, number>)[subKey]).max"
                         :step="getSubParamRange(`${entry.key}.${subKey}`, (section.raw[entry.key] as Record<string, number>)[subKey]).step"
                       />
-                      <input
+                      <UiInput
                         v-model.number="
                           (section.raw[entry.key] as Record<string, number>)[subKey]
                         "
@@ -309,14 +482,13 @@
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    class="btn-secondary"
+                  <UiButton
+                    variant="secondary"
                     :disabled="entry.changedLeaves === 0"
                     @click="resetGeodesicParams"
                   >
                     恢复测地线参数
-                  </button>
+                  </UiButton>
                 </div>
               </template>
 
@@ -325,25 +497,31 @@
                   <div class="param-row__heading">
                     <div class="param-row__title-block">
                       <h4>{{ entry.meta.label }}</h4>
+                      <details v-if="entry.meta.logic" class="param-row__details param-row__details--inline">
+                        <summary>展开调优逻辑</summary>
+                        <div class="param-row__details-body">
+                          <p>{{ entry.meta.logic }}</p>
+                        </div>
+                      </details>
                       <p class="param-row__key">{{ entry.key }}</p>
                     </div>
 
                     <div class="param-row__pills">
-                      <span class="mini-pill mini-pill--neutral">
+                      <UiBadge variant="secondary">
                         {{ getKindLabel(entry.kind) }}
-                      </span>
-                      <span
+                      </UiBadge>
+                      <UiBadge
                         v-if="entry.meta.tone"
-                        :class="['mini-pill', `mini-pill--${entry.meta.tone}`]"
+                        :variant="getToneBadgeVariant(entry.meta.tone)"
                       >
                         {{ getToneLabel(entry.meta.tone) }}
-                      </span>
-                      <span
+                      </UiBadge>
+                      <UiBadge
                         v-if="entry.changedLeaves > 0"
-                        class="mini-pill mini-pill--changed"
+                        variant="info"
                       >
                         已修改 {{ entry.changedLeaves }}
-                      </span>
+                      </UiBadge>
                     </div>
                   </div>
 
@@ -354,20 +532,14 @@
                     {{ entry.meta.range }}
                   </p>
 
-                  <details v-if="entry.meta.logic" class="param-row__details">
-                    <summary>展开调优逻辑</summary>
-                    <div class="param-row__details-body">
-                      <p>{{ entry.meta.logic }}</p>
-                    </div>
-                  </details>
                 </div>
 
                 <div class="param-row__control">
                   <div v-if="entry.kind === 'number'" class="control-shell">
                     <label class="control-shell__label" :for="entry.fieldId">当前数值</label>
-                    <input
+                    <UiInput
                       :id="entry.fieldId"
-                      v-model.number="section.raw[entry.key]"
+                      v-model.number="(section.raw as Record<string, number>)[entry.key]"
                       type="number"
                       :step="getNumberStep(entry.value)"
                     />
@@ -384,7 +556,7 @@
                         class="tuple-field"
                       >
                         <span>{{ getTupleFieldLabel(entry, index) }}</span>
-                        <input
+                        <UiInput
                           v-model.number="(section.raw[entry.key] as number[])[index]"
                           type="number"
                           :step="getNumberStep(itemValue)"
@@ -416,19 +588,16 @@
                           </p>
 
                           <div class="nested-item__meta">
-                            <span
+                            <UiBadge
                               v-if="getNestedMeta(section.name, entry.key, subKey).tone"
-                              :class="[
-                                'mini-pill',
-                                `mini-pill--${getNestedMeta(section.name, entry.key, subKey).tone}`,
-                              ]"
+                              :variant="getToneBadgeVariant(getNestedMeta(section.name, entry.key, subKey).tone)"
                             >
                               {{
                                 getToneLabel(
                                   getNestedMeta(section.name, entry.key, subKey).tone
                                 )
                               }}
-                            </span>
+                            </UiBadge>
                             <span
                               v-if="getNestedMeta(section.name, entry.key, subKey).range"
                               class="nested-item__range"
@@ -450,7 +619,7 @@
                             :max="getSubParamRange(`${entry.key}.${subKey}`, (section.raw[entry.key] as Record<string, number>)[subKey]).max"
                             :step="getSubParamRange(`${entry.key}.${subKey}`, (section.raw[entry.key] as Record<string, number>)[subKey]).step"
                           />
-                          <input
+                          <UiInput
                             v-model.number="
                               (section.raw[entry.key] as Record<string, number>)[subKey]
                             "
@@ -472,148 +641,6 @@
         </article>
       </div>
 
-      <aside class="rag-lab__aside">
-        <div
-          class="rag-console card"
-          :class="{ 'is-collapsed': asideCollapsed }"
-          :aria-label="asideCollapsed ? 'RAG 调优操作台（已折叠）' : 'RAG 调优操作台'"
-        >
-          <template v-if="asideCollapsed">
-            <div class="console-rail">
-              <button
-                type="button"
-                class="console-rail-toggle"
-                aria-label="展开操作台"
-                title="展开操作台"
-                @click="toggleAside"
-              >
-                <span class="material-symbols-outlined">right_panel_open</span>
-              </button>
-              <div class="console-rail-divider"></div>
-              <button
-                type="submit"
-                class="console-rail-icon"
-                aria-label="保存参数配置"
-                title="保存参数配置"
-                :disabled="isSaving || !hasParams || !isDirty"
-              >
-                <span class="material-symbols-outlined">save</span>
-              </button>
-              <button
-                type="button"
-                class="console-rail-icon console-rail-icon--simulation"
-                aria-label="打开浪潮语义沙盘"
-                title="打开浪潮语义沙盘"
-                @click="openSemanticSimulation"
-              >
-                <span class="material-symbols-outlined">travel_explore</span>
-              </button>
-              <button
-                v-for="section in groupSections.slice(0, 8)"
-                :key="`${section.anchor}-rail`"
-                type="button"
-                class="console-rail-icon"
-                :title="section.meta.title"
-                :aria-label="`跳转到 ${section.meta.title}`"
-                @click="scrollToGroup(section.anchor)"
-              >
-                <span class="material-symbols-outlined">tune</span>
-              </button>
-            </div>
-          </template>
-          <template v-else>
-          <div class="rag-console__section">
-            <div class="rag-console__header">
-              <div>
-                <span class="rag-console__label">操作台</span>
-                <h3>保存与回退</h3>
-                <p>建议一次只改一组高敏参数，并在每次保存后观察实际召回结果。</p>
-              </div>
-              <button
-                type="button"
-                class="console-rail-toggle"
-                aria-label="折叠操作台"
-                title="折叠操作台"
-                @click="toggleAside"
-              >
-                <span class="material-symbols-outlined">right_panel_close</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="rag-console__actions">
-            <button
-              type="submit"
-              class="btn-primary"
-              :disabled="isSaving || !hasParams || !isDirty"
-            >
-              {{ isSaving ? "保存中…" : "保存参数配置" }}
-            </button>
-            <button
-              type="button"
-              class="btn-secondary"
-              :disabled="!isDirty"
-              @click="resetParams"
-            >
-              重置未保存修改
-            </button>
-          </div>
-
-          <p
-            v-if="statusMessage"
-            :class="['rag-console__status', `rag-console__status--${statusType}`]"
-            role="status"
-            aria-live="polite"
-          >
-            {{ statusMessage }}
-          </p>
-
-          <div class="rag-console__section rag-console__section--simulation">
-            <span class="rag-console__label">语义沙盘</span>
-            <div class="semantic-sim-card">
-              <div class="semantic-sim-card__orb">
-                <span class="material-symbols-outlined">travel_explore</span>
-              </div>
-              <div class="semantic-sim-card__copy">
-                <strong>浪潮语义地形模拟器</strong>
-                <p>在子模态窗中预览 KNN 击中、顺逆流、虫洞跃迁与测地线能量场。</p>
-              </div>
-              <button type="button" class="btn-primary" @click="openSemanticSimulation">
-                打开沙盘
-              </button>
-            </div>
-          </div>
-
-          <div class="rag-console__section">
-            <span class="rag-console__label">快速跳转</span>
-            <div class="rag-console__jump-list">
-              <button
-                v-for="section in groupSections"
-                :key="`${section.name}-jump`"
-                type="button"
-                class="rag-console__jump-btn"
-                @click="scrollToGroup(section.anchor)"
-              >
-                <span>{{ section.meta.title }}</span>
-                <small>{{ section.changedLeaves }}/{{ section.totalLeaves }}</small>
-              </button>
-            </div>
-          </div>
-
-          <div class="rag-console__section">
-            <span class="rag-console__label">风险提示</span>
-            <ul class="rag-console__tips">
-              <li>标记为“高风险”的参数建议单独修改并观察效果。</li>
-              <li>虫洞路由参数之间耦合较强，不建议一次联动改太多项。</li>
-              <li>
-                如果召回突然漂移，优先回看 <code>tensionThreshold</code>、
-                <code>baseMomentum</code> 和 <code>dynamicBoostRange</code>。
-              </li>
-            </ul>
-          </div>
-          </template>
-        </div>
-      </aside>
     </form>
 
     <WormholeRoutingModal
@@ -669,12 +696,12 @@
               </p>
             </div>
             <div class="semantic-sim-modal__actions">
-              <button type="button" class="btn-secondary" @click="postSemanticSimulationParams">
+              <UiButton variant="secondary" @click="postSemanticSimulationParams">
                 同步当前参数
-              </button>
-              <button type="button" class="btn-secondary" @click="closeSemanticSimulation">
+              </UiButton>
+              <UiButton variant="secondary" @click="closeSemanticSimulation">
                 关闭沙盘
-              </button>
+              </UiButton>
             </div>
           </header>
           <iframe
@@ -692,9 +719,20 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ragApi, type ParamGroup, type ParamValue, type RagParams } from "@/api";
-import { useConsoleCollapse } from "@/composables/useConsoleCollapse";
+import {
+  ragApi,
+  type ParamGroup,
+  type ParamValue,
+  type RagParamTheme,
+  type RagParams,
+} from "@/api";
 import { useAppStore } from "@/stores/app";
+import UiBadge from "@/components/ui/UiBadge.vue";
+import UiButton from "@/components/ui/UiButton.vue";
+import UiDirtyIndicator from "@/components/ui/UiDirtyIndicator.vue";
+import UiInput from "@/components/ui/UiInput.vue";
+import UiPageActions from "@/components/ui/UiPageActions.vue";
+import UiSelect from "@/components/ui/UiSelect.vue";
 import OrderedCooccurrenceModal from "@/features/rag-tuning/OrderedCooccurrenceModal.vue";
 import WormholeRoutingModal from "@/features/rag-tuning/WormholeRoutingModal.vue";
 import {
@@ -709,6 +747,7 @@ import {
   getTupleLabel,
   type GroupMeta,
   type ParamMeta,
+  type ParamTone,
   type OrderedCooccurrencePrimaryKey,
   type WormholePrimaryKey,
 } from "@/features/rag-tuning/metadata";
@@ -717,6 +756,7 @@ import { showMessage } from "@/utils";
 type NumericRecord = Record<string, number>;
 type ParamEntryKind = "number" | "tuple" | "nested";
 type StatusType = "info" | "success" | "error";
+type BadgeVariant = "default" | "secondary" | "success" | "warning" | "danger" | "info" | "outline";
 
 interface ParamEntryBase {
   key: string;
@@ -777,10 +817,12 @@ const wormholeModalOpen = ref(false);
 const orderedCooccurrenceModalOpen = ref(false);
 const semanticSimulationOpen = ref(false);
 const semanticSimulationFrame = ref<HTMLIFrameElement | null>(null);
-
-const { collapsed: asideCollapsed, toggle: toggleAside } = useConsoleCollapse(
-  "rag-tuning-aside"
-);
+const ragParamThemes = ref<RagParamTheme[]>([]);
+const selectedThemeName = ref("");
+const newThemeName = ref("");
+const isThemeLoading = ref(false);
+const isThemeSaving = ref(false);
+const isActiveTraining = ref(false);
 
 function cloneParams(source: RagParams): RagParams {
   return JSON.parse(JSON.stringify(source));
@@ -923,6 +965,15 @@ const changedLeafCount = computed(() =>
 
 const isDirty = computed(() => changedLeafCount.value > 0);
 const hasParams = computed(() => groupSections.value.length > 0);
+const statusBadgeVariant = computed<BadgeVariant>(() => {
+  if (statusType.value === "success") return "success";
+  if (statusType.value === "error") return "danger";
+  return "info";
+});
+
+const canSaveNewTheme = computed(
+  () => hasParams.value && newThemeName.value.trim().length > 0 && !isThemeSaving.value
+);
 
 const wormholeEntry = computed<NestedParamEntry | null>(() => {
   const section = groupSections.value.find((item) => item.name === WORMHOLE_GROUP_NAME);
@@ -996,6 +1047,12 @@ function getKindLabel(kind: ParamEntryKind): string {
     default:
       return "参数";
   }
+}
+
+function getToneBadgeVariant(tone?: ParamTone): BadgeVariant {
+  if (tone === "critical") return "danger";
+  if (tone === "sensitive") return "warning";
+  return "secondary";
 }
 
 function formatNumber(value: number | undefined): string {
@@ -1250,6 +1307,160 @@ function closeSemanticSimulation(): void {
   semanticSimulationOpen.value = false;
 }
 
+async function loadThemes(): Promise<void> {
+  isThemeLoading.value = true;
+
+  try {
+    ragParamThemes.value = await ragApi.getRagParamThemes({
+      showLoader: false,
+      loadingKey: "rag-tuning.themes.load",
+    });
+
+    if (
+      selectedThemeName.value &&
+      !ragParamThemes.value.some((theme) => theme.name === selectedThemeName.value)
+    ) {
+      selectedThemeName.value = "";
+    }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    statusMessage.value = `预设列表加载失败：${errorMessage}`;
+    statusType.value = "error";
+    showMessage(statusMessage.value, "error");
+  } finally {
+    isThemeLoading.value = false;
+  }
+}
+
+async function openSelectedTheme(): Promise<void> {
+  if (!selectedThemeName.value || isThemeLoading.value || isThemeSaving.value) {
+    return;
+  }
+
+  isThemeLoading.value = true;
+
+  try {
+    const data = await ragApi.getRagParamTheme(selectedThemeName.value, {
+      loadingKey: "rag-tuning.themes.open",
+    });
+
+    params.value = cloneParams(data);
+    originalParams.value = cloneParams(data);
+    statusMessage.value = `已打开预设「${selectedThemeName.value}」，可继续调参后保存到该预设。`;
+    statusType.value = "success";
+    showMessage(statusMessage.value, "success");
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    statusMessage.value = `打开预设失败：${errorMessage}`;
+    statusType.value = "error";
+    showMessage(statusMessage.value, "error");
+  } finally {
+    isThemeLoading.value = false;
+  }
+}
+
+async function saveTheme(themeName: string, successMessage: string): Promise<void> {
+  if (!themeName || !hasParams.value || isThemeSaving.value) {
+    return;
+  }
+
+  isThemeSaving.value = true;
+
+  try {
+    const response = await ragApi.saveRagParamTheme(themeName, params.value, {
+      loadingKey: "rag-tuning.themes.save",
+    });
+
+    const savedThemeName = response.theme?.name || themeName;
+    selectedThemeName.value = savedThemeName;
+    newThemeName.value = "";
+    originalParams.value = cloneParams(params.value);
+    await loadThemes();
+    statusMessage.value = successMessage.replace("{theme}", savedThemeName);
+    statusType.value = "success";
+    showMessage(statusMessage.value, "success");
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    statusMessage.value = `保存预设失败：${errorMessage}`;
+    statusType.value = "error";
+    showMessage(statusMessage.value, "error");
+  } finally {
+    isThemeSaving.value = false;
+  }
+}
+
+async function saveCurrentAsNewTheme(): Promise<void> {
+  await saveTheme(newThemeName.value, "已保存当前参数为预设「{theme}」。");
+}
+
+async function saveCurrentToSelectedTheme(): Promise<void> {
+  await saveTheme(selectedThemeName.value, "已更新预设「{theme}」。");
+}
+
+async function applySelectedTheme(): Promise<void> {
+  if (!selectedThemeName.value || isThemeLoading.value || isThemeSaving.value) {
+    return;
+  }
+
+  isThemeSaving.value = true;
+
+  try {
+    const response = await ragApi.applyRagParamTheme(selectedThemeName.value, {
+      loadingKey: "rag-tuning.themes.apply",
+    });
+
+    if (response.params) {
+      params.value = cloneParams(response.params);
+      originalParams.value = cloneParams(response.params);
+    } else {
+      await loadParams();
+    }
+
+    const appliedThemeName = response.theme?.name || selectedThemeName.value;
+    selectedThemeName.value = appliedThemeName;
+    statusMessage.value = `已应用预设「${appliedThemeName}」到主 RAG 参数。`;
+    statusType.value = "success";
+    showMessage(statusMessage.value, "success");
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    statusMessage.value = `应用预设失败：${errorMessage}`;
+    statusType.value = "error";
+    showMessage(statusMessage.value, "error");
+  } finally {
+    isThemeSaving.value = false;
+  }
+}
+
+async function triggerActiveFullTraining(): Promise<void> {
+  if (isActiveTraining.value) {
+    return;
+  }
+
+  isActiveTraining.value = true;
+
+  try {
+    const response = await ragApi.triggerActiveFullTraining({
+      loadingKey: "rag-tuning.active-full-training",
+    });
+    const result = response.result;
+    const resetCount = result?.resetPendingNewTags ?? 0;
+    const threshold = result?.threshold;
+
+    statusMessage.value = threshold
+      ? `已排队浪潮全量自学习任务，已重置 ${resetCount}/${threshold} 个阈值计数。`
+      : `已排队浪潮全量自学习任务，已重置 ${resetCount} 个阈值计数。`;
+    statusType.value = "success";
+    showMessage(statusMessage.value, "success");
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    statusMessage.value = `触发全量自学习失败：${errorMessage}`;
+    statusType.value = "error";
+    showMessage(statusMessage.value, "error");
+  } finally {
+    isActiveTraining.value = false;
+  }
+}
+
 async function loadParams(): Promise<void> {
   isLoading.value = true;
   loadError.value = "";
@@ -1328,6 +1539,7 @@ watch(
 onMounted(() => {
   window.addEventListener("message", handleSemanticSimulationMessage);
   void loadParams();
+  void loadThemes();
 });
 
 onBeforeUnmount(() => {
@@ -1339,63 +1551,45 @@ onBeforeUnmount(() => {
 .rag-lab {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
 
-.rag-lab__hero {
-  position: relative;
-  overflow: hidden;
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) auto;
-  gap: var(--space-5);
-  padding: var(--space-6);
-  border-radius: var(--radius-xl);
-}
-
-.rag-lab__hero::before {
-  content: "";
-  position: absolute;
-  inset: auto -10% -30% 55%;
-  height: 260px;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--highlight-text) 24%, transparent),
-    transparent 68%
-  );
-  pointer-events: none;
-}
-
-.rag-lab__eyebrow {
-  background: var(--info-bg);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.rag-lab__hero-copy {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.rag-lab__hero-copy h2 {
+.rag-lab__summary-copy h2 {
   margin: 0;
-  font-size: var(--font-size-section-title-fluid);
-  line-height: 1.2;
+  font-size: 1.125rem;
+  line-height: 1.35;
 }
 
-.rag-lab__hero-copy .description {
+.rag-lab__summary-copy p {
   max-width: 68ch;
   margin: 0;
+  color: var(--secondary-text);
+  font-size: var(--font-size-helper);
+  line-height: 1.55;
 }
 
-.rag-lab__hero-stats {
+.rag-lab__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--primary-text) 1.2%, transparent);
+}
+
+.rag-lab__summary-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.rag-lab__summary-stats {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, minmax(96px, 120px));
-  gap: var(--space-3);
+  grid-template-columns: repeat(3, minmax(88px, 108px));
+  gap: var(--space-2);
   align-content: start;
 }
 
@@ -1403,10 +1597,11 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding: var(--space-4);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay-soft);
+  min-height: 58px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: var(--radius-md);
+  background: transparent;
 }
 
 .hero-stat--warning {
@@ -1450,13 +1645,9 @@ onBeforeUnmount(() => {
 
 .rag-lab__workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: var(--space-5);
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: var(--space-4);
   align-items: start;
-}
-
-.rag-lab__workspace.is-aside-collapsed {
-  grid-template-columns: minmax(0, 1fr) 56px;
 }
 
 .rag-lab__main {
@@ -1465,58 +1656,79 @@ onBeforeUnmount(() => {
 }
 
 .group-panel {
-  overflow: hidden;
-  border-radius: var(--radius-xl);
+  position: relative;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   scroll-margin-top: calc(var(--app-top-bar-height, 60px) + 16px);
+}
+
+.group-panel + .group-panel {
+  margin-top: var(--space-2);
+}
+
+.group-panel--ContextFoldingV2 {
+  background: transparent;
 }
 
 .group-panel__header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-4);
-  padding: var(--space-5) var(--space-5) 20px var(--space-6);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
   position: relative;
-  background: linear-gradient(90deg, var(--surface-overlay-soft), transparent);
+  border: 1px solid color-mix(in srgb, var(--group-accent) 24%, var(--border-color));
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--group-accent) 4%, transparent),
+    transparent 52%
+  );
 }
 
-.group-panel__header::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 4px;
-  height: 70%;
-  background: var(--group-accent);
-  border-radius: 2px;
+.group-panel--ContextFoldingV2 .group-panel__header {
+  border-color: color-mix(in srgb, var(--group-accent) 28%, var(--border-color));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--group-accent) 5%, transparent),
+    transparent 56%
+  );
 }
 
 .group-panel__header-main {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .group-panel__badge {
-  display: inline-flex;
   width: fit-content;
-  padding: 5px var(--space-3);
+  border-color: color-mix(in srgb, var(--group-accent) 32%, var(--border-color));
   border-radius: var(--radius-full);
-  background: var(--surface-overlay-strong);
-  color: var(--secondary-text);
-  font-size: var(--font-size-caption);
-  font-weight: 700;
+  background: color-mix(in srgb, var(--group-accent) 7%, transparent);
 }
 
 .group-panel__title-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .group-panel__title-row .material-symbols-outlined {
-  font-size: var(--font-size-section-icon);
-  color: var(--highlight-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--group-accent) 28%, var(--border-color));
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--group-accent) 9%, transparent);
+  color: color-mix(in srgb, var(--highlight-text) 84%, var(--primary-text));
+  font-size: 22px;
 }
 
 .group-panel__title-row h3 {
@@ -1524,38 +1736,55 @@ onBeforeUnmount(() => {
   font-size: var(--font-size-title);
 }
 
+.group-panel__title-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.group-panel__meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .group-panel__name {
-  margin: var(--space-1) 0 0;
+  margin: 0;
   color: var(--secondary-text);
   font-family: "Consolas", "Monaco", monospace;
   font-size: var(--font-size-helper);
+  line-height: 1;
 }
 
 .group-panel__description {
   max-width: 70ch;
   margin: 0;
   color: var(--secondary-text);
-  line-height: 1.7;
+  font-size: var(--font-size-body);
+  line-height: 1.55;
 }
 
 .group-panel__metrics {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(96px, 110px));
-  gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .group-panel__metric {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
   justify-content: center;
-  padding: 14px var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay-soft);
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .group-panel__metric span {
-  font-size: var(--font-size-title);
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: var(--font-size-emphasis);
   font-weight: 700;
 }
 
@@ -1565,24 +1794,71 @@ onBeforeUnmount(() => {
 
 .group-panel__list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
 }
 
 .param-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.72fr);
-  gap: var(--space-5);
-  padding: var(--space-5) var(--space-5) var(--space-5) var(--space-6);
-  border-top: 1px solid var(--border-color);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.62fr);
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent);
+}
+
+/* 第一行去除上边框：第一个项总要去掉；
+   如果第一个是简单卡片且第二个也是简单卡片（两者并排为第一行），第二个也要去掉。 */
+.group-panel__list > .param-row:first-child {
+  border-top: 0;
+}
+.group-panel__list > .param-row--number:first-child + .param-row--number,
+.group-panel__list > .param-row--number:first-child + .param-row--tuple,
+.group-panel__list > .param-row--tuple:first-child + .param-row--number,
+.group-panel__list > .param-row--tuple:first-child + .param-row--tuple {
+  border-top: 0;
 }
 
 .param-row--changed {
-  background: var(--info-bg);
+  background: color-mix(in srgb, var(--highlight-text) 4%, transparent);
+}
+
+/* 简单卡片（单值 / 区间）：在 2 列父网格中占 1 列，
+   内部从左右两栏改为单列上下堆叠，提高窄宽度下的可读性。 */
+.param-row--number,
+.param-row--tuple {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  align-content: start;
+  align-items: stretch;
+}
+
+.param-row--number .param-row__control,
+.param-row--tuple .param-row__control {
+  align-self: stretch;
+}
+
+/* 复杂卡片：跨满父网格两列，内部仍保留原左右两栏布局。 */
+.param-row--nested,
+.param-row--wormhole,
+.param-row--ordered,
+.param-row--geodesic {
+  grid-column: 1 / -1;
+}
+
+.param-row--nested {
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+.param-row--nested .param-row__control {
+  padding-top: 0;
 }
 
 .param-row__copy {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 10px;
 }
 
 .param-row__heading {
@@ -1594,11 +1870,20 @@ onBeforeUnmount(() => {
 
 .param-row__title-block h4 {
   margin: 0;
-  font-size: var(--font-size-body);
+  font-size: var(--font-size-emphasis);
+  line-height: 1.35;
+}
+
+.param-row__title-block {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px var(--space-3);
 }
 
 .param-row__key {
-  margin: var(--space-1) 0 0;
+  flex-basis: 100%;
+  margin: 0;
   color: var(--secondary-text);
   font-family: "Consolas", "Monaco", monospace;
   font-size: var(--font-size-helper);
@@ -1614,7 +1899,8 @@ onBeforeUnmount(() => {
 .param-row__summary {
   margin: 0;
   color: color-mix(in srgb, var(--primary-text) 84%, transparent);
-  line-height: 1.7;
+  font-size: var(--font-size-body);
+  line-height: 1.55;
 }
 
 .param-row__range {
@@ -1622,9 +1908,11 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-2);
   width: fit-content;
-  padding: 7px var(--space-3);
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
   border-radius: var(--radius-full);
-  background: var(--surface-overlay-soft);
+  background: transparent;
   color: var(--secondary-text);
   font-size: var(--font-size-helper);
 }
@@ -1634,31 +1922,55 @@ onBeforeUnmount(() => {
 }
 
 .param-row__details summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   cursor: pointer;
   color: var(--highlight-text);
+  font-size: var(--font-size-helper);
+  line-height: 1;
+}
+
+.param-row__details--inline {
+  display: contents;
+}
+
+.param-row__details--inline summary {
+  gap: 4px;
+  color: var(--secondary-text);
+}
+
+.param-row__details--inline summary:hover {
+  color: var(--highlight-text);
+}
+
+.param-row__details--inline[open] .param-row__details-body {
+  flex-basis: 100%;
+  order: 3;
 }
 
 .param-row__details-body {
   max-width: 68ch;
   margin-top: var(--space-2);
   color: var(--secondary-text);
-  line-height: 1.7;
+  font-size: var(--font-size-body);
+  line-height: 1.6;
 }
 
 .param-row__control {
   display: flex;
-  align-items: stretch;
+  align-items: center;
 }
 
 .control-shell {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: var(--space-3);
+  display: grid;
+  gap: 6px;
   width: 100%;
-  padding: var(--space-4);
-  border-radius: var(--radius-xl);
-  background: var(--surface-overlay-soft);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .control-shell__label,
@@ -1668,22 +1980,32 @@ onBeforeUnmount(() => {
   font-size: var(--font-size-helper);
 }
 
-.control-shell input,
-.tuple-field input,
+.control-shell :deep(.ui-input),
+.tuple-field :deep(.ui-input),
 .nested-item__number {
-  width: 100%;
-  min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  background: var(--input-bg);
-  color: var(--primary-text);
   font-family: "Consolas", "Monaco", monospace;
+  min-height: 32px;
+}
+
+.control-shell > :deep(.ui-input) {
+  width: min(100%, 180px);
+  justify-self: end;
+  min-height: 30px;
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: right;
+}
+
+.control-shell > :deep(.ui-input:hover),
+.control-shell > :deep(.ui-input:focus) {
+  border-color: color-mix(in srgb, var(--border-color) 78%, var(--highlight-text));
+  background: color-mix(in srgb, var(--input-bg) 46%, transparent);
 }
 
 .tuple-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: var(--space-3);
 }
 
@@ -1694,7 +2016,12 @@ onBeforeUnmount(() => {
 }
 
 .control-shell--nested {
-  gap: var(--space-4);
+  gap: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 64%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 64%, transparent);
   container: nested-shell / inline-size;
 }
 
@@ -1702,26 +2029,39 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   gap: var(--space-3);
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent);
+  background: transparent;
+  font-weight: 600;
 }
 
 .nested-list {
   display: grid;
-  gap: var(--space-3);
 }
 
 .nested-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px;
-  gap: 14px;
-  padding: 14px;
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay-strong);
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.56fr);
+  gap: var(--space-5);
+  align-items: center;
+  padding: 10px var(--space-3);
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 54%, transparent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.nested-item:first-child {
+  border-top: 0;
 }
 
 .nested-item__copy {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 5px;
+  min-width: 0;
 }
 
 .nested-item__title {
@@ -1734,6 +2074,7 @@ onBeforeUnmount(() => {
 .nested-item__title h5 {
   margin: 0;
   font-size: var(--font-size-body);
+  line-height: 1.35;
 }
 
 .nested-item__key {
@@ -1743,10 +2084,13 @@ onBeforeUnmount(() => {
 }
 
 .nested-item__summary {
+  overflow: hidden;
   margin: 0;
   color: var(--secondary-text);
-  font-size: var(--font-size-body);
-  line-height: 1.6;
+  font-size: var(--font-size-helper);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nested-item__meta {
@@ -1758,28 +2102,105 @@ onBeforeUnmount(() => {
 .nested-item__range {
   display: inline-flex;
   align-items: center;
-  padding: 5px 10px;
-  border-radius: var(--radius-full);
-  background: var(--surface-overlay);
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--secondary-text);
   font-size: var(--font-size-caption);
 }
 
 .nested-item__control {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: var(--space-3);
+  align-items: center;
 }
 
 .nested-item__slider {
   width: 100%;
+  height: 16px;
   margin: 0;
-  accent-color: var(--highlight-text);
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.nested-item__slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--secondary-text) 18%, transparent);
+}
+
+.nested-item__slider::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, var(--highlight-text) 50%, var(--border-color));
+  border-radius: 50%;
+  background: var(--primary-bg);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.nested-item__slider::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--secondary-text) 18%, transparent);
+}
+
+.nested-item__slider::-moz-range-progress {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--highlight-text);
+}
+
+.nested-item__slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 1px solid color-mix(in srgb, var(--highlight-text) 50%, var(--border-color));
+  border-radius: 50%;
+  background: var(--primary-bg);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.nested-item__slider:focus-visible {
+  outline: none;
+}
+
+.nested-item__slider:focus-visible::-webkit-slider-thumb,
+.nested-item__slider:hover::-webkit-slider-thumb {
+  border-color: var(--highlight-text);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--highlight-text) 16%, transparent);
+}
+
+.nested-item__slider:focus-visible::-moz-range-thumb,
+.nested-item__slider:hover::-moz-range-thumb {
+  border-color: var(--highlight-text);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--highlight-text) 16%, transparent);
 }
 
 .nested-item__number {
+  min-width: 0;
   text-align: right;
+}
+
+.nested-item__number :deep(.ui-input) {
+  min-height: 28px;
+  padding-inline: var(--space-2);
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: right;
+}
+
+.nested-item__number :deep(.ui-input:hover),
+.nested-item__number :deep(.ui-input:focus) {
+  border-color: color-mix(in srgb, var(--border-color) 80%, var(--highlight-text));
+  background: color-mix(in srgb, var(--input-bg) 54%, transparent);
 }
 
 @container nested-shell (max-width: 480px) {
@@ -1817,9 +2238,9 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   width: 100%;
   padding: var(--space-4);
-  border-radius: var(--radius-xl);
-  background: var(--surface-overlay-soft);
-  border: 1px solid var(--surface-overlay-soft);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--primary-text) 2%, transparent);
 }
 
 .wormhole-launchpad__stats {
@@ -1832,9 +2253,11 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay);
+  min-height: 64px;
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: transparent;
 }
 
 .wormhole-launchpad__stat span {
@@ -1854,17 +2277,17 @@ onBeforeUnmount(() => {
   gap: 0;
 }
 
-.wormhole-launchpad__footer .btn-primary,
-.wormhole-launchpad__control .btn-primary {
+.wormhole-launchpad__footer :deep(.ui-button),
+.wormhole-launchpad__control :deep(.ui-button) {
   width: 100%;
   justify-content: center;
 }
 
 .ordered-launchpad__control {
-  border-color: color-mix(in srgb, var(--highlight-text) 20%, var(--border-color));
+  border-color: color-mix(in srgb, var(--highlight-text) 18%, var(--border-color));
   background:
-    radial-gradient(circle at 16% 0%, color-mix(in srgb, var(--highlight-text) 12%, transparent), transparent 42%),
-    var(--surface-overlay-soft);
+    radial-gradient(circle at 16% 0%, color-mix(in srgb, var(--highlight-text) 4%, transparent), transparent 42%),
+    color-mix(in srgb, var(--primary-text) 2%, transparent);
 }
 
 .ordered-launchpad__axis {
@@ -1878,9 +2301,11 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay);
+  min-height: 56px;
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: transparent;
 }
 
 .ordered-launchpad__axis-card span {
@@ -1905,19 +2330,20 @@ onBeforeUnmount(() => {
   gap: var(--space-4);
   width: 100%;
   padding: var(--space-4);
-  border: 1px solid color-mix(in srgb, var(--highlight-text) 22%, var(--border-color));
-  border-radius: var(--radius-xl);
+  border: 1px solid color-mix(in srgb, var(--highlight-text) 18%, var(--border-color));
+  border-radius: var(--radius-lg);
   background:
-    radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--highlight-text) 14%, transparent), transparent 42%),
-    var(--surface-overlay-soft);
+    radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--highlight-text) 4%, transparent), transparent 42%),
+    color-mix(in srgb, var(--primary-text) 2%, transparent);
 }
 
 .geodesic-meter {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: transparent;
 }
 
 .geodesic-meter__label-row {
@@ -1951,11 +2377,12 @@ onBeforeUnmount(() => {
 .geodesic-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 170px;
-  gap: var(--space-4);
+  gap: var(--space-3);
   align-items: center;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: transparent;
 }
 
 .geodesic-field__copy {
@@ -1992,9 +2419,10 @@ onBeforeUnmount(() => {
 
 .geodesic-field__control input[type="number"] {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: var(--radius-sm);
   background: var(--input-bg);
   color: var(--primary-text);
   font-family: "Consolas", "Monaco", monospace;
@@ -2003,41 +2431,27 @@ onBeforeUnmount(() => {
 
 .rag-lab__aside {
   position: sticky;
-  top: var(--space-4);
+  top: var(--space-2);
+  max-height: calc(100vh - var(--app-top-bar-height, 48px) - 28px);
+  overflow: auto;
 }
 
 .rag-console {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-5);
-  border-radius: var(--radius-xl);
+  gap: var(--space-3);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   transition: padding 0.2s ease;
-}
-
-.rag-console.is-collapsed {
-  padding: var(--space-3) 0;
-  gap: 0;
-  align-items: center;
-}
-
-.rag-console__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.rag-console__header > div {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
 }
 
 .rag-console__section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 8px;
 }
 
 .rag-console__section h3,
@@ -2047,21 +2461,22 @@ onBeforeUnmount(() => {
 
 .rag-console__section p {
   color: var(--secondary-text);
-  font-size: var(--font-size-body);
+  font-size: var(--font-size-helper);
+  line-height: 1.45;
 }
 
 .rag-console__label {
-  color: var(--highlight-text);
+  color: var(--secondary-text);
   font-size: var(--font-size-caption);
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .rag-console__actions,
 .rag-console__jump-list {
   display: grid;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .rag-console__actions button {
@@ -2076,55 +2491,65 @@ onBeforeUnmount(() => {
 }
 
 .rag-console__status {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
-  border: 1px solid transparent;
-  font-size: var(--font-size-body);
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.4;
 }
 
-.rag-console__status--info {
-  background: var(--info-bg);
-  border-color: var(--info-border);
+.rag-console__themes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
 }
 
-.rag-console__status--success {
-  background: var(--success-bg);
-  border-color: var(--success-border);
-  color: var(--success-text);
+.rag-console__themes-header code {
+  font-family: "Consolas", "Monaco", monospace;
 }
 
-.rag-console__status--error {
-  background: var(--danger-bg);
-  border-color: var(--danger-border);
-  color: var(--danger-text);
+.theme-field {
+  display: grid;
+  gap: 6px;
+  color: var(--secondary-text);
+  font-size: var(--font-size-helper);
+}
+
+.rag-console__theme-actions {
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.rag-console__theme-actions :deep(.ui-button) {
+  min-width: 0;
+  padding-inline: var(--space-2);
+}
+
+.rag-console__theme-actions :deep(.ui-button):last-child {
+  grid-column: 1 / -1;
+}
+
+.rag-console__section--themes {
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-text) 1%, transparent);
 }
 
 .rag-console__jump-btn {
+  width: 100%;
+  border-color: transparent;
+  color: var(--primary-text);
+  text-align: left;
+}
+
+.rag-console__jump-btn :deep(.ui-button__content) {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   width: 100%;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay-soft);
-  color: var(--primary-text);
-  cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
-  text-align: left;
-}
-
-.rag-console__jump-btn:hover {
-  border-color: var(--highlight-text);
-  background: var(--info-bg);
-  transform: translateY(-1px);
-}
-
-.rag-console__jump-btn:focus-visible {
-  outline: 2px solid var(--highlight-text);
-  outline-offset: 2px;
 }
 
 .rag-console__jump-btn small,
@@ -2143,42 +2568,51 @@ onBeforeUnmount(() => {
   padding-left: var(--space-4);
 }
 
+.active-training-card {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--warning-border) 58%, var(--border-color));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--warning-bg) 54%, transparent);
+}
+
+.active-training-card__copy {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.active-training-card__copy strong {
+  font-size: var(--font-size-emphasis);
+}
+
+.active-training-card__copy p {
+  margin: 0;
+  color: var(--secondary-text);
+  line-height: 1.6;
+}
+
+.active-training-card :deep(.ui-button) {
+  justify-content: center;
+  width: 100%;
+}
+
 .semantic-sim-card {
   position: relative;
   overflow: hidden;
   display: grid;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border: 1px solid color-mix(in srgb, var(--highlight-text) 24%, var(--border-color));
-  border-radius: var(--radius-xl);
-  background:
-    radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--highlight-text) 18%, transparent), transparent 42%),
-    linear-gradient(135deg, var(--surface-overlay-soft), var(--surface-overlay));
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: var(--radius-md);
+  background: transparent;
 }
 
-.semantic-sim-card::after {
-  content: "";
-  position: absolute;
-  right: -38px;
-  bottom: -42px;
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--highlight-text) 10%, transparent);
-  filter: blur(2px);
-  pointer-events: none;
-}
-
-.semantic-sim-card__orb {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--highlight-text) 14%, transparent);
-  color: var(--highlight-text);
-  box-shadow: 0 0 28px color-mix(in srgb, var(--highlight-text) 20%, transparent);
+.group-panel--ContextFoldingV2 .group-panel__metric {
+  border-color: transparent;
+  background: transparent;
 }
 
 .semantic-sim-card__copy {
@@ -2198,7 +2632,7 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
-.semantic-sim-card .btn-primary {
+.semantic-sim-card :deep(.ui-button) {
   position: relative;
   z-index: 1;
   justify-content: center;
@@ -2305,16 +2739,15 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1180px) {
-  .rag-lab__hero {
+  .rag-lab__summary {
     grid-template-columns: 1fr;
   }
 
-  .rag-lab__hero-stats {
+  .rag-lab__summary-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .rag-lab__workspace,
-  .rag-lab__workspace.is-aside-collapsed {
+  .rag-lab__workspace {
     grid-template-columns: 1fr;
   }
 
@@ -2324,6 +2757,10 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 960px) {
+  .group-panel__list {
+    grid-template-columns: 1fr;
+  }
+
   .group-panel__header,
   .param-row,
   .wormhole-launchpad,
@@ -2348,12 +2785,11 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
-  .rag-lab__hero,
-  .rag-console {
+  .rag-lab__summary {
     padding: var(--space-4);
   }
 
-  .rag-lab__hero-stats {
+  .rag-lab__summary-stats {
     grid-template-columns: 1fr;
   }
 

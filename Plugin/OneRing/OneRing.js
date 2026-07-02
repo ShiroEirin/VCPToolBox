@@ -1420,7 +1420,7 @@ class OneRingPreprocessor {
                     meta.senderName || classified.senderName,
                     meta.timestamp,
                     meta.frontendSource || frontendSource,
-                    m.role === 'user' && isNewConversationStart
+                    isNewConversationStart
                 )
             });
         });
@@ -1815,35 +1815,23 @@ class OneRingPreprocessor {
     _detectNewConversationStartUserIndex(messages, defaultUserName, agentName) {
         if (!Array.isArray(messages)) return -1;
 
-        const effectiveBlocks = [];
+        // 统一语义：一个 post 是客户端发来的“当前完整上下文视图”。
+        // 不论 raw-client 还是 server-inferred，忽略 system、伪 system user、空 user / 通知栏 user 后，
+        // 第一个真实聊天块就是新对话起点；该块可能是 user，也可能是 assistant。
+        //
+        // 注意：这里返回的是当前传入 messages 视图中的 index。
+        // raw-client 路径传入原始 messages，因此是 raw index；
+        // server-inferred 路径传入 workingMessages，因此是 working index。
+        // 后续绑定/恢复继续沿用各自现有 index 坐标系，避免破坏 original/working 映射。
         for (let i = 0; i < messages.length; i++) {
             const message = messages[i];
             if (!message || (message.role !== 'user' && message.role !== 'assistant')) continue;
 
             if (message.role === 'assistant') {
-                effectiveBlocks.push({ role: 'assistant', index: i });
+                const classifiedAssistant = classifyAssistantContent(message.content, agentName);
+                if (classifiedAssistant) return i;
                 continue;
             }
-
-            const classified = classifyUserContent(message.content, defaultUserName, agentName);
-            if (!classified) {
-                // 纯系统通知 user 块在新对话起点判定中也被忽略。
-                continue;
-            }
-
-            effectiveBlocks.push({ role: 'user', index: i, classified });
-        }
-
-        if (effectiveBlocks.length !== 1 || effectiveBlocks[0].role !== 'user') return -1;
-        return effectiveBlocks[0].index;
-    }
-
-    _detectFirstUserIndexForClientHashTimeline(messages, defaultUserName, agentName) {
-        if (!Array.isArray(messages)) return -1;
-
-        for (let i = 0; i < messages.length; i++) {
-            const message = messages[i];
-            if (!message || message.role !== 'user') continue;
 
             const classified = classifyUserContent(message.content, defaultUserName, agentName);
             if (classified) return i;
@@ -1852,10 +1840,15 @@ class OneRingPreprocessor {
         return -1;
     }
 
+    _detectFirstUserIndexForClientHashTimeline(messages, defaultUserName, agentName) {
+        // 兼容旧方法名；新逻辑不再按 raw-client 特判“第一个 user”，
+        // 而是统一返回第一个真实聊天块的当前视图 index。
+        return this._detectNewConversationStartUserIndex(messages, defaultUserName, agentName);
+    }
+
     _detectNewConversationStartUserIndexForTimeline(messages, defaultUserName, agentName, hasClientTimestampTruth = false) {
-        return hasClientTimestampTruth
-            ? this._detectFirstUserIndexForClientHashTimeline(messages, defaultUserName, agentName)
-            : this._detectNewConversationStartUserIndex(messages, defaultUserName, agentName);
+        void hasClientTimestampTruth;
+        return this._detectNewConversationStartUserIndex(messages, defaultUserName, agentName);
     }
 
     _createPostRequestHash(postBlocks) {
@@ -1866,6 +1859,15 @@ class OneRingPreprocessor {
             hash: snapshot.contentHash(block.text || '')
         }));
         return snapshot.contentHash(JSON.stringify(normalizedBlocks));
+    }
+
+    _getPostBlockTotalCount(postBlocks) {
+        const blocks = Array.isArray(postBlocks) ? postBlocks : [];
+        const maxIndex = blocks.reduce((max, block) => {
+            const index = Number(block?.index);
+            return Number.isInteger(index) && index >= 0 ? Math.max(max, index) : max;
+        }, -1);
+        return maxIndex >= 0 ? maxIndex + 1 : blocks.length;
     }
 
     _createTurnId(agentName, frontendSource, requestHash) {
@@ -1885,17 +1887,24 @@ class OneRingPreprocessor {
             }
 
             // 极短 retry 保守判定：
-            // 旧逻辑只要求 blockCount 一致，通用客户端无 hash 包体时会把连续短新对话误判为 retry，
-            // 导致 post 回复 update 上一轮 assistant。这里改为必须 requestHash 完全一致。
-            // 用户改写内容时 requestHash 会变化，不再误复用最近 completed turn。
+            // requestHash 只能证明当前可见短窗口一致，不能证明它来自同一个长上下文。
+            // 因此必须同时校验：
+            // 1) 当前参与 hash 的短窗口 block 数一致；
+            // 2) 当前 post 的真实聊天楼层总数一致（例如 28 楼不能误复用 58 楼的 turn）；
+            // 3) requestHash 完全一致。
+            // 旧库没有 requestTotalBlockCount 的 completed turn 一律不参与自动 retry 复用。
             const blockCount = Array.isArray(postBlocks) ? postBlocks.length : 0;
+            const totalBlockCount = this._getPostBlockTotalCount(postBlocks);
             const latest = recentTurns[0] || null;
+            const latestTotalBlockCount = Number(latest?.requestTotalBlockCount);
             const requestHash = this._createPostRequestHash(postBlocks);
             if (
                 latest &&
                 blockCount > 0 &&
                 blockCount <= 2 &&
                 Number(latest.requestBlockCount) === blockCount &&
+                Number.isInteger(latestTotalBlockCount) &&
+                latestTotalBlockCount === totalBlockCount &&
                 latest.requestHash === requestHash
             ) {
                 return latest;
@@ -1915,6 +1924,7 @@ class OneRingPreprocessor {
             frontendSource,
             requestHash,
             requestBlockCount: Array.isArray(postBlocks) ? postBlocks.length : 0,
+            requestTotalBlockCount: this._getPostBlockTotalCount(postBlocks),
             status: 'pending',
             createdAt: nowIso,
             updatedAt: nowIso
@@ -2338,10 +2348,12 @@ class OneRingPreprocessor {
                 if (!classifiedAssistant) return m;
 
                 const originalIndex = result.indexOf(m);
+                const shouldMarkNewConversationStart = originalIndex === newConversationStartUserIndex;
                 const bound = timestampBindings[originalIndex] || null;
                 if (
                     existingMeta &&
                     existingMeta.senderName === classifiedAssistant.senderName &&
+                    (!shouldMarkNewConversationStart || existingMeta.isNewConversationStart) &&
                     (!bound || (
                         existingMeta.timestamp === bound.timestamp &&
                         existingMeta.frontendSource === (bound.frontendSource || frontendSource)
@@ -2359,7 +2371,8 @@ class OneRingPreprocessor {
                         m.content,
                         classifiedAssistant.senderName,
                         bound.timestamp,
-                        bound.frontendSource || frontendSource
+                        bound.frontendSource || frontendSource,
+                        shouldMarkNewConversationStart || existingMeta?.isNewConversationStart
                     )
                 });
             }
@@ -3182,7 +3195,8 @@ class OneRingPreprocessor {
                     classifiedAssistant.cleanText,
                     nextTimestamp(),
                     threshold,
-                    classifiedAssistant.senderName
+                    classifiedAssistant.senderName,
+                    block.index === newConversationStartUserIndex
                 );
                 if (assistantResult === 'insert') stats.inserted++;
                 if (assistantResult === 'update') stats.updated++;
@@ -3219,9 +3233,13 @@ class OneRingPreprocessor {
         return stats;
     }
 
-    async _recordAssistantMessage(agentName, frontendSource, cleanText, timestamp, threshold = 0.92, senderName = agentName) {
+    async _recordAssistantMessage(agentName, frontendSource, cleanText, timestamp, threshold = 0.92, senderName = agentName, isNewConversationStart = false) {
         const timing = createOneRingTimingProbe('record-assistant-message', { agentName, frontendSource });
         try {
+            const dbContent = isNewConversationStart
+                ? upsertTailTag(cleanText, senderName, timestamp, frontendSource, true)
+                : cleanText;
+            timing.mark('prepareDbContent', `cleanLen=${String(cleanText || '').length} dbLen=${String(dbContent || '').length} newStart=${isNewConversationStart}`);
             const recentRows = db.getRecentMessagesByFrontend(agentName, frontendSource, 12, projectBasePath);
             timing.mark('getRecentMessagesByFrontend', `rows=${recentRows.length}`);
             const recent = recentRows
@@ -3233,7 +3251,7 @@ class OneRingPreprocessor {
                 const sim = await fuzzyPool.similarity(cleanText, recent.content);
                 timing.mark('similarityRecentAssistant', `sim=${sim.toFixed(4)} cleanLen=${String(cleanText || '').length} recentLen=${String(recent.content || '').length}`);
                 if (sim >= threshold) {
-                    db.updateMessageById(agentName, recent.id, cleanText, projectBasePath);
+                    db.updateMessageById(agentName, recent.id, dbContent, projectBasePath);
                     timing.mark('updateMessageById', `dbId=${recent.id}`);
                     timing.finish('result=update');
                     if (debugMode) console.log(`[OneRing] Updated recent assistant message dbId=${recent.id}`);
@@ -3247,11 +3265,11 @@ class OneRingPreprocessor {
                 role: 'assistant',
                 senderName,
                 frontendSource,
-                content: cleanText,
+                content: dbContent,
                 timestamp,
                 maxRecords: getOneRingMaxDbRecords(),
             }, projectBasePath);
-            timing.mark('insertMessage', `contentLen=${String(cleanText || '').length}`);
+            timing.mark('insertMessage', `contentLen=${String(dbContent || '').length}`);
             timing.finish('result=insert');
             if (debugMode) console.log(`[OneRing] Recorded assistant message for agent=${agentName}, sender=${senderName}, frontend=${frontendSource}`);
             return 'insert';

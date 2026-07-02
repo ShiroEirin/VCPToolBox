@@ -8,6 +8,100 @@ const execAsync = util.promisify(exec);
 const pm2 = require('pm2');
 const { getAuthCode } = require('../../modules/captchaDecoder');
 
+const CPU_TEMPERATURE_URL = 'http://localhost:8085/data.json';
+const CPU_TEMPERATURE_TIMEOUT_MS = 800;
+const CPU_TEMPERATURE_PRIORITY = [
+    'CPU Package',
+    'Core Max',
+    'Core Average',
+    'CPU Core #1'
+];
+
+function parseTemperatureValue(value) {
+    if (!value || typeof value !== 'string') {
+        return null;
+    }
+
+    const matched = value.match(/-?\d+(?:\.\d+)?/);
+    if (!matched) {
+        return null;
+    }
+
+    const parsed = Number.parseFloat(matched[0]);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function collectCpuTemperatureSensors(node, output = []) {
+    if (!node || typeof node !== 'object') {
+        return output;
+    }
+
+    if (
+        node.Type === 'Temperature' &&
+        typeof node.SensorId === 'string' &&
+        node.SensorId.includes('/intelcpu/')
+    ) {
+        output.push(node);
+    }
+
+    if (Array.isArray(node.Children)) {
+        node.Children.forEach(child => collectCpuTemperatureSensors(child, output));
+    }
+
+    return output;
+}
+
+function pickCpuTemperatureSensor(sensors) {
+    for (const preferredName of CPU_TEMPERATURE_PRIORITY) {
+        const matched = sensors.find(sensor => sensor.Text === preferredName);
+        if (matched) {
+            return matched;
+        }
+    }
+
+    return sensors.find(sensor => !String(sensor.Text || '').includes('Distance to TjMax')) || null;
+}
+
+async function getCpuTemperature() {
+    if (typeof fetch !== 'function' || typeof AbortController !== 'function') {
+        return null;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CPU_TEMPERATURE_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(CPU_TEMPERATURE_URL, {
+            signal: controller.signal,
+            cache: 'no-store'
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const data = await response.json();
+        const sensor = pickCpuTemperatureSensor(collectCpuTemperatureSensors(data));
+        const value = parseTemperatureValue(sensor?.Value || sensor?.RawValue);
+
+        if (value === null) {
+            return null;
+        }
+
+        return {
+            value,
+            unit: '°C',
+            source: sensor?.Text || '',
+            sensorId: sensor?.SensorId || '',
+            updatedAt: new Date().toISOString()
+        };
+    } catch (error) {
+        return null;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 module.exports = function(options) {
     const router = express.Router();
     // const { DEBUG_MODE } = options; // Currently unused in this module but available
@@ -106,6 +200,11 @@ module.exports = function(options) {
                     systemInfo.cpu = { usage: 0 };
                 }
             }
+            const cpuTemperature = await getCpuTemperature();
+            if (cpuTemperature && systemInfo.cpu) {
+                systemInfo.cpu.temperature = cpuTemperature;
+            }
+
             systemInfo.nodeProcess = {
                 pid: process.pid,
                 memory: process.memoryUsage(),
@@ -188,6 +287,45 @@ module.exports = function(options) {
             } else {
                 res.status(500).json({ success: false, error: '读取热榜缓存失败。', details: error.message });
             }
+        }
+    });
+
+    // 获取 VCPLog WebSocket 通知通道连接信息（VCP_Key + PORT）
+    // 用于 Vue 管理面板的右上角通知中心直连 VCP 主服务器的 VCPLog 频道
+    router.get('/notifications/connection', (req, res) => {
+        try {
+            const vcpKey = process.env.VCP_Key || '';
+            const port = parseInt(process.env.PORT, 10) || 6005;
+            if (!vcpKey) {
+                return res.status(503).json({
+                    success: false,
+                    error: 'VCP_Key 未在 config.env 中配置，无法建立 VCPLog 通知连接。'
+                });
+            }
+
+            // 优先使用请求的 Host (反向代理后的对外域名/IP)；fallback 到 localhost
+            const rawHost = req.headers['x-forwarded-host'] || req.headers.host || `localhost:${port}`;
+            const hostname = String(rawHost).split(':')[0] || 'localhost';
+            const forwardedProto = (req.headers['x-forwarded-proto'] || '').toString().split(',')[0].trim();
+            const proto = forwardedProto || (req.protocol === 'https' ? 'https' : 'http');
+            const wsProto = proto === 'https' ? 'wss' : 'ws';
+
+            res.json({
+                success: true,
+                connection: {
+                    vcpKey,
+                    port,
+                    hostname,
+                    wsUrl: `${wsProto}://${hostname}:${port}/VCPlog/VCP_Key=${encodeURIComponent(vcpKey)}`
+                }
+            });
+        } catch (error) {
+            console.error('[Notifications] Failed to build VCPLog connection info:', error);
+            res.status(500).json({
+                success: false,
+                error: '获取 VCPLog 连接信息失败。',
+                details: error.message
+            });
         }
     });
 

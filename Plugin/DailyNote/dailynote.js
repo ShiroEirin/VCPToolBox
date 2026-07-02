@@ -412,6 +412,10 @@ async function processLocalFiles(content) {
 }
 
 // --- 'create' Command Logic ---
+function contentStartsWithAiTimePrefix(content) {
+    return /^\s*\[\d{1,2}:\d{2}(?::\d{2})?\](?=\s|$)/.test(content);
+}
+
 async function handleCreateCommand(args) {
     // 兼容 'Date'/'dateString', 'Content'/'contentText'/'content', 'maid'/'maidName' (case-insensitive for maid)
     // 新增 folder 字段：用于直接指定存储目录，避免必须把目录塞进 maid 的 [文件夹]署名格式。
@@ -515,8 +519,7 @@ async function handleCreateCommand(args) {
 
         debugLog(`Target file path: ${filePath}`);
         const timeStringForContent = `${hours}:${minutes}`;
-        const contentStartsWithTimeLine = /^\s*\[\d{1,2}:\d{2}(?::\d{2})?\]\s*(?:\r?\n|$)/.test(processedContent);
-        const fileContent = contentStartsWithTimeLine
+        const fileContent = contentStartsWithAiTimePrefix(processedContent)
             ? `[${datePart}] - ${actualMaidName}\n${processedContent}`
             : `[${datePart}] - ${actualMaidName}\n[${timeStringForContent}]\n${processedContent}`;
         await fs.writeFile(filePath, fileContent);

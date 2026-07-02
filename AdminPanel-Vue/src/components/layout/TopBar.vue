@@ -35,6 +35,12 @@
           @click="goToDashboard"
           aria-label="返回仪表盘"
         >
+          <img
+            class="brand-logo"
+            :src="topbarLogoUrl"
+            alt=""
+            aria-hidden="true"
+          />
           <span class="server-title">VCPToolBox</span>
         </button>
       </div>
@@ -46,16 +52,62 @@
 
       <!-- 右列：通知 + 系统菜单 + 用户菜单 -->
       <div class="header-actions">
+        <UiIconButton
+          class="external-link-trigger"
+          label="打开 VCPToolBox 官网"
+          title="VCPToolBox 官网"
+          @click="openExternalLink('https://www.vcptoolbox.com/')"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">language</span>
+        </UiIconButton>
+
+        <UiIconButton
+          class="external-link-trigger"
+          label="打开 GitHub 仓库"
+          title="GitHub 仓库"
+          @click="openExternalLink('https://github.com/lioensky/VCPToolBox')"
+        >
+          <svg
+            class="github-icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path
+              fill="currentColor"
+              d="M12 2C6.48 2 2 6.58 2 12.24c0 4.52 2.87 8.35 6.84 9.71.5.1.68-.22.68-.49 0-.24-.01-1.05-.01-1.9-2.78.62-3.37-1.22-3.37-1.22-.45-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.36 1.12 2.93.86.09-.67.35-1.12.63-1.38-2.22-.26-4.55-1.14-4.55-5.05 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.32 9.32 0 0 1 12 6.95c.85 0 1.7.12 2.5.35 1.9-1.33 2.74-1.05 2.74-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.92-2.34 4.79-4.57 5.04.36.32.68.94.68 1.9 0 1.38-.01 2.49-.01 2.83 0 .27.18.59.69.49A10.17 10.17 0 0 0 22 12.24C22 6.58 17.52 2 12 2Z"
+            />
+          </svg>
+        </UiIconButton>
+
+        <UiIconButton
+          class="theme-quick-trigger"
+          label="快捷外观"
+          title="快捷外观"
+          :active="isThemeQuickDrawerOpen"
+          aria-haspopup="dialog"
+          :aria-expanded="isThemeQuickDrawerOpen"
+          @click="openThemeQuickDrawer"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">palette</span>
+        </UiIconButton>
+
         <!-- 通知图标（预留） -->
         <button
           class="icon-button notification-btn"
-          :aria-label="hasNotifications ? '系统通知（有新通知）' : '系统通知'"
-          :title="hasNotifications ? '有新通知' : '系统通知'"
+          :class="{ active: notificationsStore.isDrawerOpen }"
+          :aria-label="notificationsStore.hasUnread ? `系统通知（${notificationsStore.unreadCount} 条未读）` : '系统通知'"
+          :title="notificationsStore.hasUnread ? `${notificationsStore.unreadCount} 条新通知` : '系统通知'"
+          aria-haspopup="dialog"
+          :aria-expanded="notificationsStore.isDrawerOpen"
+          @click="toggleNotifications"
         >
           <span class="material-symbols-outlined" aria-hidden="true"
             >notifications</span
           >
-          <span v-if="hasNotifications" class="notification-badge"></span>
+          <span v-if="notificationsStore.hasUnread" class="notification-badge">
+            {{ badgeText }}
+          </span>
         </button>
 
         <!-- 系统菜单下拉 -->
@@ -80,10 +132,8 @@
               <span>{{ animationsEnabled ? "关闭动画" : "开启动画" }}</span>
             </button>
             <button @click="toggleTheme" class="dropdown-item">
-              <span class="material-symbols-outlined">{{
-                theme === "dark" ? "light_mode" : "dark_mode"
-              }}</span>
-              <span>{{ theme === "dark" ? "切换亮色" : "切换暗色" }}</span>
+              <span class="material-symbols-outlined">{{ themeToggleIcon }}</span>
+              <span>{{ themeToggleLabel }}</span>
             </button>
             <div class="dropdown-divider"></div>
             <button @click="restartServer" class="dropdown-item danger">
@@ -120,19 +170,23 @@
         </div>
       </div>
     </div>
+    <ThemeQuickDrawer :open="isThemeQuickDrawerOpen" @close="closeThemeQuickDrawer" />
   </header>
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { systemApi } from "@/api";
 import { askConfirm } from "@/platform/feedback/feedbackBus";
 import { useAppStore } from "@/stores/app";
 import { useAuthStore } from "@/stores/auth";
+import { useNotificationsStore } from "@/stores/notifications";
 import { showMessage, createLogger } from "@/utils";
 import UiIconButton from "@/components/ui/UiIconButton.vue";
 import Breadcrumb from "@/components/layout/Breadcrumb.vue";
+import ThemeQuickDrawer from "@/components/layout/ThemeQuickDrawer.vue";
+import topbarLogoUrl from "@/assets/topbar-logo.png";
 
 interface Props {
   isMobileMenuOpen: boolean;
@@ -159,8 +213,23 @@ const router = useRouter();
 const appStore = useAppStore();
 const authStore = useAuthStore();
 
+const notificationsStore = useNotificationsStore();
+
 const theme = computed(() => appStore.theme);
+const isThemeQuickDrawerOpen = ref(false);
+const themeToggleIcon = computed(() => {
+  if (theme.value === "dark") return "light_mode";
+  return "dark_mode";
+});
+const themeToggleLabel = computed(() => {
+  if (theme.value === "dark") return "切换亮色";
+  return "切换暗色";
+});
 const animationsEnabled = computed(() => appStore.animationsEnabled);
+const badgeText = computed(() => {
+  const count = notificationsStore.unreadCount;
+  return count > 99 ? "99+" : count > 0 ? String(count) : "";
+});
 const logger = createLogger("TopBar");
 
 function toggleMobileMenu() {
@@ -179,8 +248,28 @@ function toggleUserMenu() {
   emit("toggleUserMenu");
 }
 
+function openThemeQuickDrawer() {
+  isThemeQuickDrawerOpen.value = true;
+  emit("closeAllMenus");
+}
+
+function closeThemeQuickDrawer() {
+  isThemeQuickDrawerOpen.value = false;
+}
+
+function toggleNotifications() {
+  notificationsStore.toggleDrawer();
+  emit("closeAllMenus");
+}
+
+function openExternalLink(url: string) {
+  window.open(url, "_blank", "noopener,noreferrer");
+  emit("closeAllMenus");
+}
+
 function toggleTheme() {
-  appStore.setTheme(theme.value === "dark" ? "light" : "dark");
+  const nextTheme = theme.value === "dark" ? "light" : "dark";
+  appStore.setTheme(nextTheme);
   emit("closeAllMenus");
 }
 
@@ -232,7 +321,7 @@ function goToDashboard() {
   left: 0;
   right: 0;
   height: var(--app-top-bar-height, 48px);
-  background-color: color-mix(in srgb, var(--secondary-bg) 100%, var(--primary-bg));
+  background-color: var(--app-shell-bg);
   color: var(--primary-text);
   border-bottom: 0;
   z-index: 1000;
@@ -242,6 +331,15 @@ function goToDashboard() {
   transition:
     background-color var(--transition-fast),
     border-color var(--transition-fast);
+}
+
+:global(html:not([data-theme-shell-layout]) .top-bar),
+:global(html[data-theme-shell-layout="inset"] .top-bar) {
+  background-color: var(--app-shell-bg);
+}
+
+:global(html[data-theme-shell-layout="sidebar"] .top-bar) {
+  background-color: var(--app-shell-bg);
 }
 
 /* 三列网格：左列对齐侧栏宽度，折叠时切图标宽度 */
@@ -271,6 +369,8 @@ function goToDashboard() {
   flex: 0 0 auto;
   min-width: 0;
   height: 32px;
+  box-sizing: border-box;
+  padding-left: 8px;
 }
 
 .mobile-menu-toggle {
@@ -341,6 +441,18 @@ function goToDashboard() {
   min-width: 0;
   justify-self: end;
   height: 32px;
+}
+
+.theme-quick-trigger .material-symbols-outlined,
+.external-link-trigger .material-symbols-outlined {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.github-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 
 @media (max-width: 768px) {
@@ -489,6 +601,15 @@ function goToDashboard() {
   min-width: 0;
 }
 
+.brand-logo {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
 .top-bar.sidebar-collapsed .brand {
   display: none;
 }
@@ -530,7 +651,8 @@ function goToDashboard() {
   line-height: 1;
 }
 
-.icon-button:hover {
+.icon-button:hover,
+.icon-button.active {
   background-color: var(--accent-bg);
   color: var(--primary-text);
 }
@@ -543,13 +665,20 @@ function goToDashboard() {
 
 .notification-btn .notification-badge {
   position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 8px;
-  height: 8px;
+  top: 2px;
+  right: 1px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  box-sizing: border-box;
   background-color: var(--danger-color);
-  border-radius: 50%;
+  color: #ffffff;
+  border-radius: 999px;
   border: 2px solid var(--secondary-bg);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
 }
 
 .dropdown {
@@ -561,12 +690,14 @@ function goToDashboard() {
   top: 100%;
   right: 0;
   margin-top: 4px;
-  background-color: var(--tertiary-bg);
-  border: 1px solid var(--border-color);
+  background-color: color-mix(in srgb, var(--primary-bg) 96%, var(--secondary-bg));
+  border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
   border-radius: 8px;
   min-width: 168px;
   padding: 4px;
   box-shadow: var(--shadow-overlay-soft);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   opacity: 0;
   visibility: hidden;
   transform: translateY(-4px) scale(0.98);

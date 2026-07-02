@@ -1,12 +1,11 @@
 <template>
   <section class="config-section active-section">
-    <div class="daily-notes-manager" :class="{ 'is-sidebar-collapsed': folderSidebarCollapsed }">
+    <div class="daily-notes-manager">
       <FolderList
         :folders="folders"
         :selected-folder="selectedFolder"
         :folder-label="resourceConfig.folderLabel"
         @selectFolder="selectFolder"
-        @update:collapsed="folderSidebarCollapsed = $event"
       />
 
       <div class="notes-main-area">
@@ -93,6 +92,8 @@ import { useMarkdownRenderer } from '@/composables/useMarkdownRenderer'
 import { askConfirm } from '@/platform/feedback/feedbackBus'
 import { showMessage } from '@/utils'
 import 'easymde/dist/easymde.min.css'
+import 'font-awesome/css/font-awesome.min.css'
+import 'highlight.js/styles/github-dark.css'
 import DiaryEditor from './DailyNotesManager/DiaryEditor.vue'
 import DiscoveryModal from './DailyNotesManager/DiscoveryModal.vue'
 import FolderList from './DailyNotesManager/FolderList.vue'
@@ -128,8 +129,6 @@ const savingNote = ref(false)
 const isEditorInitializing = ref(false)
 const editorStatus = ref('')
 const editorStatusType = ref<'info' | 'success' | 'error'>('info')
-
-const folderSidebarCollapsed = ref(false)
 
 const showDiscoveryModal = ref(false)
 const discoverySourceNote = ref<{ file: string; title?: string } | null>(null)
@@ -177,6 +176,7 @@ async function initMarkdownEditor(content = ''): Promise<void> {
     easyMDE = new EasyMDE({
       element: markdownEditorRef.value,
       spellChecker: false,
+      autoDownloadFontAwesome: false,
       status: ['lines', 'words', 'cursor'],
       minHeight: '500px',
       maxHeight: '700px',
@@ -422,25 +422,57 @@ onMounted(() => {
 .daily-notes-manager {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  gap: var(--space-5);
+  gap: var(--space-4);
   align-items: start;
-}
-
-.daily-notes-manager.is-sidebar-collapsed {
-  grid-template-columns: 56px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .notes-main-area {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
+  height: 100%;
   min-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 2px var(--space-6) 0;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--secondary-text) 24%, transparent) transparent;
+}
+
+.notes-main-area::-webkit-scrollbar {
+  width: 8px;
+}
+
+.notes-main-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notes-main-area::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-full);
+  background-color: color-mix(in srgb, var(--secondary-text) 24%, transparent);
+  background-clip: padding-box;
+}
+
+.notes-main-area::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--secondary-text) 42%, transparent);
 }
 
 @media (max-width: 768px) {
-  .daily-notes-manager,
-  .daily-notes-manager.is-sidebar-collapsed {
+  .daily-notes-manager {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .notes-main-area {
+    height: auto;
+    overflow: visible;
+    padding: 0;
   }
 }
 </style>
