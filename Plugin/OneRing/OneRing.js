@@ -13,10 +13,15 @@ const snapshot = require('./OneRingSnapshot.js');
 const timelineCommon = require('./OneRingTimelineCommon.js');
 const { RawClientTimelineStrategy, probeRawClientTimestampBindings } = require('./OneRingRawClientTimeline.js');
 const { ServerInferredTimelineStrategy } = require('./OneRingServerInferredTimeline.js');
+const oneRingMemo = require('./OneRingMemo.js');
 
 // ─── 触发语法解析 ────────────────────────────────────────────────────────────
-const TRIGGER_REGEX = /\[\[OneRing::([^:]+?)::([^:\]]+?)(?:::([^\]]+?))?\]\]/;
-const TRIGGER_GLOBAL_REGEX = /\[\[OneRing::([^:]+?)::([^:\]]+?)(?:::([^\]]+?))?\]\]/g;
+// 每个字段都必须被限制在同一个 [[...]] 内，尤其不能吞入右方括号或换行。
+// 否则独立的 [[OneRing::Only]] 会从 “Only]]” 开始跨行回溯，错误地借用后续
+// [[Flowlock::Start]] 等标记中的 “::”，把中间整段系统提示词识别成 OneRing 触发串。
+const ONERING_TRIGGER_PATTERN = String.raw`\[\[OneRing::([^:\]\r\n]+)::([^:\]\r\n]+)(?:::([^:\]\r\n]+))?\]\]`;
+const TRIGGER_REGEX = new RegExp(ONERING_TRIGGER_PATTERN);
+const TRIGGER_GLOBAL_REGEX = new RegExp(ONERING_TRIGGER_PATTERN, 'g');
 const ONLY_TRIGGER_GLOBAL_REGEX = /\[\[OneRing::Only\]\]/gi;
 const VCP_RAG_BLOCK_REGEX = /<!--\s*VCP_RAG_BLOCK_START\b[\s\S]*?<!--\s*VCP_RAG_BLOCK_END\s*-->/gi;
 
@@ -515,7 +520,8 @@ const DEFAULT_HOT_CONFIG = Object.freeze({
     timeInsert: true,
     timeInsertPrepend: true,
     timeInsertMiddle: true,
-    asyncOnlyMode: true
+    asyncOnlyMode: true,
+    memo: { ...oneRingMemo.DEFAULT_CONFIG }
 });
 const TAIL_TAG_PLACEMENT_INLINE = 'inline';
 const TAIL_TAG_PLACEMENT_SYSTEM_USER_BLOCK = 'system_user_block';
@@ -559,7 +565,8 @@ function normalizeHotConfig(raw = {}) {
         timeInsert: toBoolean(raw.timeInsert, DEFAULT_HOT_CONFIG.timeInsert),
         timeInsertPrepend: toBoolean(raw.timeInsertPrepend, DEFAULT_HOT_CONFIG.timeInsertPrepend),
         timeInsertMiddle: toBoolean(raw.timeInsertMiddle, DEFAULT_HOT_CONFIG.timeInsertMiddle),
-        asyncOnlyMode: toBoolean(raw.asyncOnlyMode, DEFAULT_HOT_CONFIG.asyncOnlyMode)
+        asyncOnlyMode: toBoolean(raw.asyncOnlyMode, DEFAULT_HOT_CONFIG.asyncOnlyMode),
+        memo: oneRingMemo.normalizeConfig(raw.memo)
     };
 }
 
@@ -921,6 +928,28 @@ async function dedupeAdjacentSimilarConversation(messages, threshold = 0.98) {
 
 class OneRingPreprocessor {
     async processMessages(messages, requestConfig) {
+        let result = messages;
+        try {
+            result = await this._processOneRingMessages(messages, requestConfig);
+        } catch (error) {
+            // 保持原预处理器错误语义，由 PluginManager 记录并决定上层降级。
+            throw error;
+        }
+
+        // OneRingMemo 是 OneRing 插件自身的统一收尾协议：
+        // - 与主 OneRing 触发符、enabled 开关及 Only 模式完全解耦；
+        // - 主流程无论在哪个分支提前返回，均在这里执行一次；
+        // - 只替换顶层连续 system 前缀中的倒数第一个占位符；
+        // - 替换结果不再次进入变量或 Memo 解析流程，因此禁止递归展开。
+        try {
+            return oneRingMemo.injectMemo(result);
+        } catch (error) {
+            console.warn('[OneRingMemo] Injection failed; forwarding OneRing result unchanged:', error.message);
+            return result;
+        }
+    }
+
+    async _processOneRingMessages(messages, requestConfig) {
         const cfg = { ...config, ...requestConfig };
         if (!hotConfig.enabled) return messages;
         const clientTimestampBindingInfo = timelineCommon.getClientTimestampBindingsFromConfig(cfg, formatOneRingTimestamp);
@@ -3068,6 +3097,7 @@ class OneRingPreprocessor {
                     }
                 }
                 console.log(`[OneRing] post回复写入OneRing成功：agent=${meta.agentName} frontend=${meta.frontendSource} mode=update dbId=${responseId} turn=${meta.turnId || 'none'} turnCompleted=${turnCompleted} textLen=${aiText.length}`);
+                oneRingMemo.scheduleAutoGenerate(meta.agentName, hotConfig.memo);
                 return;
             }
 
@@ -3095,6 +3125,7 @@ class OneRingPreprocessor {
                 }
             }
             console.log(`[OneRing] post回复写入OneRing成功：agent=${meta.agentName} frontend=${meta.frontendSource} mode=insert dbId=${insertedId} timestamp="${timestamp}" turn=${meta.turnId || 'none'} turnCompleted=${turnCompleted} textLen=${aiText.length}`);
+            oneRingMemo.scheduleAutoGenerate(meta.agentName, hotConfig.memo);
         } catch (e) {
             console.warn(`[OneRing] post回复未写入OneRing：写库异常 agent=${meta.agentName} frontend=${meta.frontendSource} turn=${meta.turnId || 'none'} textLen=${aiText.length} error=${e.message}`);
         }
@@ -3158,6 +3189,7 @@ class OneRingPreprocessor {
                 }
             }
             console.log(`[OneRing] post回复写入OneRing成功：agent=${meta.agentName} frontend=${meta.frontendSource} mode=compat-insert dbId=${insertedId} timestamp="${timestamp}" turn=${meta.turnId || 'none'} turnCompleted=${turnCompleted} textLen=${aiText.length}`);
+            oneRingMemo.scheduleAutoGenerate(meta.agentName, hotConfig.memo);
         } catch (e) {
             console.warn(`[OneRing] post回复未写入OneRing：兼容入口写库异常 agent=${meta.agentName} frontend=${meta.frontendSource} turn=${meta.turnId || 'none'} textLen=${aiText.length} error=${e.message}`);
         }
@@ -3340,6 +3372,7 @@ class OneRingPreprocessor {
         }
         projectBasePath = config.PROJECT_BASE_PATH || '';
         this._projectBasePath = projectBasePath;
+        oneRingMemo.configure({ projectBasePath, runtimeConfig: config });
         hotConfigPath = path.join(projectBasePath || path.join(__dirname, '..', '..'), 'Plugin', 'OneRing', HOT_CONFIG_FILE_NAME);
         setupHotConfigWatcher();
         console.log(`[OneRing] Initialized. agent-scoped SQLite at ${projectBasePath}/Plugin/OneRing/data/`);

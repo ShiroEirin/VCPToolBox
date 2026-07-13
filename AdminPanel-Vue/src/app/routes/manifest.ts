@@ -22,6 +22,8 @@ export type AppRouteId =
   | "vcptavern-editor"
   | "agent-files-editor"
   | "agent-assistant-config"
+  | "onering-manager"
+  | "agent-timeline-manager"
   | "claw-mail-manager"
   | "agent-emotion-manager"
   | "forum-assistant-config"
@@ -171,6 +173,26 @@ export const APP_ROUTE_MANIFEST: readonly AppRouteMeta[] = [
     path: "/agent-assistant-config",
     title: "Agent 通讯配置",
     icon: "diversity_3",
+    requiresAuth: true,
+    navGroup: "agentContent",
+    showInSidebar: true,
+  },
+  {
+    id: "onering-manager",
+    routeName: "OneRingManager",
+    path: "/onering-manager",
+    title: "OneRing 管理",
+    icon: "all_inclusive",
+    requiresAuth: true,
+    navGroup: "agentContent",
+    showInSidebar: true,
+  },
+  {
+    id: "agent-timeline-manager",
+    routeName: "AgentTimeLineManager",
+    path: "/agent-timeline-manager",
+    title: "Agent TimeLine",
+    icon: "timeline",
     requiresAuth: true,
     navGroup: "agentContent",
     showInSidebar: true,
