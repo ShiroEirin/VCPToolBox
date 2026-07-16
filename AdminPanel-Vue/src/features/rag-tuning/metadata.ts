@@ -321,10 +321,10 @@ export const PARAM_METADATA: Record<string, Record<string, ParamMeta>> = {
   },
   KnowledgeBaseManager: {
     geodesicRerank: {
-      label: "测地线重排(V8)",
-      summary: "复用 Spike 距离场对 KNN 候选做基于 Tag 地形的二次重排。通过 ::TagMemo+ 修饰符激活。",
-      logic: "V8 核心引擎，让被语义山峰挡住的相关记忆通过 Tag 拓扑关联浮出。新增地图可信度门控：当能量场过稀、采样覆盖不足或测地线分数没有区分度时，主动回归 KNN 保底。",
-      range: "包含 α、采样密度与低可信地图回退等 8 个子参数，见下方详细说明。",
+      label: "查询势场曲线重排 (V9.2)",
+      summary: "让候选有序 Tag 曲线采样查询诱导连续势场，并将证据分为 direct、structural、thematic 三档，以不同奖励上限修正排序。通过 ::TagMemo+ 激活。",
+      logic: "V9.2 保留候选扩池与连续场读出，但不再把批内冠军强制归一化为满分。曲线分按固定绝对区间映射，直接锚点、结构走廊和主题晕轮分别获得递减的排序权限。",
+      range: "包含候选扩池、连续场核、绝对奖励标度、证据等级上限和联合可信守卫；建议先观察 A/B 表中的证据等级与实际奖励。",
       tone: "critical",
     },
     "geodesicRerank.alpha": {
@@ -334,10 +334,17 @@ export const PARAM_METADATA: Record<string, Record<string, ParamMeta>> = {
       range: "建议区间: 0.1 ~ 0.6；当前默认由 rag_params.json 中的 KnowledgeBaseManager.geodesicRerank.alpha 决定",
       tone: "sensitive",
     },
+    "geodesicRerank.candidateKMultiplier": {
+      label: "测地候选 K 倍率",
+      summary: "仅在 TagMemo+ 开启时，将底层向量候选池扩展为最终请求 K 的指定倍数；曲线重排后仍只返回原始 K。",
+      logic: "默认 2。调到 3 可让势场读出看到更多远端候选，但会线性增加候选 Tag 链加载和连续场采样成本。它扩大已有向量召回池，不等价于独立 Tag 倒排召回。",
+      range: "建议 1 ~ 4，默认 2；1 表示不额外扩池",
+      tone: "sensitive",
+    },
     "geodesicRerank.minGeoSamples": {
-      label: "最小采样密度门槛",
-      summary: "一个 chunk 在距离场上至少需要命中多少个 Tag 才有资格参与测地线评估。低于此值退化为纯 KNN。",
-      logic: "调高：更严格，只有 Tag 密度高的 chunk 才会被测地线影响；调低：更宽松，但可能因采样不足导致估计不可靠。莱恩建议 4 作为基准。",
+      label: "证据饱和尺度",
+      summary: "控制强接触证据达到满置信度所需的大致样本尺度，不再是低于该数量就清零的硬门槛。",
+      logic: "调高会要求更多强接触才能达到满置信度；短 Tag 链仍可凭单个强锚点获得贡献。通常保持 4。",
       range: "建议区间: 2 ~ 8 (整数，默认 4)",
       tone: "sensitive",
     },
@@ -347,6 +354,139 @@ export const PARAM_METADATA: Record<string, Record<string, ParamMeta>> = {
       logic: "建议保持开启。关闭后即使 Tag 能量场稀疏、候选采样不足或测地线分数缺乏区分度，也会继续尝试测地线融合，误伤风险更高。",
       range: "0 (关闭) / 1 (开启)，默认 1",
       tone: "critical",
+    },
+    "geodesicRerank.maxFieldNodes": {
+      label: "连续场节点上限",
+      summary: "一次查询最多保留多少个高能量场节点参与向量核插值，限制候选 Tag × 场节点 × 向量维度的计算量。",
+      logic: "调高能保留更多长尾场结构，但连续场采样成本近似线性增加；调低更快，却可能截掉弱而有价值的远端节点。",
+      range: "建议 24 ~ 96，默认 48",
+      tone: "critical",
+    },
+    "geodesicRerank.fieldEnergyMassRatio": {
+      label: "场能量质量覆盖率",
+      summary: "按能量降序保留场节点，累计达到该比例后允许停止；同时受连续场节点上限约束。",
+      logic: "0.95 表示尽量覆盖 95% 查询场能量。调低更快、更聚焦峰值；调高保留更多长尾结构。",
+      range: "建议 0.85 ~ 0.99，默认 0.95",
+      tone: "sensitive",
+    },
+    "geodesicRerank.fieldSimilarityThreshold": {
+      label: "连续场语义接触阈值",
+      summary: "候选 Tag 与场节点的余弦相似度达到该值后，才允许通过局部核插值获得非精确势能。",
+      logic: "调低会扩大语义晕轮并增加误接触；调高更精确，但可能重新退化为近似离散 ID 命中。建议结合 geo_contact_tags 观察。",
+      range: "建议 0.45 ~ 0.75，默认 0.50",
+      tone: "critical",
+    },
+    "geodesicRerank.weakContactThreshold": {
+      label: "弱势场接触阈值",
+      summary: "采样势能达到该值时计为曲线接触，用于覆盖率、连续性和孤立点计算。",
+      logic: "调低可减少 no candidate curve contacted 回退，但会引入更多弱背景接触；应低于强接触阈值。",
+      range: "建议 0.02 ~ 0.10，默认 0.04",
+      tone: "sensitive",
+    },
+    "geodesicRerank.strongContactThreshold": {
+      label: "强势场接触阈值",
+      summary: "达到该势能的 Tag 被视为强证据，参与证据置信度和联合低信任守卫。",
+      logic: "调低更容易建立曲线置信度；调高只承认靠近场峰的接触。必须不低于弱接触阈值。",
+      range: "建议 0.08 ~ 0.30，默认 0.14",
+      tone: "sensitive",
+    },
+    "geodesicRerank.maxFieldNeighbors": {
+      label: "单 Tag 场邻居上限",
+      summary: "每个候选 Tag 最多聚合多少个局部高势能场邻居。",
+      logic: "调高允许多节点共同形成连续势能，但也增加语义晕轮和排序成本；默认 4 较保守。",
+      range: "建议 1 ~ 8，默认 4",
+      tone: "stable",
+    },
+    "geodesicRerank.fieldKernelExponent": {
+      label: "连续场核指数",
+      summary: "控制相似度超过接触阈值后势能上升的陡峭程度。",
+      logic: "指数越大，只有非常相近的邻居才能保留明显势能；指数越小，场扩散更平缓、更宽。",
+      range: "建议 1 ~ 4，默认 2",
+      tone: "sensitive",
+    },
+    "geodesicRerank.geoRewardFloor": {
+      label: "曲线奖励起点",
+      summary: "候选曲线分必须超过该绝对值，才开始获得排序奖励。",
+      logic: "它是跨查询固定标尺，不依赖当前批次的最高分。调高会过滤弱场响应，调低会让微弱主题接触也获得少量奖励。",
+      range: "建议 0.005 ~ 0.05，默认 0.015",
+      tone: "critical",
+    },
+    "geodesicRerank.geoRewardSaturation": {
+      label: "曲线奖励饱和点",
+      summary: "曲线分达到该绝对值时，绝对强度映射视为饱和；最终仍受证据等级奖励上限约束。",
+      logic: "调低会让中等曲线更快吃满等级预算；调高则要求更强的场响应。必须高于奖励起点。",
+      range: "建议 0.10 ~ 0.50，默认 0.25",
+      tone: "critical",
+    },
+    "geodesicRerank.directBonusCap": {
+      label: "直接证据奖励上限",
+      summary: "候选精确接触查询 seed/core 场节点时，最多可增加的绝对排序分。",
+      logic: "直接事实背景拥有最高排序权限。调高会加强实体与核心锚点召回，但过高仍可能造成大幅跨位。",
+      range: "建议 0.08 ~ 0.25，默认 0.18",
+      tone: "critical",
+    },
+    "geodesicRerank.structuralBonusCap": {
+      label: "结构证据奖励上限",
+      summary: "传播节点精确接触或形成多点连续走廊时，最多可增加的绝对排序分。",
+      logic: "用于叙事结构和关联链，默认应低于直接证据、明显高于纯主题晕轮。",
+      range: "建议 0.04 ~ 0.16，默认 0.10",
+      tone: "critical",
+    },
+    "geodesicRerank.thematicBonusCap": {
+      label: "主题证据奖励上限",
+      summary: "仅依赖连续核插值得到的泛主题共振，最多可增加的绝对排序分。",
+      logic: "这是防止“有关联但不是直接背景”的候选越权冲顶的关键上限。建议保持明显低于结构证据。",
+      range: "建议 0.01 ~ 0.06，默认 0.035",
+      tone: "critical",
+    },
+    "geodesicRerank.structuralContinuityMin": {
+      label: "结构走廊连续性门槛",
+      summary: "没有精确命中时，多个强接触要达到该连续性才能升级为 structural 证据。",
+      logic: "调高更严格，减少离散主题点伪装成结构；调低更容易承认松散叙事同构。",
+      range: "建议 0.03 ~ 0.25，默认 0.08",
+      tone: "sensitive",
+    },
+    "geodesicRerank.thematicMinPotential": {
+      label: "主题奖励最低峰值",
+      summary: "纯 thematic 候选的最大势能至少达到该值，才具备奖励资格。",
+      logic: "低于门槛仍保留曲线诊断，但不改变 KNN 排序。",
+      range: "建议 0.04 ~ 0.20，默认 0.08",
+      tone: "sensitive",
+    },
+    "geodesicRerank.thematicMaxIsolatedRatio": {
+      label: "主题奖励最大孤立率",
+      summary: "纯 thematic 接触的孤立程度不得超过该比例，否则不给排序奖励。",
+      logic: "调低要求更连续的主题走廊；调高允许单点语义共振参与排序。",
+      range: "建议 0.35 ~ 0.80，默认 0.65",
+      tone: "sensitive",
+    },
+    "geodesicRerank.directSemanticMinPotential": {
+      label: "语义直锚最低势能",
+      summary: "非精确 Tag 若直接采样到查询 seed/core，势能达到该值后才计入语义直锚。",
+      logic: "用于识别 GPT-5.6/Grok 4.5 等 ID 不同但实体语义直接对应的候选。该值同时不低于强接触阈值，避免弱主题近义词升级。",
+      range: "建议 0.12 ~ 0.30，默认 0.16",
+      tone: "critical",
+    },
+    "geodesicRerank.directSemanticSaturation": {
+      label: "语义直锚饱和势能",
+      summary: "多个语义直锚的平均势能达到该值时，直锚奖励强度视为饱和。",
+      logic: "调低会让强实体近义锚更快获得完整直接证据预算；必须高于语义直锚最低势能。",
+      range: "建议 0.25 ~ 0.60，默认 0.35",
+      tone: "critical",
+    },
+    "geodesicRerank.directSemanticMinContacts": {
+      label: "语义直锚最少接触数",
+      summary: "至少需要多少个候选 Tag 高强度采样到查询 seed/core，才能从 thematic 升级为 direct。",
+      logic: "默认 2，防止单个宽泛近义词越权。实体丰富的直接背景通常会同时命中多个查询锚点。",
+      range: "建议 2 ~ 4，默认 2",
+      tone: "critical",
+    },
+    "geodesicRerank.directConfidenceFloor": {
+      label: "语义直锚置信度下限",
+      summary: "通过多直锚判定后，排序奖励使用的最低置信度。",
+      logic: "文件级 Tag 较多时 weighted coverage 会稀释直接实体证据；该下限避免多个强直锚仍因长 Tag 链而奖励过弱。",
+      range: "建议 0.20 ~ 0.55，默认 0.35",
+      tone: "sensitive",
     },
     "geodesicRerank.minFieldTags": {
       label: "地图最小激活 Tag 数",
@@ -363,24 +503,31 @@ export const PARAM_METADATA: Record<string, Record<string, ParamMeta>> = {
       tone: "sensitive",
     },
     "geodesicRerank.minGeoCoverageRatio": {
-      label: "候选最小测地线覆盖率",
-      summary: "参与测地线贡献的候选占总候选的最低比例。低于此值说明候选池对当前地图采样不足。",
-      logic: "调高会更保守，只有较多候选都能被 Tag 地图解释时才启用测地线；调低则更愿意使用局部地图。",
-      range: "建议 0.10 ~ 0.50，默认 0.20",
-      tone: "sensitive",
+      label: "联合守卫覆盖率阈值",
+      summary: "有曲线贡献的候选比例低于此值时进入联合低信任检查，不再单独触发整批回退。",
+      logic: "只有覆盖率低、最大曲线分低且强证据不足三者同时成立才回归 KNN。稀有但精准的窄场不会仅因覆盖低被拒绝。",
+      range: "建议 0.02 ~ 0.20，默认 0.05",
+      tone: "stable",
     },
     "geodesicRerank.minMaxGeoScore": {
-      label: "最大地形能量下限",
-      summary: "候选中最高测地线原始分数必须达到该值，否则认为整张地图对候选池太弱。",
-      logic: "用于防止所有候选都只吃到极弱能量还被归一化放大。一般保持很小即可。",
-      range: "建议 0.001 ~ 0.10，默认 0.01",
+      label: "曲线奖励可信基准",
+      summary: "最高曲线分低于该值时会按比例收缩整批正向奖励，并参与联合低信任守卫。",
+      logic: "它不再单独导致回退。用于防止极弱曲线分经过归一化后获得过大奖励，一般保持很小即可。",
+      range: "建议 0.001 ~ 0.05，默认 0.01",
       tone: "stable",
     },
     "geodesicRerank.minGeoScoreSpread": {
-      label: "地形分数最小区分度",
-      summary: "候选测地线分数的最大值与最小正值差距。差距过小说明地图没有排序分辨率。",
-      logic: "调高会要求测地线更有区分能力才参与融合；调低会允许平坦地形也参与重排。",
-      range: "建议 0.005 ~ 0.20，默认 0.03",
+      label: "联合守卫最小区分度",
+      summary: "候选曲线分最大值与最小正值的差距；只在最大分和强证据也不足时参与回退。",
+      logic: "平坦但强度充足的场不再因 spread 单条件被拒绝。调高会更保守，调低则允许细微排序信号。",
+      range: "建议 0.005 ~ 0.10，默认 0.03",
+      tone: "stable",
+    },
+    "geodesicRerank.minStrongEvidence": {
+      label: "联合守卫强证据下限",
+      summary: "候选池累计强接触与折算精确命中的最低证据量，用于覆盖率、最大分和区分度的联合回退判断。",
+      logic: "调高会更保守；默认 1 表示只要存在一个可靠强接触，就不会因低覆盖或低 spread 单独回退。",
+      range: "建议 0.5 ~ 3，默认 1",
       tone: "sensitive",
     },
     orderedCooccurrence: {
@@ -672,9 +819,58 @@ export function getSubParamRange(subKey: string, subVal?: unknown): {
     return { min: 1, max: 20, step: 1 };
   }
 
-  // 🆕 V8: 测地线混合权重
+  // V9.1 查询势场曲线重排显式范围。
   if (key === "geodesicrerank.alpha") {
     return { min: 0, max: 1, step: 0.01 };
+  }
+
+  if (key === "geodesicrerank.candidatekmultiplier") {
+    return { min: 1, max: 6, step: 0.25 };
+  }
+
+  if (key === "geodesicrerank.maxfieldnodes") {
+    return { min: 4, max: 128, step: 1 };
+  }
+
+  if (key === "geodesicrerank.maxfieldneighbors") {
+    return { min: 1, max: 12, step: 1 };
+  }
+
+  if (key === "geodesicrerank.fieldkernelExponent".toLowerCase()) {
+    return { min: 0.25, max: 6, step: 0.05 };
+  }
+
+  if (
+    key === "geodesicrerank.fieldenergymassratio"
+    || key === "geodesicrerank.fieldsimilaritythreshold"
+    || key === "geodesicrerank.weakcontactthreshold"
+    || key === "geodesicrerank.strongcontactthreshold"
+  ) {
+    return { min: 0, max: 1, step: 0.01 };
+  }
+
+  if (key === "geodesicrerank.minstrongevidence") {
+    return { min: 0, max: 10, step: 0.25 };
+  }
+
+  if (
+    key === "geodesicrerank.georewardfloor"
+    || key === "geodesicrerank.georewardsaturation"
+    || key === "geodesicrerank.directbonuscap"
+    || key === "geodesicrerank.structuralbonuscap"
+    || key === "geodesicrerank.thematicbonuscap"
+    || key === "geodesicrerank.structuralcontinuitymin"
+    || key === "geodesicrerank.thematicminpotential"
+    || key === "geodesicrerank.thematicmaxisolatedratio"
+    || key === "geodesicrerank.directsemanticminpotential"
+    || key === "geodesicrerank.directsemanticsaturation"
+    || key === "geodesicrerank.directconfidencefloor"
+  ) {
+    return { min: 0, max: 1, step: 0.005 };
+  }
+
+  if (key === "geodesicrerank.directsemanticmincontacts") {
+    return { min: 1, max: 8, step: 1 };
   }
 
   // 🛡️ V8: 测地线低可信地图回退开关

@@ -18,7 +18,16 @@ class TagMemoEngine {
         this.epa = null;
         this.residualPyramid = null;
         this.tagCooccurrenceMatrix = null;
+        // V9.1 单轨锚增益与数据库无关的原始残差比例。
         this.tagIntrinsicResiduals = null;
+        this.tagRawResidualRatios = null;
+        this.intrinsicResidualArtifact = null;
+
+        // TagMemo V9.1: RCU 风格单轨活动资产包。
+        // 发布后对象及其 Map 只读；重建始终创建全新的 Map，再一次性替换此指针。
+        this._activeArtifactBundle = null;
+        this._artifactBundlesByVersion = Object.freeze({});
+        this._artifactBundleGeneration = 0;
 
         // 🌟 TagMemo V7.1: 矩阵计算防抖系统
         // V8.3: 阈值触发改为“唯一新增 tag”Set 累积，而不是 file_tags 关系数累加。
@@ -30,6 +39,7 @@ class TagMemoEngine {
         this._isMatrixRebuilding = false;
         // 🌟 V8: 最近一次距离场缓存（仅保留兼容/诊断用途；搜索链路必须使用查询级 energyField，避免 await 并发污染）
         this.lastEnergyField = null;
+        this.lastEnergyFieldProvenance = null;
 
         // 🌟 V8.2-γ: 持久化的 Tag 对语义距离 (内存 Map: "a:b" → cosineSim)
         // 边视角的语义邻近度，与 tagIntrinsicResiduals (节点视角) 正交。
@@ -43,6 +53,7 @@ class TagMemoEngine {
         this._derivedTaskRunning = false;
         this._derivedTaskTimer = null;
         this._derivedTaskSeq = 0;
+        this._shutdownRequested = false;
     }
 
     _envFlag(name, defaultValue = false) {
@@ -143,6 +154,320 @@ class TagMemoEngine {
         return rows;
     }
 
+    _deepFreezeConfig(value) {
+        if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+        for (const child of Object.values(value)) this._deepFreezeConfig(child);
+        return Object.freeze(value);
+    }
+
+    _computeGraphGeneration(matrix, pairwiseView, residualMap) {
+        let edgeCount = 0;
+        let edgeMass = 0;
+        if (matrix instanceof Map) {
+            for (const edges of matrix.values()) {
+                if (!(edges instanceof Map)) continue;
+                edgeCount += edges.size;
+                for (const weight of edges.values()) edgeMass += Number(weight) || 0;
+            }
+        }
+        return [
+            `sources:${matrix instanceof Map ? matrix.size : 0}`,
+            `edges:${edgeCount}`,
+            `edgeMass:${edgeMass.toFixed(8)}`,
+            `pairs:${pairwiseView instanceof Map ? pairwiseView.size : 0}`,
+            `residuals:${residualMap instanceof Map ? residualMap.size : 0}`
+        ].join('|');
+    }
+
+    _validateArtifactBundle(bundle) {
+        if (!bundle || bundle.version !== 'v9') {
+            throw new Error('ArtifactBundle must be the V9.1 production asset');
+        }
+        if (!bundle.artifactSig || !bundle.graphGeneration) {
+            throw new Error('ArtifactBundle is missing signature/generation');
+        }
+        if (!(bundle.anchorGainMap instanceof Map) || !(bundle.propagationKernel instanceof Map)) {
+            throw new Error('ArtifactBundle is missing anchor-gain/kernel Map');
+        }
+        if (!(bundle.rawResidualRatioMap instanceof Map)) {
+            throw new Error('ArtifactBundle is missing raw residual ratio Map');
+        }
+        if (!(bundle.inboundMassMap instanceof Map) || !(bundle.hubSpecificityBaseMap instanceof Map)) {
+            throw new Error('ArtifactBundle is missing precomputed inbound/hub-specificity Map');
+        }
+        if (!(bundle.pairwiseView instanceof Map)) {
+            throw new Error('ArtifactBundle is missing pairwise Map');
+        }
+        for (const [source, edges] of bundle.propagationKernel.entries()) {
+            if (!(edges instanceof Map)) {
+                throw new Error(`ArtifactBundle kernel source ${source} is not a Map`);
+            }
+            for (const [target, weight] of edges.entries()) {
+                if (!Number.isFinite(Number(weight)) || Number(weight) < 0) {
+                    throw new Error(`ArtifactBundle kernel has invalid edge ${source}->${target}`);
+                }
+            }
+        }
+        return true;
+    }
+
+    _preparePublishedBundle(staging, generation, publishedAt) {
+        this._validateArtifactBundle(staging);
+        return Object.freeze({
+            ...staging,
+            effectiveConfig: this._deepFreezeConfig(staging.effectiveConfig),
+            potentialFieldConfig: this._deepFreezeConfig(staging.potentialFieldConfig),
+            publishedAt,
+            generation
+        });
+    }
+
+    _publishArtifactBundle(staging) {
+        const generation = ++this._artifactBundleGeneration;
+        const publishedAt = Date.now();
+        const bundle = this._preparePublishedBundle(staging, generation, publishedAt);
+
+        // 单次引用替换发布完整 V9.1 资产，杜绝 residual/kernel/config 分别换代。
+        const registry = Object.freeze({
+            generation,
+            publishedAt,
+            activeVersion: 'v9',
+            bundles: Object.freeze({ v9: bundle })
+        });
+        this._artifactBundlesByVersion = registry;
+        this._activeArtifactBundle = bundle;
+        this.tagCooccurrenceMatrix = bundle.propagationKernel;
+        this.tagIntrinsicResiduals = bundle.anchorGainMap;
+        this.tagRawResidualRatios = bundle.rawResidualRatioMap;
+        this.tagPairSimilarities = bundle.pairwiseView;
+
+        console.log(
+            `[TagMemoEngine] 📦 V9.1 production artifact published atomically: ` +
+            `generation=${generation}, artifact=${bundle.artifactSig}`
+        );
+        return registry;
+    }
+
+    getArtifactBundleSnapshot(version = null) {
+        const requestedVersion = version || 'v9';
+        if (requestedVersion !== 'v9') return null;
+        return this._artifactBundlesByVersion?.bundles?.v9 || this._activeArtifactBundle;
+    }
+
+    resolveArtifactBundle(options = {}) {
+        const requestedVersion = options.version || 'v9';
+        if (requestedVersion !== 'v9') {
+            const error = new Error(
+                `TagMemo artifact version "${requestedVersion}" was retired; V9.1 is the only supported production version`
+            );
+            error.code = 'TAGMEMO_VERSION_RETIRED';
+            error.requestedVersion = requestedVersion;
+            throw error;
+        }
+
+        const bundle = this.getArtifactBundleSnapshot('v9');
+        if (!bundle) {
+            const error = new Error('V9.1 TagMemo artifact bundle is unavailable');
+            error.code = 'TAGMEMO_ARTIFACT_UNAVAILABLE';
+            throw error;
+        }
+
+        return {
+            bundle,
+            requestedVersion: 'v9',
+            effectiveVersion: 'v9',
+            fallbackUsed: false,
+            fallbackReason: null,
+            explicitVersion: options.version !== undefined && options.version !== null,
+            strictVersion: true
+        };
+    }
+
+    _buildV9PropagationKernel(factMatrix, residualMap, v9Config = {}) {
+        const kernel = new Map();
+        const wormholeEdges = new Set();
+        const outboundMass = Math.max(0.01, Math.min(1, Number(v9Config.outboundMass ?? 0.95)));
+        // V9.1 仍让虫洞在总预算内竞争；association reserve 不产生额外能量。
+        const associationReserveMass = Math.min(
+            Math.max(0, Number(v9Config.associationReserveMass ?? 0.05)),
+            outboundMass
+        );
+        const evidenceCompression = Math.max(0.01, Number(v9Config.evidenceCompression ?? 1));
+        const wormholeGain = Math.max(1, Number(v9Config.wormholeGain ?? 1.35));
+        const tensionThreshold = Math.max(0, Number(v9Config.tensionThreshold ?? 1));
+        const hubPenaltyExponent = Math.max(0, Math.min(1, Number(v9Config.hubPenaltyExponent ?? 0.3)));
+        const hubPenaltyFloor = Math.max(0.05, Math.min(1, Number(v9Config.hubPenaltyFloor ?? 0.55)));
+        const hubPenaltyCeiling = Math.max(1, Math.min(4, Number(v9Config.hubPenaltyCeiling ?? 1.8)));
+        const hubSmoothingRatio = Math.max(0.01, Math.min(2, Number(v9Config.hubSmoothingRatio ?? 0.1)));
+
+        // 第一遍：保留每条边的未归一化证据，并统计目标节点吸收的全图入流。
+        // 入流统计必须发生在行归一化之前，否则无法识别“从许多来源吸积少量质量”的通用枢纽。
+        const rawRows = new Map();
+        const targetInflows = new Map();
+        for (const [sourceId, edges] of factMatrix.entries()) {
+            if (!(edges instanceof Map) || edges.size === 0) continue;
+            const rawEdges = [];
+            for (const [targetId, compatWeight] of edges.entries()) {
+                const evidence = Math.log1p(Math.max(0, Number(compatWeight) || 0) * evidenceCompression);
+                const residual = residualMap?.get(targetId) ?? 1;
+                const isWormhole = evidence * residual >= tensionThreshold;
+                const rawConductance = evidence * (isWormhole ? wormholeGain : 1);
+                if (!Number.isFinite(rawConductance) || rawConductance <= 0) continue;
+                rawEdges.push([targetId, rawConductance, isWormhole]);
+                targetInflows.set(targetId, (targetInflows.get(targetId) || 0) + rawConductance);
+            }
+            if (rawEdges.length > 0) rawRows.set(sourceId, rawEdges);
+        }
+
+        const positiveInflows = [...targetInflows.values()]
+            .filter(value => Number.isFinite(value) && value > 0)
+            .sort((a, b) => a - b);
+        const medianInflow = positiveInflows.length > 0
+            ? positiveInflows[Math.floor(positiveInflows.length / 2)]
+            : 1;
+        const smoothing = Math.max(1e-9, medianInflow * hubSmoothingRatio);
+
+        // 第二遍：按“相对中位入流”温和抑制枢纽，再统一归一化到固定行预算。
+        // 夹逼防止罕见节点被无限奖励，也防止真实核心概念被过度压低。
+        for (const [sourceId, rawEdges] of rawRows.entries()) {
+            const adjustedEdges = [];
+            let adjustedSum = 0;
+            let wormholeAdjustedSum = 0;
+
+            for (const [targetId, rawConductance, isWormhole] of rawEdges) {
+                const relativeInflow = (targetInflows.get(targetId) || 0) / (medianInflow + smoothing);
+                const rawPenalty = hubPenaltyExponent > 0
+                    ? Math.pow(Math.max(1e-9, relativeInflow), -hubPenaltyExponent)
+                    : 1;
+                const hubPenalty = Math.max(hubPenaltyFloor, Math.min(hubPenaltyCeiling, rawPenalty));
+                const adjustedConductance = rawConductance * hubPenalty;
+                if (!Number.isFinite(adjustedConductance) || adjustedConductance <= 0) continue;
+                adjustedEdges.push([targetId, adjustedConductance, isWormhole]);
+                adjustedSum += adjustedConductance;
+                if (isWormhole) wormholeAdjustedSum += adjustedConductance;
+            }
+
+            if (adjustedSum <= 0) continue;
+            const normalizedEdges = new Map();
+            const reserveMass = wormholeAdjustedSum > 0 ? associationReserveMass : 0;
+            const mainMass = outboundMass - reserveMass;
+            for (const [targetId, adjustedConductance, isWormhole] of adjustedEdges) {
+                const mainConductance = mainMass * adjustedConductance / adjustedSum;
+                const associationConductance = isWormhole && wormholeAdjustedSum > 0
+                    ? reserveMass * adjustedConductance / wormholeAdjustedSum
+                    : 0;
+                normalizedEdges.set(targetId, mainConductance + associationConductance);
+                if (isWormhole) wormholeEdges.add(`${sourceId}:${targetId}`);
+            }
+            kernel.set(sourceId, normalizedEdges);
+        }
+
+        return {
+            kernel,
+            wormholeEdges,
+            outboundMass,
+            kernelDiagnostics: Object.freeze({
+                algorithmVersion: 'v9.1-hub-aware',
+                medianInflow,
+                targetCount: targetInflows.size,
+                hubPenaltyExponent,
+                hubPenaltyFloor,
+                hubPenaltyCeiling
+            })
+        };
+    }
+
+    _buildInboundArtifacts(kernel) {
+        const inboundMassMap = new Map();
+        let maxInbound = 0;
+
+        if (kernel instanceof Map) {
+            for (const edges of kernel.values()) {
+                if (!(edges instanceof Map)) continue;
+                for (const [rawTargetId, rawConductance] of edges.entries()) {
+                    const targetId = Number(rawTargetId);
+                    const conductance = Math.max(0, Number(rawConductance) || 0);
+                    if (!Number.isFinite(targetId) || conductance <= 0) continue;
+                    const next = (inboundMassMap.get(targetId) || 0) + conductance;
+                    inboundMassMap.set(targetId, next);
+                    if (next > maxInbound) maxInbound = next;
+                }
+            }
+        }
+
+        // 不带 publicHubFloor 的基础 specificity，只依赖图资产；查询热参数可在 O(1) 读取后施加 floor。
+        const hubSpecificityBaseMap = new Map();
+        for (const [tagId, inboundMass] of inboundMassMap.entries()) {
+            const ratio = maxInbound > 0 ? Math.max(0, Math.min(1, inboundMass / maxInbound)) : 0;
+            hubSpecificityBaseMap.set(tagId, 1 - Math.sqrt(ratio));
+        }
+
+        return { inboundMassMap, maxInbound, hubSpecificityBaseMap };
+    }
+
+    _stageAndPublishV91Bundle(factMatrix) {
+        const pairwiseView = this.tagPairSimilarities instanceof Map
+            ? this.tagPairSimilarities
+            : new Map();
+        const anchorGainMap = this.tagIntrinsicResiduals instanceof Map
+            ? this.tagIntrinsicResiduals
+            : new Map();
+        const rawResidualRatioMap = this.tagRawResidualRatios instanceof Map
+            ? this.tagRawResidualRatios
+            : new Map();
+        const kbConfig = JSON.parse(JSON.stringify(
+            this.ragParams?.KnowledgeBaseManager || {}
+        ));
+        const v9Config = kbConfig.v9 || {};
+        const potentialFieldConfig = kbConfig.potentialFieldRerank
+            || kbConfig.geodesicRerank
+            || {};
+        const build = this._buildV9PropagationKernel(factMatrix, anchorGainMap, v9Config);
+        const inboundArtifacts = this._buildInboundArtifacts(build.kernel);
+        const graphGeneration = this._computeGraphGeneration(
+            build.kernel,
+            pairwiseView,
+            anchorGainMap
+        );
+        const effectiveConfig = JSON.parse(JSON.stringify(kbConfig));
+        const artifactSig = crypto.createHash('sha256')
+            .update(JSON.stringify({
+                version: 'v9',
+                algorithmVersion: 'v9.1',
+                modelSig: this.modelSig,
+                graphGeneration,
+                residualArtifact: this.intrinsicResidualArtifact?.artifactSig || 'legacy',
+                effectiveConfig
+            }))
+            .digest('hex')
+            .slice(0, 24);
+
+        return this._publishArtifactBundle({
+            version: 'v9',
+            artifactSig,
+            graphGeneration,
+            modelSig: this.modelSig,
+            effectiveConfig,
+            // 明确物理量语义；residualMap 仅保留为旧调用兼容别名。
+            anchorGainMap,
+            rawResidualRatioMap,
+            residualMap: anchorGainMap,
+            propagationKernel: build.kernel,
+            inboundMassMap: inboundArtifacts.inboundMassMap,
+            maxInbound: inboundArtifacts.maxInbound,
+            hubSpecificityBaseMap: inboundArtifacts.hubSpecificityBaseMap,
+            pairwiseView,
+            potentialFieldConfig: JSON.parse(JSON.stringify(potentialFieldConfig)),
+            residualArtifact: this.intrinsicResidualArtifact
+                ? Object.freeze({ ...this.intrinsicResidualArtifact })
+                : null,
+            wormholeEdges: build.wormholeEdges,
+            outboundMass: build.outboundMass,
+            kernelDiagnostics: build.kernelDiagnostics,
+            algorithmVersion: 'v9.1'
+        });
+    }
+
     async initialize() {
         // 初始化 EPA 和残差金字塔模块
         this.epa = new EPAModule(this.db, {
@@ -193,20 +518,194 @@ class TagMemoEngine {
         }
     }
 
+    _propagateSpikes(initialTags, queryMatrix, queryResiduals, queryWormholeEdges, srConfig = {}) {
+        const MAX_SAFE_HOPS = srConfig.maxSafeHops ?? 4;
+        const BASE_MOMENTUM = srConfig.baseMomentum ?? 2.0;
+        const FIRING_THRESHOLD = srConfig.firingThreshold ?? 0.10;
+        const BASE_DECAY = srConfig.baseDecay ?? 0.25;
+        const WORMHOLE_DECAY = srConfig.wormholeDecay ?? 0.70;
+        const TENSION_THRESHOLD = srConfig.tensionThreshold ?? 1.0;
+        const MAX_NEIGHBORS_PER_NODE = srConfig.maxNeighborsPerNode ?? 20;
+
+        // V9.1 使用有前驱记忆的传播状态，精确识别 i→j→i 的立即回流。
+        // 状态数量设硬上限，防止边状态在高分支图中指数增长。
+        const returnFlowFactor = Math.max(0, Math.min(1, Number(srConfig.v91ReturnFlowFactor ?? 0.15)));
+        const firGamma = Math.max(0.05, Math.min(0.95, Number(srConfig.v91FirGamma ?? 0.6)));
+        const maxPropagationStates = Math.max(100, Math.floor(Number(srConfig.v91MaxPropagationStates ?? 2000)));
+        const firWeights = [];
+        let firWeightSum = 0;
+        for (let hop = 0; hop <= MAX_SAFE_HOPS; hop++) {
+            const weight = Math.pow(firGamma, hop);
+            firWeights.push(weight);
+            firWeightSum += weight;
+        }
+        if (firWeightSum > 0) {
+            for (let hop = 0; hop < firWeights.length; hop++) firWeights[hop] /= firWeightSum;
+        }
+
+        // key 为 prev:node，V9.1 使用前驱边状态抑制立即回流。
+        // provenance 记录查询场节点来自显式核心、原始种子还是第几跳涌现，
+        // 让读出层区分“直接事实证据”和“传播后的主题共振”。
+        let activeSpikes = new Map();
+        const accumulatedEnergy = new Map();
+        const fieldProvenance = new Map();
+        for (const tag of initialTags) {
+            const key = `seed:${tag.id}`;
+            const sourceType = tag.isCore ? 'core' : 'seed';
+            activeSpikes.set(key, {
+                nodeId: tag.id,
+                previousNodeId: null,
+                energy: tag.adjustedWeight,
+                momentum: BASE_MOMENTUM,
+                sourceType,
+                hop: 0
+            });
+            accumulatedEnergy.set(tag.id, tag.adjustedWeight * firWeights[0]);
+            fieldProvenance.set(Number(tag.id), {
+                sourceType,
+                hop: 0,
+                seedId: Number(tag.id)
+            });
+        }
+
+        const diagnostics = {
+            algorithmVersion: 'v9.1-soft-nonbacktracking-fir',
+            returnFlowSuppressedMass: 0,
+            stateTruncations: 0,
+            hopInFlightMass: []
+        };
+
+        for (let hop = 0; hop < MAX_SAFE_HOPS; hop++) {
+            const nextSpikes = new Map();
+            let propagated = false;
+            let inFlightMass = 0;
+
+            for (const spike of activeSpikes.values()) {
+                if (spike.energy < FIRING_THRESHOLD || spike.momentum < 0) continue;
+                const synapses = queryMatrix.get(spike.nodeId);
+                if (!synapses) continue;
+
+                const sortedSynapses = Array.from(synapses.entries())
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, MAX_NEIGHBORS_PER_NODE);
+
+                for (const [neighborId, coocWeight] of sortedSynapses) {
+                    const neighborResidual = queryResiduals?.get(neighborId) ?? 1.0;
+                    const tension = coocWeight * neighborResidual;
+                    const isWormhole = queryWormholeEdges instanceof Set
+                        ? queryWormholeEdges.has(`${spike.nodeId}:${neighborId}`)
+                        : tension >= TENSION_THRESHOLD;
+                    const decayFactor = isWormhole ? WORMHOLE_DECAY : BASE_DECAY;
+                    const momentumCost = isWormhole ? 0 : 1.0;
+                    const isImmediateReturn = spike.previousNodeId !== null
+                        && neighborId === spike.previousNodeId;
+                    const flowFactor = isImmediateReturn ? returnFlowFactor : 1;
+                    const unpenalizedCurrent = spike.energy * coocWeight * decayFactor;
+                    const injectedCurrent = unpenalizedCurrent * flowFactor;
+                    if (isImmediateReturn) {
+                        diagnostics.returnFlowSuppressedMass += unpenalizedCurrent - injectedCurrent;
+                    }
+                    if (injectedCurrent < 0.01) continue;
+
+                    const nextMomentum = spike.momentum - momentumCost;
+                    if (nextMomentum < 0 && !isWormhole) continue;
+
+                    const stateKey = `${spike.nodeId}:${neighborId}`;
+                    const existing = nextSpikes.get(stateKey);
+                    if (existing) {
+                        existing.energy += injectedCurrent;
+                        existing.momentum = Math.max(existing.momentum, nextMomentum);
+                        if (spike.hop + 1 < existing.hop) {
+                            existing.hop = spike.hop + 1;
+                            existing.sourceType = spike.sourceType;
+                        }
+                    } else {
+                        nextSpikes.set(stateKey, {
+                            nodeId: neighborId,
+                            previousNodeId: spike.nodeId,
+                            energy: injectedCurrent,
+                            momentum: nextMomentum,
+                            sourceType: spike.sourceType,
+                            hop: spike.hop + 1
+                        });
+                    }
+                }
+            }
+
+            if (nextSpikes.size > maxPropagationStates) {
+                const retained = [...nextSpikes.entries()]
+                    .sort((a, b) => b[1].energy - a[1].energy)
+                    .slice(0, maxPropagationStates);
+                diagnostics.stateTruncations += nextSpikes.size - retained.length;
+                nextSpikes.clear();
+                for (const [key, value] of retained) nextSpikes.set(key, value);
+            }
+
+            const nodeEnergyThisHop = new Map();
+            for (const newSpike of nextSpikes.values()) {
+                nodeEnergyThisHop.set(
+                    newSpike.nodeId,
+                    (nodeEnergyThisHop.get(newSpike.nodeId) || 0) + newSpike.energy
+                );
+                const numericNodeId = Number(newSpike.nodeId);
+                const previousProvenance = fieldProvenance.get(numericNodeId);
+                if (!previousProvenance || newSpike.hop < previousProvenance.hop) {
+                    fieldProvenance.set(numericNodeId, {
+                        sourceType: 'emergent',
+                        originType: newSpike.sourceType,
+                        hop: newSpike.hop
+                    });
+                }
+                inFlightMass += newSpike.energy;
+            }
+            diagnostics.hopInFlightMass.push(inFlightMass);
+
+            const fieldWeight = firWeights[hop + 1];
+            for (const [nodeId, energy] of nodeEnergyThisHop.entries()) {
+                accumulatedEnergy.set(
+                    nodeId,
+                    (accumulatedEnergy.get(nodeId) || 0) + energy * fieldWeight
+                );
+                if (energy > 0.01) propagated = true;
+            }
+
+            if (!propagated) break;
+            activeSpikes = nextSpikes;
+        }
+
+        return { accumulatedEnergy, fieldProvenance, diagnostics };
+    }
+
     /**
      * 🌟 TagMemo 浪潮 + EPA + Residual Pyramid + Worldview Gating + LIF Spike Propagation (V6)
      *
      * 返回值中的 energyField 是查询级距离场。不要依赖 lastEnergyField 参与搜索重排：
      * lastEnergyField 只是兼容/诊断缓存，在全局搜索 await 间隙会被其他并发查询覆盖。
      */
-    applyTagBoost(vector, baseTagBoost, coreTags = [], coreBoostFactor = 1.33) {
+    applyTagBoost(vector, baseTagBoost, coreTags = [], coreBoostFactor = 1.33, options = {}) {
         const debug = false;
         const originalFloat32 = vector instanceof Float32Array ? vector : new Float32Array(vector);
         const dim = originalFloat32.length;
+        // 请求开始时只解析一次活动指针；后续后台发布不会改变本次查询持有的对象。
+        const resolution = options.artifactBundle
+            ? {
+                bundle: options.artifactBundle,
+                requestedVersion: options.version || options.artifactBundle.version,
+                effectiveVersion: options.artifactBundle.version,
+                fallbackUsed: false,
+                fallbackReason: null
+            }
+            : this.resolveArtifactBundle(options);
+        const artifactBundle = resolution.bundle;
+        const queryMatrix = artifactBundle?.propagationKernel || this.tagCooccurrenceMatrix;
+        const queryResiduals = artifactBundle?.anchorGainMap || artifactBundle?.residualMap || this.tagIntrinsicResiduals;
+        const queryVersion = 'v9';
+        const queryWormholeEdges = artifactBundle?.wormholeEdges;
 
         try {
             // 🌟 V8: 清空旧距离场，防止跨调用数据泄露
             this.lastEnergyField = null;
+            this.lastEnergyFieldProvenance = null;
 
             // [1] EPA 分析 (逻辑深度与共振) - 识别"你在哪个世界"
             const epaResult = this.epa.project(originalFloat32);
@@ -218,7 +717,8 @@ class TagMemoEngine {
             const features = pyramid.features;
 
             // [3] 动态调整策略
-            const config = this.ragParams?.KnowledgeBaseManager || {};
+            // 配置与核/残差属于同一不可变资产包，禁止在请求中途读取热更新后的 ragParams。
+            const config = artifactBundle?.effectiveConfig || this.ragParams?.KnowledgeBaseManager || {};
             const logicDepth = epaResult.logicDepth;        // 0~1, 高=逻辑聚焦
             const entropyPenalty = epaResult.entropy;       // 0~1, 高=信息散乱
             const resonanceBoost = Math.log(1 + resonance.resonance);
@@ -324,87 +824,25 @@ class TagMemoEngine {
 
             // [4.5] 仿脑认知扩散 (Spike Propagation / Lif-Router)
             // 🔧 重构 V7：动量与残差张力驱动的虫洞跃迁 (Wormhole Routing)
-            if (allTags.length > 0 && this.tagCooccurrenceMatrix) {
+            let propagationDiagnostics = null;
+            if (allTags.length > 0 && queryMatrix) {
                 const srConfig = config.spikeRouting || {};
-                const MAX_SAFE_HOPS = srConfig.maxSafeHops ?? 4;
-                const BASE_MOMENTUM = srConfig.baseMomentum ?? 2.0;
-                const FIRING_THRESHOLD = srConfig.firingThreshold ?? 0.10;
-                const BASE_DECAY = srConfig.baseDecay ?? 0.25;
-                const WORMHOLE_DECAY = srConfig.wormholeDecay ?? 0.70;
-                const TENSION_THRESHOLD = srConfig.tensionThreshold ?? 1.0;
                 const MAX_EMERGENT_NODES = srConfig.maxEmergentNodes ?? 50;
-                const MAX_NEIGHBORS_PER_NODE = srConfig.maxNeighborsPerNode ?? 20;
 
-                // 1. 初始注入：带有“动量(TTL)”的脉冲发射器
-                let activeSpikes = new Map();      // id -> { energy, momentum }
-                const accumulatedEnergy = new Map(); // id -> energySum 全局能量累加器
-                
-                allTags.forEach(t => {
-                    activeSpikes.set(t.id, { energy: t.adjustedWeight, momentum: BASE_MOMENTUM });
-                    accumulatedEnergy.set(t.id, t.adjustedWeight);
-                });
+                const propagation = this._propagateSpikes(
+                    allTags,
+                    queryMatrix,
+                    queryResiduals,
+                    queryWormholeEdges,
+                    srConfig
+                );
+                const accumulatedEnergy = propagation.accumulatedEnergy;
+                const fieldProvenance = propagation.fieldProvenance;
+                propagationDiagnostics = propagation.diagnostics;
 
-                // 2. 迭代扩散网络 (基于动量与张力驱动)
-                for (let hop = 0; hop < MAX_SAFE_HOPS; hop++) {
-                    const nextSpikes = new Map();
-                    let propagated = false;
-
-                    for (const [nodeId, spike] of activeSpikes.entries()) {
-                        if (spike.energy < FIRING_THRESHOLD || spike.momentum < 0) continue;
-
-                        const synapses = this.tagCooccurrenceMatrix.get(nodeId);
-                        if (!synapses) continue;
-
-                        const sortedSynapses = Array.from(synapses.entries())
-                            .sort((a, b) => b[1] - a[1])
-                            .slice(0, MAX_NEIGHBORS_PER_NODE);
-
-                        for (const [neighborId, coocWeight] of sortedSynapses) {
-                            // TagMemo V7: Wormhole Routing
-                            // 张力 = 目标节点的残差新颖度 * 边权重
-                            const neighborResidual = this.tagIntrinsicResiduals?.get(neighborId) ?? 1.0;
-                            const tension = coocWeight * neighborResidual;
-                            
-                            // 虫洞判定
-                            const isWormhole = tension >= TENSION_THRESHOLD;
-                            
-                            // 能量衰减与动量消耗策略
-                            const decayFactor = isWormhole ? WORMHOLE_DECAY : BASE_DECAY;
-                            const momentumCost = isWormhole ? 0 : 1.0; // 穿越虫洞豁免动量消耗
-
-                            const injectedCurrent = spike.energy * coocWeight * decayFactor;
-                            
-                            if (injectedCurrent < 0.01) continue;
-                            
-                            const nextMomentum = spike.momentum - momentumCost;
-                            if (nextMomentum < 0 && !isWormhole) continue; // 动量耗尽且非虫洞，则停止传播
-
-                            // 聚合到达同一节点的脉冲
-                            const existing = nextSpikes.get(neighborId);
-                            if (existing) {
-                                existing.energy += injectedCurrent;
-                                existing.momentum = Math.max(existing.momentum, nextMomentum); // 继承最优动量
-                            } else {
-                                nextSpikes.set(neighborId, { energy: injectedCurrent, momentum: nextMomentum });
-                            }
-                        }
-                    }
-
-                    // 3. 将新一波激发的电流叠加到全局激活总图中
-                    for (const [nid, newSpike] of nextSpikes.entries()) {
-                        const currentSum = accumulatedEnergy.get(nid) || 0;
-                        accumulatedEnergy.set(nid, currentSum + newSpike.energy);
-                        if (newSpike.energy > 0.01) propagated = true;
-                    }
-
-                    if (!propagated) break;
-                    
-                    // 下一跳的火种
-                    activeSpikes = nextSpikes;
-                }
-
-                // 🌟 V8: 缓存距离场（供 geodesicRerank 使用）
+                // 查询级缓存仅用于返回；并发搜索必须继续显式传递 energyField 与 provenance。
                 this.lastEnergyField = accumulatedEnergy;
+                this.lastEnergyFieldProvenance = fieldProvenance;
 
                 // 4. 将涌现出来的高电位节点，重新塞回到 allTags
                 const allTagsMap = new Map();
@@ -515,7 +953,15 @@ class TagMemoEngine {
             injectGhosts(hardGhostObjects, true);
             injectGhosts(softGhostObjects, false);
 
-            if (allTags.length === 0) return { vector: originalFloat32, info: null, energyField: this.lastEnergyField };
+            if (allTags.length === 0) {
+                return {
+                    vector: originalFloat32,
+                    info: null,
+                    energyField: this.lastEnergyField,
+                    energyFieldProvenance: this.lastEnergyFieldProvenance,
+                    artifactBundle
+                };
+            }
 
             // [5] 批量获取向量与名称（chunked IN，避免 SQLite 参数数量上限）
             const dbTagIds = allTags.filter(t => t.id > 0).map(t => t.id);
@@ -598,7 +1044,13 @@ class TagMemoEngine {
                 mag = Math.sqrt(mag);
                 if (mag > 1e-9) for (let d = 0; d < dim; d++) contextVec[d] /= mag;
             } else {
-                return { vector: originalFloat32, info: null, energyField: this.lastEnergyField };
+                return {
+                    vector: originalFloat32,
+                    info: null,
+                    energyField: this.lastEnergyField,
+                    energyFieldProvenance: this.lastEnergyFieldProvenance,
+                    artifactBundle
+                };
             }
 
             // [6] 最终融合 (clamp 防止外推：boost > 1 时原向量会被反向叠加)
@@ -616,6 +1068,9 @@ class TagMemoEngine {
             return {
                 vector: fused,
                 energyField: this.lastEnergyField,
+                energyFieldProvenance: this.lastEnergyFieldProvenance,
+                // 调用方必须把生成 energyField 的同一代资产传给读出层。
+                artifactBundle,
                 info: {
                     // 🌟 标记核心 Tag 召回情况 (安全映射)
                     coreTagsMatched: deduplicatedTags.filter(t => t.isCore && t.name).map(t => t.name),
@@ -639,14 +1094,29 @@ class TagMemoEngine {
                         }).map(t => t.name).filter(Boolean);
                     })(),
                     boostFactor: effectiveTagBoost,
+                    requestedVersion: resolution.requestedVersion,
+                    effectiveVersion: resolution.effectiveVersion,
+                    versionFallbackUsed: resolution.fallbackUsed,
+                    versionFallbackReason: resolution.fallbackReason,
+                    artifactSig: artifactBundle?.artifactSig || null,
+                    graphGeneration: artifactBundle?.graphGeneration || null,
+                    artifactGeneration: artifactBundle?.generation || null,
                     epa: { logicDepth, entropy: entropyPenalty, resonance: resonance.resonance },
-                    pyramid: { coverage: features.coverage, novelty: features.novelty, depth: features.depth }
+                    pyramid: { coverage: features.coverage, novelty: features.novelty, depth: features.depth },
+                    propagation: propagationDiagnostics,
+                    algorithmVersion: artifactBundle?.algorithmVersion || queryVersion
                 }
             };
 
         } catch (e) {
             console.error('[TagMemoEngine] TagMemo V6 CRITICAL FAIL:', e);
-            return { vector: originalFloat32, info: null, energyField: null };
+            return {
+                vector: originalFloat32,
+                info: null,
+                energyField: null,
+                energyFieldProvenance: null,
+                artifactBundle
+            };
         }
     }
 
@@ -669,232 +1139,1102 @@ class TagMemoEngine {
     }
 
     /**
-     * 🌟 V8: 测地线重排 (Geodesic Rerank)
-     * 复用 Spike Propagation 已计算的 accumulatedEnergy 距离场，
-     * 对 KNN 候选 chunk 做基于"地形贴地距离"的二次重排。
+     * V9.1 查询诱导式曲线测地重排。
      *
-     * 四层防御链：
-     *   L-1: Tag 能量场/候选采样可信度不足 → 整体退化（返回原数组）
-     *   L0: lastEnergyField 为空 → 整体退化（返回原数组）
-     *   L1: chunk 的 hitCount < minGeoSamples → 该 chunk 的 geoScore = 0
-     *   L2: 所有 chunk 的 maxGeo = 0 → 归一化跳过，全部走纯 KNN
+     * 不再把“候选 Tag ID 与离散 energyField 的交集数量”当作距离。每篇候选文件的
+     * 有序 Tag 链是一条待检验曲线；查询能量场通过 Tag 向量局部核插值到这条曲线上，
+     * 再联合候选自身的 Tag 质量、连续性、拓扑导通、语义弧长与 Chunk 闭合度计算分数。
      *
-     * @param {Array<{id: BigInt|Number, score: Number}>} candidates - 原始 KNN 搜索结果
-     * @param {object} options - 配置项
-     * @param {number} [options.alpha] - 测地线分数混合权重 (0=纯KNN, 1=纯测地线)，默认读取 rag_params.json: KnowledgeBaseManager.geodesicRerank.alpha
-     * @param {number} [options.minGeoSamples] - 最小采样密度门槛，默认读取 rag_params.json: KnowledgeBaseManager.geodesicRerank.minGeoSamples
+     * 守卫原则：
+     *   - 查询场本身不可信时整批回退；
+     *   - 候选既无精确接触也无可信连续场接触时不获得测地贡献；
+     *   - 全批无贡献或缺乏区分度时保持原始顺序；
+     *   - 无贡献候选保留原 KNN 分数，不被测地混合无差别压低。
+     *
+     * @param {Array<{id: BigInt|Number, score: Number}>} candidates 原始候选
+     * @param {object} options 查询级 energyField 与热配置
      * @returns {Array} 重排后的完整数组（不截断）
      */
     geodesicRerank(candidates, options = {}) {
         let energyField = options.energyField;
+        let requestedFieldProvenance = options.energyFieldProvenance;
         if (!energyField && options.allowLastEnergyFieldFallback === true) {
             energyField = this.lastEnergyField;
-            console.warn('[TagMemoEngine] ⚠️ geodesicRerank using lastEnergyField fallback by explicit opt-in; prefer query-scoped options.energyField to avoid cross-query contamination.');
+            requestedFieldProvenance = this.lastEnergyFieldProvenance;
+            console.warn('[TagMemoEngine] ⚠️ geodesicRerank using lastEnergyField fallback by explicit opt-in; prefer query-scoped options.energyField.');
         }
-
-        // L0: 距离场为空 → 整体退化
-        if (!energyField || energyField.size === 0) {
-            return candidates;
-        }
-        if (!candidates || candidates.length === 0) {
+        if (!(energyField instanceof Map) || energyField.size === 0 || !Array.isArray(candidates) || candidates.length === 0) {
             return candidates;
         }
 
-        const geoConfig = this.ragParams?.KnowledgeBaseManager?.geodesicRerank || {};
-        const rawAlpha = options.alpha ?? geoConfig.alpha;
-        const rawMinGeoSamples = options.minGeoSamples ?? geoConfig.minGeoSamples;
-
-        if (!Number.isFinite(Number(rawAlpha)) || !Number.isFinite(Number(rawMinGeoSamples))) {
+        const geoConfig = options.config
+            || this.ragParams?.KnowledgeBaseManager?.potentialFieldRerank
+            || this.ragParams?.KnowledgeBaseManager?.geodesicRerank
+            || {};
+        const alpha = Number(options.alpha ?? geoConfig.alpha);
+        const minGeoSamples = Number(options.minGeoSamples ?? geoConfig.minGeoSamples);
+        if (!Number.isFinite(alpha) || !Number.isFinite(minGeoSamples)) {
             console.warn('[TagMemoEngine] geodesicRerank missing valid alpha/minGeoSamples config; falling back to original order.');
             return candidates;
         }
 
-        const alpha = Math.max(0, Math.min(1, Number(rawAlpha)));
-        const minGeoSamples = Math.max(1, Math.floor(Number(rawMinGeoSamples)));
-
-        const fallbackToKnnOnLowTrust = geoConfig.fallbackToKnnOnLowTrust !== false
+        const mixAlpha = Math.max(0, Math.min(1, alpha));
+        const sampleScale = Math.max(1, Math.floor(minGeoSamples));
+        const fallbackEnabled = geoConfig.fallbackToKnnOnLowTrust !== false
             && geoConfig.fallbackToKnnOnLowTrust !== 0;
-        const minFieldTags = Math.max(1, Math.floor(Number(geoConfig.minFieldTags ?? minGeoSamples)));
+        const minFieldTags = Math.max(1, Math.floor(Number(geoConfig.minFieldTags ?? sampleScale)));
         const minFieldEntropy = Math.max(0, Math.min(1, Number(geoConfig.minFieldEntropy ?? 0.12)));
-        const minGeoCoverageRatio = Math.max(0, Math.min(1, Number(geoConfig.minGeoCoverageRatio ?? 0.2)));
-        const minMaxGeoScore = Math.max(0, Number(geoConfig.minMaxGeoScore ?? 0.01));
-        const minGeoScoreSpread = Math.max(0, Number(geoConfig.minGeoScoreSpread ?? 0.03));
+        const minCandidateCoverage = Math.max(0, Math.min(1, Number(geoConfig.minGeoCoverageRatio ?? 0.2)));
+        const minGeoScore = Math.max(0, Number(geoConfig.minMaxGeoScore ?? 0.01));
+        const minGeoSpread = Math.max(0, Number(geoConfig.minGeoScoreSpread ?? 0.03));
 
-        const fallbackToKnn = (reason, extra = {}) => {
-            if (fallbackToKnnOnLowTrust) {
-                const extraText = Object.entries(extra)
+        const maxFieldNodes = Math.max(minFieldTags, Math.floor(Number(geoConfig.maxFieldNodes ?? 48)));
+        const fieldEnergyMassRatio = Math.max(0.5, Math.min(1, Number(geoConfig.fieldEnergyMassRatio ?? 0.95)));
+        const minStrongEvidence = Math.max(0, Number(geoConfig.minStrongEvidence ?? 1));
+
+        // 连续场与曲线参数均提供内置默认值，现有配置无需迁移即可运行。
+        // 接触阈值必须先初始化，后续语义直锚门槛会以 strongContactThreshold 为安全下限。
+        const fieldSimilarityThreshold = Math.max(-1, Math.min(1, Number(geoConfig.fieldSimilarityThreshold ?? 0.50)));
+        const strongContactThreshold = Math.max(0, Math.min(1, Number(geoConfig.strongContactThreshold ?? 0.16)));
+        const weakContactThreshold = Math.max(0, Math.min(strongContactThreshold, Number(geoConfig.weakContactThreshold ?? 0.06)));
+        const fieldKernelExponent = Math.max(0.25, Number(geoConfig.fieldKernelExponent ?? 2.0));
+        const maxFieldNeighbors = Math.max(1, Math.floor(Number(geoConfig.maxFieldNeighbors ?? 4)));
+        const positionDecay = Math.max(0, Number(geoConfig.candidatePositionDecay ?? 0.035));
+        const publicHubFloor = Math.max(0.05, Math.min(1, Number(geoConfig.publicHubFloor ?? 0.35)));
+        const minClosureSimilarity = Math.max(-1, Math.min(1, Number(geoConfig.minClosureSimilarity ?? 0.20)));
+
+        // V9.2 读出校准：分数使用绝对标度映射，并按证据等级限制最大排序权限。
+        const geoRewardFloor = Math.max(0, Math.min(1, Number(geoConfig.geoRewardFloor ?? 0.015)));
+        const geoRewardSaturation = Math.max(
+            geoRewardFloor + 1e-6,
+            Math.min(1, Number(geoConfig.geoRewardSaturation ?? 0.25))
+        );
+        const directBonusCap = Math.max(0, Math.min(1, Number(geoConfig.directBonusCap ?? 0.18)));
+        const structuralBonusCap = Math.max(0, Math.min(directBonusCap, Number(geoConfig.structuralBonusCap ?? 0.10)));
+        const thematicBonusCap = Math.max(0, Math.min(structuralBonusCap, Number(geoConfig.thematicBonusCap ?? 0.035)));
+        const structuralContinuityMin = Math.max(0, Math.min(1, Number(geoConfig.structuralContinuityMin ?? 0.08)));
+        const thematicMinPotential = Math.max(0, Math.min(1, Number(geoConfig.thematicMinPotential ?? 0.08)));
+        const thematicMaxIsolatedRatio = Math.max(0, Math.min(1, Number(geoConfig.thematicMaxIsolatedRatio ?? 0.65)));
+        // 非精确 ID 也可以构成直接事实锚点，但必须同时满足“来自查询 seed/core、
+        // 势能足够高、至少多个独立接触”，避免单个宽泛近义词把主题共振抬成直接证据。
+        const directSemanticMinPotential = Math.max(
+            strongContactThreshold,
+            Math.min(1, Number(geoConfig.directSemanticMinPotential ?? 0.16))
+        );
+        const directSemanticSaturation = Math.max(
+            directSemanticMinPotential + 1e-6,
+            Math.min(1, Number(geoConfig.directSemanticSaturation ?? 0.35))
+        );
+        const directSemanticMinContacts = Math.max(
+            1,
+            Math.floor(Number(geoConfig.directSemanticMinContacts ?? 2))
+        );
+        const directConfidenceFloor = Math.max(
+            0,
+            Math.min(1, Number(geoConfig.directConfidenceFloor ?? 0.35))
+        );
+
+        // 四层几何生产辅助：旧测地奖励仍是主轨，辅助轨只提供有界“奖励地板补差”。
+        // 默认关闭并由热配置显式启用；C4/Lift 只能验证闭合，不能独立创造奖励。
+        const geometryAuxConfig = geoConfig.geometryAuxiliary || {};
+        const geometryAuxEnabled = geometryAuxConfig.enabled === true
+            || geometryAuxConfig.enabled === 1;
+        const geometryAuxMaxBonus = Math.max(
+            0,
+            Math.min(0.05, Number(geometryAuxConfig.maxAuxBonus ?? 0.018))
+        );
+        const geometryAuxDirectCap = Math.max(
+            0,
+            Math.min(geometryAuxMaxBonus, Number(geometryAuxConfig.directFloorCap ?? geometryAuxMaxBonus))
+        );
+        const geometryAuxStructuralCap = Math.max(
+            0,
+            Math.min(geometryAuxDirectCap, Number(geometryAuxConfig.structuralFloorCap ?? 0.012))
+        );
+        const geometryAuxThematicCap = Math.max(
+            0,
+            Math.min(geometryAuxStructuralCap, Number(geometryAuxConfig.thematicFloorCap ?? 0.006))
+        );
+        const geometryAuxMinFused = Math.max(
+            0,
+            Math.min(1, Number(geometryAuxConfig.minFusedScore ?? 0.12))
+        );
+        const geometryAuxMinClosure = Math.max(
+            0,
+            Math.min(1, Number(geometryAuxConfig.minClosureScore ?? 0.55))
+        );
+        const geometryAuxMinClassEvidence = Math.max(
+            0,
+            Math.min(1, Number(geometryAuxConfig.minClassEvidence ?? 0.10))
+        );
+        const geometryAuxExponent = Math.max(
+            0.5,
+            Math.min(4, Number(geometryAuxConfig.floorExponent ?? 1.5))
+        );
+
+        // Exact Identity Anchor：仅保护高势能 query seed/core 精确接触。
+        // 还必须同时满足 Tag 特异性与 Tag→chunk 闭合，公共 Tag 和 emergent 节点不能触发。
+        const identityConfig = geometryAuxConfig.identityAnchor || {};
+        const identityAnchorEnabled = geometryAuxEnabled
+            && (identityConfig.enabled === true || identityConfig.enabled === 1);
+        const identityAnchorMinPotential = Math.max(
+            0,
+            Math.min(1, Number(identityConfig.minPotential ?? 0.80))
+        );
+        const identityAnchorMinSpecificity = Math.max(
+            0,
+            Math.min(1, Number(identityConfig.minSpecificity ?? 0.55))
+        );
+        const identityAnchorMinClosure = Math.max(
+            0,
+            Math.min(1, Number(identityConfig.minTagChunkClosure ?? 0.35))
+        );
+        const identityAnchorMinStrength = Math.max(
+            0,
+            Math.min(1, Number(identityConfig.minStrength ?? 0.55))
+        );
+        const identityAnchorFloorCap = Math.max(
+            0,
+            Math.min(
+                Math.min(directBonusCap, geometryAuxMaxBonus),
+                Number(identityConfig.floorCap ?? 0.018)
+            )
+        );
+        const identityAnchorExponent = Math.max(
+            0.5,
+            Math.min(4, Number(identityConfig.floorExponent ?? 1.25))
+        );
+
+        const energyFieldProvenance = requestedFieldProvenance instanceof Map
+            ? requestedFieldProvenance
+            : new Map();
+
+        // V9.2 四层几何影子读出：只产生诊断，不参与当前排序。
+        // EPA/Pyramid 描述查询希望从 direct/structural/thematic 三层读取多少信息；
+        // 后续候选观测再描述每层实际提供了多少证据。
+        const queryGeometryState = options.queryGeometryState || options.queryState || {};
+        const queryEpa = queryGeometryState.epa || {};
+        const queryPyramid = queryGeometryState.pyramid || {};
+        const finite01 = (value, fallback = 0.5) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : fallback;
+        };
+        const logicDepth = finite01(queryEpa.logicDepth);
+        const queryEntropy = finite01(queryEpa.entropy);
+        const queryResonance = finite01(queryEpa.resonance, 0);
+        const pyramidCoverage = finite01(queryPyramid.coverage);
+        const pyramidNovelty = finite01(queryPyramid.novelty);
+        const pyramidDepth = finite01(queryPyramid.depth);
+        const rawGeometryWeights = {
+            direct: 0.45 + 0.35 * logicDepth + 0.20 * pyramidCoverage,
+            structural: 0.35 + 0.30 * pyramidDepth + 0.25 * pyramidNovelty + 0.10 * queryResonance,
+            thematic: 0.20 + 0.35 * queryEntropy + 0.30 * queryResonance + 0.15 * (1 - logicDepth)
+        };
+        const geometryWeightSum = Object.values(rawGeometryWeights).reduce((sum, value) => sum + value, 0) || 1;
+        const queryGeometryWeights = Object.freeze({
+            direct: rawGeometryWeights.direct / geometryWeightSum,
+            structural: rawGeometryWeights.structural / geometryWeightSum,
+            thematic: rawGeometryWeights.thematic / geometryWeightSum
+        });
+        const originalQueryVector = options.originalQueryVector
+            ? (options.originalQueryVector instanceof Float32Array
+                ? options.originalQueryVector
+                : new Float32Array(options.originalQueryVector))
+            : null;
+        const enhancedQueryVector = options.enhancedQueryVector
+            ? (options.enhancedQueryVector instanceof Float32Array
+                ? options.enhancedQueryVector
+                : new Float32Array(options.enhancedQueryVector))
+            : null;
+
+        const fallback = (reason, extra = {}) => {
+            if (fallbackEnabled) {
+                const details = Object.entries(extra)
                     .map(([key, value]) => `${key}=${typeof value === 'number' ? value.toFixed(4) : value}`)
                     .join(', ');
-                console.log(`[TagMemo-V8 Geodesic] 🛡️ Low-trust map fallback to KNN: ${reason}${extraText ? ` (${extraText})` : ''}`);
-                return candidates;
+                console.warn(`[TagMemo-V9.1 GeodesicCurve] 🛡️ Fallback to original order: ${reason}${details ? ` (${details})` : ''}.`);
             }
-            return null;
+            return candidates;
         };
 
-        // L-1a: 查询级 Tag 能量场太稀疏或熵过低时，视为地图可信度不足。
-        if (fallbackToKnnOnLowTrust) {
-            if (energyField.size < minFieldTags) {
-                return fallbackToKnn('energy field has too few activated tags', {
-                    fieldTags: energyField.size,
-                    minFieldTags
-                });
-            }
-
-            let fieldEnergySum = 0;
-            const fieldEnergies = [];
-            for (const value of energyField.values()) {
-                const energy = Math.max(0, Number(value) || 0);
-                if (energy <= 0) continue;
-                fieldEnergies.push(energy);
-                fieldEnergySum += energy;
-            }
-
-            if (fieldEnergySum <= 0 || fieldEnergies.length < minFieldTags) {
-                return fallbackToKnn('energy field has insufficient positive mass', {
-                    positiveTags: fieldEnergies.length,
-                    minFieldTags
-                });
-            }
-
-            let entropy = 0;
-            for (const energy of fieldEnergies) {
-                const p = energy / fieldEnergySum;
-                entropy -= p * Math.log(p);
-            }
-            const normalizedEntropy = fieldEnergies.length > 1
-                ? entropy / Math.log(fieldEnergies.length)
-                : 0;
-
-            if (normalizedEntropy < minFieldEntropy) {
-                return fallbackToKnn('energy field entropy too low', {
-                    entropy: normalizedEntropy,
-                    minFieldEntropy
-                });
-            }
+        const normalizedField = new Map();
+        for (const [rawId, rawEnergy] of energyField.entries()) {
+            const id = Number(rawId);
+            const energy = Math.max(0, Number(rawEnergy) || 0);
+            if (!Number.isFinite(id) || id <= 0 || energy <= 0) continue;
+            // 不同 key 类型归一化后可能合并，保留较强的查询场值。
+            normalizedField.set(id, Math.max(normalizedField.get(id) || 0, energy));
         }
 
+        const positiveField = [];
+        let fieldEnergySum = 0;
+        let maxFieldEnergy = 0;
+        for (const [id, energy] of normalizedField.entries()) {
+            positiveField.push({ id, energy });
+            fieldEnergySum += energy;
+            if (energy > maxFieldEnergy) maxFieldEnergy = energy;
+        }
+        if (positiveField.length < minFieldTags || fieldEnergySum <= 0 || maxFieldEnergy <= 0) {
+            return fallback('query energy field has insufficient positive support', {
+                positiveTags: positiveField.length,
+                minFieldTags
+            });
+        }
+
+        let entropy = 0;
+        for (const item of positiveField) {
+            const p = item.energy / fieldEnergySum;
+            entropy -= p * Math.log(p);
+            item.normalizedEnergy = item.energy / maxFieldEnergy;
+        }
+        positiveField.sort((a, b) => b.energy - a.energy);
+        const normalizedEntropy = positiveField.length > 1 ? entropy / Math.log(positiveField.length) : 0;
+        if (fallbackEnabled && normalizedEntropy < minFieldEntropy) {
+            return fallback('query energy field entropy too low', { entropy: normalizedEntropy, minFieldEntropy });
+        }
+
+        // 先按累计能量质量截断，再查询向量，避免完整场节点进入 SQLite 与高维余弦热循环。
+        const retainedField = [];
+        let retainedEnergy = 0;
+        for (const item of positiveField) {
+            if (
+                retainedField.length >= maxFieldNodes
+                || (retainedField.length >= minFieldTags && retainedEnergy / fieldEnergySum >= fieldEnergyMassRatio)
+            ) {
+                break;
+            }
+            retainedField.push(item);
+            retainedEnergy += item.energy;
+        }
+
+        const cosine = (left, right) => {
+            if (!left || !right || left.length !== right.length) return 0;
+            let dot = 0;
+            let normLeft = 0;
+            let normRight = 0;
+            for (let i = 0; i < left.length; i++) {
+                dot += left[i] * right[i];
+                normLeft += left[i] * left[i];
+                normRight += right[i] * right[i];
+            }
+            return normLeft > 1e-12 && normRight > 1e-12
+                ? dot / (Math.sqrt(normLeft) * Math.sqrt(normRight))
+                : 0;
+        };
+        const clamp01 = value => Math.max(0, Math.min(1, Number(value) || 0));
+
         try {
-            // Step 1: 批量查询 chunk_id → file_id 映射（chunked IN，避免 SQLite 参数数量上限）
-            const chunkIds = candidates.map(c => Number(c.id)).filter(Number.isFinite);
-            const chunkFileRows = this._queryByChunks('SELECT id, file_id FROM chunks WHERE id', chunkIds);
-            const chunkFileMap = new Map(chunkFileRows.map(r => [r.id, r.file_id]));
+            const dimension = Number(this.config?.dimension) || 0;
+            if (dimension <= 0) return fallback('invalid vector dimension', { dimension });
 
-            // Step 2: 收集所有需要查询的 file_ids，批量查询 file_id → tag_id[] 映射
-            const uniqueFileIds = [...new Set(chunkFileRows.map(r => r.file_id))];
-            const fileTagsMap = new Map(); // file_id → [tag_id, ...]
+            // 一次性取得候选 Chunk、文件归属和终点向量。
+            const chunkIds = [...new Set(candidates.map(item => Number(item.id)).filter(Number.isFinite))];
+            const chunkRows = this._queryByChunks(
+                'SELECT id, file_id, vector FROM chunks WHERE id',
+                chunkIds
+            );
+            const chunkById = new Map(chunkRows.map(row => [Number(row.id), row]));
+            const fileIds = [...new Set(chunkRows.map(row => Number(row.file_id)).filter(Number.isFinite))];
 
-            if (uniqueFileIds.length > 0) {
-                const fileTagRows = this._queryByChunks(
-                    'SELECT file_id, tag_id FROM file_tags WHERE file_id',
-                    uniqueFileIds
+            // position 是候选曲线的方向；旧 position=0 数据按 tag_id 稳定排序但降低方向可信度。
+            const fileTagRows = fileIds.length > 0
+                ? this._queryByChunks(
+                    'SELECT file_id, tag_id, position FROM file_tags WHERE file_id',
+                    fileIds,
+                    ' ORDER BY file_id, position ASC, tag_id ASC'
+                )
+                : [];
+            const chainsByFile = new Map();
+            const candidateTagIds = new Set();
+            for (const row of fileTagRows) {
+                const fileId = Number(row.file_id);
+                const tagId = Number(row.tag_id);
+                if (!Number.isFinite(fileId) || !Number.isFinite(tagId)) continue;
+                if (!chainsByFile.has(fileId)) chainsByFile.set(fileId, []);
+                chainsByFile.get(fileId).push({
+                    id: tagId,
+                    position: Math.max(0, Number(row.position) || 0)
+                });
+                candidateTagIds.add(tagId);
+            }
+
+            const allTagIds = [...new Set([
+                ...retainedField.map(item => item.id),
+                ...candidateTagIds
+            ])];
+            const tagRows = this._queryByChunks(
+                'SELECT id, name, vector FROM tags WHERE id',
+                allTagIds
+            );
+            const tagById = new Map();
+            for (const row of tagRows) {
+                const vector = this._decodeVectorBlob(row.vector, dimension, `geodesic-tag:${row.id}`);
+                if (vector) tagById.set(Number(row.id), { id: Number(row.id), name: row.name, vector });
+            }
+
+            const fieldNodes = retainedField
+                .map(item => {
+                    const tag = tagById.get(item.id);
+                    const provenance = energyFieldProvenance.get(Number(item.id)) || {
+                        sourceType: 'unknown',
+                        hop: null
+                    };
+                    return tag ? { ...item, ...tag, provenance } : null;
+                })
+                .filter(Boolean);
+            if (fieldNodes.length < minFieldTags) {
+                return fallback('query field vectors unavailable', {
+                    fieldVectors: fieldNodes.length,
+                    minFieldTags
+                });
+            }
+
+            // 必须读取生成 energyField 的同一代资产；入流与 hub 基值已在发布阶段预计算。
+            const bundle = options.artifactBundle
+                || this.getArtifactBundleSnapshot(options.version || 'v9');
+            const kernel = bundle?.propagationKernel || this.tagCooccurrenceMatrix || new Map();
+            const anchorGainMap = bundle?.anchorGainMap || bundle?.residualMap || this.tagIntrinsicResiduals || new Map();
+            const hubSpecificityBaseMap = bundle?.hubSpecificityBaseMap || new Map();
+
+            const hubSpecificity = tagId => {
+                const base = hubSpecificityBaseMap.get(Number(tagId));
+                return Number.isFinite(base) ? Math.max(publicHubFloor, clamp01(base)) : 1;
+            };
+
+            // 对任意候选 Tag 向量采样查询连续势场。相同 Tag 跨文件只计算一次。
+            const sampledPotentialCache = new Map();
+            const samplePotential = tag => {
+                const cached = sampledPotentialCache.get(tag.id);
+                if (cached) return cached;
+
+                const exact = normalizedField.get(Number(tag.id));
+                const exactPotential = exact === undefined
+                    ? 0
+                    : clamp01((Number(exact) || 0) / maxFieldEnergy);
+
+                const neighbors = [];
+                for (const fieldNode of fieldNodes) {
+                    if (fieldNode.id === tag.id) continue;
+                    const similarity = cosine(tag.vector, fieldNode.vector);
+                    if (similarity < fieldSimilarityThreshold) continue;
+                    const local = (similarity - fieldSimilarityThreshold)
+                        / Math.max(1e-6, 1 - fieldSimilarityThreshold);
+                    neighbors.push({
+                        similarity,
+                        fieldNode,
+                        potential: fieldNode.normalizedEnergy
+                            * Math.pow(clamp01(local), fieldKernelExponent)
+                            * hubSpecificity(fieldNode.id)
+                    });
+                }
+                neighbors.sort((a, b) => b.potential - a.potential);
+                const selected = neighbors.slice(0, maxFieldNeighbors);
+                const interpolated = selected.length > 0
+                    ? selected.reduce((sum, item) => sum + item.potential, 0)
+                        / Math.sqrt(selected.length)
+                    : 0;
+                const exactProvenance = energyFieldProvenance.get(Number(tag.id)) || null;
+                const nearestFieldNode = selected[0]?.fieldNode || null;
+
+                const result = {
+                    potential: clamp01(Math.max(exactPotential, interpolated)),
+                    exact: exactPotential > 0,
+                    exactSourceType: exactProvenance?.sourceType || null,
+                    exactHop: Number.isFinite(exactProvenance?.hop) ? exactProvenance.hop : null,
+                    nearestSimilarity: selected[0]?.similarity || 0,
+                    nearestSourceType: nearestFieldNode?.provenance?.sourceType || null,
+                    nearestHop: Number.isFinite(nearestFieldNode?.provenance?.hop)
+                        ? nearestFieldNode.provenance.hop
+                        : null
+                };
+                sampledPotentialCache.set(tag.id, result);
+                return result;
+            };
+
+            const geoData = candidates.map((candidate, originalIndex) => {
+                const chunkId = Number(candidate.id);
+                const chunkRow = chunkById.get(chunkId);
+                const chain = chunkRow ? (chainsByFile.get(Number(chunkRow.file_id)) || []) : [];
+                const chunkVector = chunkRow
+                    ? this._decodeVectorBlob(chunkRow.vector, dimension, `geodesic-chunk:${chunkId}`)
+                    : null;
+
+                if (!chunkRow || !chunkVector || chain.length === 0) {
+                    return {
+                        candidate,
+                        originalIndex,
+                        geoScore: 0,
+                        confidence: 0,
+                        reason: 'missing-chunk-vector-or-tag-chain'
+                    };
+                }
+
+                const samples = [];
+                let totalCandidateMass = 0;
+                let contactedMass = 0;
+                let weightedPotential = 0;
+                let exactHits = 0;
+                let directExactHits = 0;
+                let directExactMaxPotential = 0;
+                let directExactBestSpecificity = 0;
+                let directExactBestClosure = 0;
+                let identityAnchorStrength = 0;
+                let emergentExactHits = 0;
+                let directSemanticHits = 0;
+                let directSemanticPotentialSum = 0;
+                let directSemanticMaxPotential = 0;
+                let strongHits = 0;
+                let weakHits = 0;
+                let maxPotential = 0;
+
+                for (let index = 0; index < chain.length; index++) {
+                    const chainNode = chain[index];
+                    const tag = tagById.get(chainNode.id);
+                    if (!tag) continue;
+
+                    const closure = clamp01(
+                        (cosine(tag.vector, chunkVector) - minClosureSimilarity)
+                        / Math.max(1e-6, 1 - minClosureSimilarity)
+                    );
+                    const anchorGain = Math.max(0.5, Math.min(2, Number(anchorGainMap?.get(tag.id)) || 1));
+                    const positional = Math.exp(-positionDecay * Math.max(0, chainNode.position - 1));
+                    const specificity = hubSpecificity(tag.id);
+                    const candidateMass = Math.max(0.02, closure * anchorGain * positional * specificity);
+                    const fieldSample = samplePotential(tag);
+                    const contacted = fieldSample.potential >= weakContactThreshold;
+
+                    totalCandidateMass += candidateMass;
+                    if (contacted) {
+                        contactedMass += candidateMass;
+                        weightedPotential += candidateMass * fieldSample.potential;
+                        weakHits++;
+                    }
+                    if (fieldSample.potential >= strongContactThreshold) strongHits++;
+                    if (fieldSample.exact) {
+                        exactHits++;
+                        if (fieldSample.exactSourceType === 'core' || fieldSample.exactSourceType === 'seed') {
+                            directExactHits++;
+                            directExactMaxPotential = Math.max(
+                                directExactMaxPotential,
+                                fieldSample.potential
+                            );
+                            const exactIdentityStrength = clamp01(
+                                fieldSample.potential
+                                * specificity
+                                * Math.sqrt(Math.max(0, closure))
+                            );
+                            if (exactIdentityStrength > identityAnchorStrength) {
+                                identityAnchorStrength = exactIdentityStrength;
+                                directExactBestSpecificity = specificity;
+                                directExactBestClosure = closure;
+                            }
+                        } else {
+                            emergentExactHits++;
+                        }
+                    }
+                    const semanticSourceIsDirect = !fieldSample.exact
+                        && (
+                            fieldSample.nearestSourceType === 'core'
+                            || fieldSample.nearestSourceType === 'seed'
+                        )
+                        && fieldSample.potential >= directSemanticMinPotential;
+                    if (semanticSourceIsDirect) {
+                        directSemanticHits++;
+                        directSemanticPotentialSum += fieldSample.potential;
+                        directSemanticMaxPotential = Math.max(
+                            directSemanticMaxPotential,
+                            fieldSample.potential
+                        );
+                    }
+                    if (fieldSample.potential > maxPotential) maxPotential = fieldSample.potential;
+
+                    samples.push({
+                        id: tag.id,
+                        name: tag.name,
+                        vector: tag.vector,
+                        position: chainNode.position || index + 1,
+                        candidateMass,
+                        closure,
+                        potential: fieldSample.potential,
+                        exact: fieldSample.exact,
+                        exactSourceType: fieldSample.exactSourceType,
+                        exactHop: fieldSample.exactHop,
+                        nearestSimilarity: fieldSample.nearestSimilarity,
+                        nearestSourceType: fieldSample.nearestSourceType,
+                        nearestHop: fieldSample.nearestHop
+                    });
+                }
+
+                if (samples.length === 0 || totalCandidateMass <= 0 || weakHits === 0) {
+                    // 节点场守卫不应抹掉第四层观测：即使 D/S/T 暂无可信接触，
+                    // 仍记录原查询→候选、增强查询→候选及 V9.1 向量提升，供跨层诊断。
+                    const originalQueryClosure = originalQueryVector
+                        ? clamp01((cosine(originalQueryVector, chunkVector) + 1) / 2)
+                        : 0;
+                    const enhancedQueryClosure = enhancedQueryVector
+                        ? clamp01((cosine(enhancedQueryVector, chunkVector) + 1) / 2)
+                        : 0;
+                    const vectorLift = originalQueryVector && enhancedQueryVector
+                        ? enhancedQueryClosure - originalQueryClosure
+                        : 0;
+                    const vectorLiftConsistency = clamp01(0.5 + vectorLift * 5);
+                    const closureScore = clamp01(
+                        0.35 * originalQueryClosure
+                        + 0.45 * enhancedQueryClosure
+                        + 0.20 * vectorLiftConsistency
+                    );
+                    return {
+                        candidate,
+                        originalIndex,
+                        geoScore: 0,
+                        confidence: 0,
+                        reason: 'no-trusted-field-contact',
+                        sampleCount: samples.length,
+                        exactHits,
+                        directExactHits,
+                        directExactMaxPotential,
+                        directExactBestSpecificity,
+                        directExactBestClosure,
+                        identityAnchorStrength,
+                        emergentExactHits,
+                        directSemanticHits,
+                        directSemanticStrength: 0,
+                        strongHits,
+                        weakHits,
+                        geometryShadow: {
+                            version: 'four-layer-shadow-v1',
+                            directScore: 0,
+                            structuralScore: 0,
+                            thematicScore: 0,
+                            closureScore,
+                            fusedScore: 0,
+                            queryWeights: queryGeometryWeights,
+                            directionConsistency: 0,
+                            meanForwardConductance: 0,
+                            meanReverseConductance: 0,
+                            supportedSegments: 0,
+                            originalQueryClosure,
+                            enhancedQueryClosure,
+                            vectorLift,
+                            vectorLiftConsistency,
+                            nodeFieldGuarded: true
+                        }
+                    };
+                }
+
+                const weightedCoverage = clamp01(contactedMass / totalCandidateMass);
+                const meanPotential = contactedMass > 0 ? clamp01(weightedPotential / contactedMass) : 0;
+
+                // 连续性：奖励相邻高势能走廊，允许有限低谷；单点接触不会伪装成长链。
+                let transitionWeight = 0;
+                let continuityMass = 0;
+                let semanticArc = 0;
+                let weightedSemanticArc = 0;
+                let weightedAction = 0;
+                let isolatedMass = 0;
+                let directedSupportWeight = 0;
+                let directionConsistencyMass = 0;
+                let forwardConductanceMass = 0;
+                let reverseConductanceMass = 0;
+                let supportedSegments = 0;
+                for (let index = 0; index < samples.length; index++) {
+                    const current = samples[index];
+                    const leftActive = index > 0 && samples[index - 1].potential >= weakContactThreshold;
+                    const rightActive = index + 1 < samples.length && samples[index + 1].potential >= weakContactThreshold;
+                    if (current.potential >= weakContactThreshold && !leftActive && !rightActive) {
+                        isolatedMass += current.candidateMass * current.potential;
+                    }
+                    if (index + 1 >= samples.length) continue;
+
+                    const next = samples[index + 1];
+                    const similarity = Math.max(-1, Math.min(1, cosine(current.vector, next.vector)));
+                    const arc = Math.acos(similarity) / Math.PI;
+                    const directConductance = Math.max(
+                        0,
+                        Number(kernel?.get(current.id)?.get(next.id)) || 0
+                    );
+                    const reverseConductance = Math.max(
+                        0,
+                        Number(kernel?.get(next.id)?.get(current.id)) || 0
+                    );
+                    const topology = clamp01(Math.sqrt(Math.max(directConductance, reverseConductance)));
+                    const segmentPotential = Math.sqrt(current.potential * next.potential);
+                    const segmentMass = Math.sqrt(current.candidateMass * next.candidateMass);
+                    const segmentTrust = segmentPotential * (0.65 + 0.35 * topology);
+                    const directionalTotal = directConductance + reverseConductance;
+                    const directionalWeight = segmentMass * Math.max(segmentPotential, 0.05);
+                    if (directionalTotal > 0) {
+                        const directionRatio = directConductance / directionalTotal;
+                        directedSupportWeight += directionalWeight;
+                        directionConsistencyMass += directionalWeight * directionRatio;
+                        forwardConductanceMass += directionalWeight * directConductance;
+                        reverseConductanceMass += directionalWeight * reverseConductance;
+                        supportedSegments++;
+                    }
+
+                    transitionWeight += segmentMass;
+                    continuityMass += segmentMass * segmentTrust;
+                    semanticArc += arc;
+                    weightedSemanticArc += arc * segmentMass;
+                    weightedAction += arc * segmentMass / Math.max(0.08, segmentPotential + 0.25 * topology);
+                }
+
+                const continuity = transitionWeight > 0
+                    ? clamp01(continuityMass / transitionWeight)
+                    : clamp01(maxPotential * 0.35);
+                const isolatedRatio = weightedPotential > 0
+                    ? clamp01(isolatedMass / weightedPotential)
+                    : 1;
+                const actionQuality = weightedSemanticArc > 0
+                    ? clamp01(Math.exp(-weightedAction / Math.max(0.15, weightedSemanticArc)))
+                    : clamp01(maxPotential * 0.5);
+                const closureQuality = samples.reduce(
+                    (sum, sample) => sum + sample.closure * sample.candidateMass,
+                    0
+                ) / totalCandidateMass;
+                const directionConsistency = directedSupportWeight > 0
+                    ? clamp01(directionConsistencyMass / directedSupportWeight)
+                    : 0;
+                const meanForwardConductance = directedSupportWeight > 0
+                    ? Math.max(0, forwardConductanceMass / directedSupportWeight)
+                    : 0;
+                const meanReverseConductance = directedSupportWeight > 0
+                    ? Math.max(0, reverseConductanceMass / directedSupportWeight)
+                    : 0;
+
+                // 不以绝对 Tag 数裁决。sampleScale 只控制“证据饱和速度”：
+                // 短 Tag 链的核心锚点仍可成立，长链的孤立弱命中不会因数量膨胀获利。
+                const effectiveEvidence = strongHits + exactHits * 0.75;
+                const adaptiveTarget = Math.max(1, Math.min(sampleScale, Math.ceil(Math.sqrt(samples.length))));
+                const evidenceConfidence = clamp01(effectiveEvidence / adaptiveTarget);
+                const contactConfidence = clamp01(
+                    weightedCoverage
+                    * (0.55 + 0.45 * evidenceConfidence)
+                    * (1 - 0.65 * isolatedRatio)
                 );
 
-                for (const row of fileTagRows) {
-                    if (!fileTagsMap.has(row.file_id)) {
-                        fileTagsMap.set(row.file_id, []);
-                    }
-                    fileTagsMap.get(row.file_id).push(row.tag_id);
+                const geoScore = contactConfidence * clamp01(
+                    0.30 * meanPotential
+                    + 0.20 * maxPotential
+                    + 0.20 * continuity
+                    + 0.15 * actionQuality
+                    + 0.15 * closureQuality
+                );
+
+                const directSemanticMeanPotential = directSemanticHits > 0
+                    ? directSemanticPotentialSum / directSemanticHits
+                    : 0;
+                const directSemanticStrength = directSemanticHits >= directSemanticMinContacts
+                    ? clamp01(
+                        (directSemanticMeanPotential - directSemanticMinPotential)
+                        / (directSemanticSaturation - directSemanticMinPotential)
+                    )
+                    : 0;
+
+                // 四层几何影子读出。D/S/T 是同时存在的连续通道，而 legacy evidenceClass
+                // 继续承担现有生产奖励限幅，不受本段计算影响。
+                const directContactSaturation = clamp01(
+                    (directExactHits + directSemanticHits)
+                    / Math.max(1, directSemanticMinContacts + 1)
+                );
+                const directScore = clamp01(
+                    0.45 * Math.max(directSemanticStrength, directExactHits > 0 ? 1 : 0)
+                    + 0.25 * maxPotential
+                    + 0.20 * meanPotential
+                    + 0.10 * directContactSaturation
+                );
+                const structuralContact = clamp01(
+                    (emergentExactHits + Math.min(strongHits, adaptiveTarget))
+                    / Math.max(1, adaptiveTarget + 1)
+                );
+                const structuralScore = clamp01(
+                    0.25 * continuity
+                    + 0.20 * actionQuality
+                    + 0.15 * closureQuality
+                    + 0.15 * (1 - isolatedRatio)
+                    + 0.15 * directionConsistency
+                    + 0.10 * structuralContact
+                );
+                const thematicScore = clamp01(
+                    0.35 * weightedCoverage
+                    + 0.30 * meanPotential
+                    + 0.20 * (1 - isolatedRatio)
+                    + 0.15 * closureQuality
+                );
+                const originalQueryClosure = originalQueryVector
+                    ? clamp01((cosine(originalQueryVector, chunkVector) + 1) / 2)
+                    : 0;
+                const enhancedQueryClosure = enhancedQueryVector
+                    ? clamp01((cosine(enhancedQueryVector, chunkVector) + 1) / 2)
+                    : 0;
+                const vectorLift = originalQueryVector && enhancedQueryVector
+                    ? enhancedQueryClosure - originalQueryClosure
+                    : 0;
+                const vectorLiftConsistency = clamp01(0.5 + vectorLift * 5);
+                const closureScore = clamp01(
+                    0.25 * originalQueryClosure
+                    + 0.35 * enhancedQueryClosure
+                    + 0.30 * closureQuality
+                    + 0.10 * vectorLiftConsistency
+                );
+                const weightedDirect = queryGeometryWeights.direct * directScore;
+                const weightedStructural = queryGeometryWeights.structural * structuralScore;
+                const weightedThematic = queryGeometryWeights.thematic * thematicScore;
+                const fusedGeometryScore = clamp01(
+                    (1 - (1 - weightedDirect) * (1 - weightedStructural) * (1 - weightedThematic))
+                    * closureScore
+                );
+
+                let evidenceClass = 'thematic';
+                let evidenceReason = 'interpolated-theme-contact';
+                if (directExactHits > 0) {
+                    evidenceClass = 'direct';
+                    evidenceReason = 'query-seed-or-core-exact-contact';
+                } else if (directSemanticHits >= directSemanticMinContacts) {
+                    evidenceClass = 'direct';
+                    evidenceReason = 'multi-query-anchor-semantic-contact';
+                } else if (
+                    exactHits > 0
+                    || (
+                        strongHits >= 2
+                        && continuity >= structuralContinuityMin
+                        && isolatedRatio <= thematicMaxIsolatedRatio
+                    )
+                ) {
+                    evidenceClass = 'structural';
+                    evidenceReason = exactHits > 0
+                        ? 'propagated-exact-contact'
+                        : 'multi-contact-continuous-corridor';
                 }
-            }
 
-            // Step 3: 对每个候选计算 geoScore
-            let maxGeo = 0;
-            let minPositiveGeo = Infinity;
-            let geoContributionCount = 0;
-            let geoHitCountSum = 0;
-            const geoData = candidates.map(c => {
-                const chunkId = Number(c.id);
-                const fileId = chunkFileMap.get(chunkId);
-                if (fileId === undefined) {
-                    return { candidate: c, geoScore: 0, hitCount: 0, totalEnergy: 0 };
-                }
-
-                const tagIds = fileTagsMap.get(fileId) || [];
-                let totalEnergy = 0;
-                let hitCount = 0;
-
-                for (const tid of tagIds) {
-                    const energy = energyField.get(tid);
-                    if (energy !== undefined) {
-                        totalEnergy += energy;
-                        hitCount++;
-                    }
-                }
-
-                // L1: 最小采样密度门槛
-                const geoScore = hitCount >= minGeoSamples
-                    ? totalEnergy / hitCount
-                    : 0; // 密度不足 → 放弃测地线评估，退化为纯 KNN
-
-                if (geoScore > 0) {
-                    geoContributionCount++;
-                    geoHitCountSum += hitCount;
-                    if (geoScore > maxGeo) maxGeo = geoScore;
-                    if (geoScore < minPositiveGeo) minPositiveGeo = geoScore;
-                }
-
-                return { candidate: c, geoScore, hitCount, totalEnergy };
-            });
-
-            // L2: 所有 chunk 的 maxGeo = 0 → 归一化跳过，全部走纯 KNN 排序
-            if (maxGeo === 0) {
-                return candidates;
-            }
-
-            // L-1b: 候选采样视角的地图可信度门控。覆盖率/强度/区分度不足时，回归 KNN。
-            if (fallbackToKnnOnLowTrust) {
-                const geoCoverageRatio = geoContributionCount / candidates.length;
-                const avgGeoHitCount = geoContributionCount > 0 ? geoHitCountSum / geoContributionCount : 0;
-                const geoScoreSpread = Number.isFinite(minPositiveGeo) ? maxGeo - minPositiveGeo : 0;
-
-                if (geoCoverageRatio < minGeoCoverageRatio) {
-                    return fallbackToKnn('candidate geo coverage too low', {
-                        coverage: geoCoverageRatio,
-                        minGeoCoverageRatio,
-                        avgGeoHitCount
-                    });
-                }
-
-                if (maxGeo < minMaxGeoScore) {
-                    return fallbackToKnn('max geo score too low', {
-                        maxGeo,
-                        minMaxGeoScore
-                    });
-                }
-
-                if (geoScoreSpread < minGeoScoreSpread) {
-                    return fallbackToKnn('geo score spread too low', {
-                        spread: geoScoreSpread,
-                        minGeoScoreSpread
-                    });
-                }
-            }
-
-            // Step 4: 归一化并混合分数
-            const reranked = geoData.map(d => {
-                const normalizedGeo = d.geoScore / maxGeo; // [0, 1]
-                const knnScore = d.candidate.score || 0;
-                const finalScore = (1 - alpha) * knnScore + alpha * normalizedGeo;
+                // 纯主题晕轮必须至少具备可解释的势能与非孤立接触，否则只保留诊断，不授予排序权。
+                const rewardEligible = evidenceClass !== 'thematic'
+                    || (
+                        maxPotential >= thematicMinPotential
+                        && isolatedRatio <= thematicMaxIsolatedRatio
+                    );
 
                 return {
-                    ...d.candidate,
-                    score: finalScore,
-                    original_knn_score: knnScore,
-                    geo_score: d.geoScore,
-                    normalized_geo: normalizedGeo,
-                    geo_hit_count: d.hitCount
+                    candidate,
+                    originalIndex,
+                    geoScore,
+                    confidence: contactConfidence,
+                    evidenceClass,
+                    evidenceReason,
+                    rewardEligible,
+                    exactHits,
+                    directExactHits,
+                    directExactMaxPotential,
+                    directExactBestSpecificity,
+                    directExactBestClosure,
+                    identityAnchorStrength,
+                    emergentExactHits,
+                    directSemanticHits,
+                    directSemanticStrength,
+                    directSemanticMeanPotential,
+                    directSemanticMaxPotential,
+                    strongHits,
+                    weakHits,
+                    sampleCount: samples.length,
+                    weightedCoverage,
+                    meanPotential,
+                    maxPotential,
+                    continuity,
+                    isolatedRatio,
+                    actionQuality,
+                    closureQuality,
+                    semanticArc,
+                    geometryShadow: {
+                        version: 'four-layer-shadow-v1',
+                        directScore,
+                        structuralScore,
+                        thematicScore,
+                        closureScore,
+                        fusedScore: fusedGeometryScore,
+                        queryWeights: queryGeometryWeights,
+                        directionConsistency,
+                        meanForwardConductance,
+                        meanReverseConductance,
+                        supportedSegments,
+                        originalQueryClosure,
+                        enhancedQueryClosure,
+                        vectorLift,
+                        vectorLiftConsistency
+                    },
+                    reason: geoScore > 0 ? null : 'curve-confidence-zero',
+                    contactTags: samples
+                        .filter(sample => sample.potential >= weakContactThreshold)
+                        .sort((a, b) => b.potential - a.potential)
+                        .slice(0, 8)
+                        .map(sample => ({
+                            id: sample.id,
+                            name: sample.name,
+                            potential: sample.potential,
+                            exact: sample.exact,
+                            position: sample.position,
+                            sourceType: sample.exact
+                                ? sample.exactSourceType
+                                : sample.nearestSourceType,
+                            hop: sample.exact
+                                ? sample.exactHop
+                                : sample.nearestHop
+                        }))
                 };
             });
 
-            // Step 5: 按 finalScore 降序排列（只重排，不截断）
-            reranked.sort((a, b) => b.score - a.score);
+            const contributors = geoData.filter(item => item.geoScore > 0);
+            if (contributors.length === 0) {
+                return fallback('no candidate curve contacted the query field', {
+                    candidates: candidates.length,
+                    fieldTags: fieldNodes.length
+                });
+            }
 
-            console.log(`[TagMemo-V8 Geodesic] α=${alpha}, minSamples=${minGeoSamples}, candidates=${candidates.length}, maxGeo=${maxGeo.toFixed(4)}, coverage=${(geoContributionCount / candidates.length).toFixed(3)}, reranked=${reranked.filter(r => r.geo_score > 0).length} with geo contribution`);
+            let minPositiveGeo = Infinity;
+            let maxGeo = 0;
+            for (const item of contributors) {
+                minPositiveGeo = Math.min(minPositiveGeo, item.geoScore);
+                maxGeo = Math.max(maxGeo, item.geoScore);
+            }
+            const coverageRatio = contributors.length / candidates.length;
+            const spread = maxGeo - minPositiveGeo;
+            const strongEvidence = contributors.reduce(
+                (sum, item) => sum + (item.strongHits || 0) + (item.exactHits || 0) * 0.75,
+                0
+            );
 
+            // 稀有但精准的场接触不应因低覆盖单独被拒绝；仅联合低覆盖、低曲线分和弱证据时回退。
+            if (
+                fallbackEnabled
+                && coverageRatio < minCandidateCoverage
+                && maxGeo < minGeoScore
+                && strongEvidence < minStrongEvidence
+            ) {
+                return fallback('candidate curve readout jointly low-trust', {
+                    coverage: coverageRatio,
+                    maxGeo,
+                    strongEvidence
+                });
+            }
+            if (
+                fallbackEnabled
+                && contributors.length > 1
+                && spread < minGeoSpread
+                && maxGeo < minGeoScore
+                && strongEvidence < minStrongEvidence
+            ) {
+                return fallback('candidate curve scores jointly lack discrimination', {
+                    spread,
+                    maxGeo,
+                    strongEvidence
+                });
+            }
+
+            const reranked = geoData.map(item => {
+                const knnScore = Number(item.candidate.score) || 0;
+                // 不再把批内冠军强制归一化为 1；相同绝对曲线分跨查询获得相同读出强度。
+                const normalizedGeo = item.geoScore > 0
+                    ? clamp01(
+                        (item.geoScore - geoRewardFloor)
+                        / (geoRewardSaturation - geoRewardFloor)
+                    )
+                    : 0;
+                const bonusCap = item.evidenceClass === 'direct'
+                    ? directBonusCap
+                    : item.evidenceClass === 'structural'
+                        ? structuralBonusCap
+                        : thematicBonusCap;
+                const directSemanticQualified = item.evidenceClass === 'direct'
+                    && (item.directSemanticHits || 0) >= directSemanticMinContacts;
+                const rewardStrength = directSemanticQualified
+                    ? Math.max(normalizedGeo, item.directSemanticStrength || 0)
+                    : normalizedGeo;
+                const rewardConfidence = directSemanticQualified
+                    ? Math.max(item.confidence || 0, directConfidenceFloor)
+                    : item.confidence;
+                const requestedBonus = item.rewardEligible
+                    ? mixAlpha * rewardConfidence * rewardStrength
+                    : 0;
+                const baseGeoBonus = Math.min(bonusCap, Math.max(0, requestedBonus));
+
+                // 辅助轨必须已经拥有可信节点场证据。闭合层和向量提升只参与门控，
+                // 不允许节点场守卫候选或单纯 KNN 相似候选凭 C4/Lift 获得奖励。
+                const shadow = item.geometryShadow || null;
+                const classEvidence = item.evidenceClass === 'direct'
+                    ? Number(shadow?.directScore || 0)
+                    : item.evidenceClass === 'structural'
+                        ? Number(shadow?.structuralScore || 0)
+                        : Number(shadow?.thematicScore || 0);
+                const classFloorCap = item.evidenceClass === 'direct'
+                    ? geometryAuxDirectCap
+                    : item.evidenceClass === 'structural'
+                        ? geometryAuxStructuralCap
+                        : geometryAuxThematicCap;
+                const fusedShadow = Math.max(0, Number(shadow?.fusedScore) || 0);
+                const closureShadow = Math.max(0, Number(shadow?.closureScore) || 0);
+                const geometryAuxEligible = geometryAuxEnabled
+                    && item.rewardEligible === true
+                    && shadow
+                    && shadow.nodeFieldGuarded !== true
+                    && classEvidence >= geometryAuxMinClassEvidence
+                    && fusedShadow >= geometryAuxMinFused
+                    && closureShadow >= geometryAuxMinClosure;
+                const fusedReliability = geometryAuxEligible
+                    ? clamp01(
+                        (fusedShadow - geometryAuxMinFused)
+                        / Math.max(1e-6, 1 - geometryAuxMinFused)
+                    )
+                    : 0;
+                const classReliability = geometryAuxEligible
+                    ? clamp01(
+                        (classEvidence - geometryAuxMinClassEvidence)
+                        / Math.max(1e-6, 1 - geometryAuxMinClassEvidence)
+                    )
+                    : 0;
+                const closureReliability = geometryAuxEligible
+                    ? clamp01(
+                        (closureShadow - geometryAuxMinClosure)
+                        / Math.max(1e-6, 1 - geometryAuxMinClosure)
+                    )
+                    : 0;
+                const geometryAuxReliability = geometryAuxEligible
+                    ? Math.cbrt(fusedReliability * classReliability * closureReliability)
+                    : 0;
+                const geometryAuxTargetFloor = geometryAuxEligible
+                    ? classFloorCap * Math.pow(geometryAuxReliability, geometryAuxExponent)
+                    : 0;
+
+                const identityAnchorEligible = identityAnchorEnabled
+                    && item.evidenceClass === 'direct'
+                    && item.rewardEligible === true
+                    && shadow?.nodeFieldGuarded !== true
+                    && (item.directExactHits || 0) > 0
+                    && (item.directExactMaxPotential || 0) >= identityAnchorMinPotential
+                    && (item.directExactBestSpecificity || 0) >= identityAnchorMinSpecificity
+                    && (item.directExactBestClosure || 0) >= identityAnchorMinClosure
+                    && (item.identityAnchorStrength || 0) >= identityAnchorMinStrength;
+                const identityAnchorReliability = identityAnchorEligible
+                    ? clamp01(
+                        (item.identityAnchorStrength - identityAnchorMinStrength)
+                        / Math.max(1e-6, 1 - identityAnchorMinStrength)
+                    )
+                    : 0;
+                const identityAnchorTargetFloor = identityAnchorEligible
+                    ? identityAnchorFloorCap
+                        * Math.pow(identityAnchorReliability, identityAnchorExponent)
+                    : 0;
+
+                // 生产公式：辅助目标不是额外线性奖励，只补足旧奖励未达到的最低权限。
+                // 两个辅助来源取 max 而非相加，进一步避免同一 direct 证据被重复计算。
+                const auxiliaryTargetFloor = Math.min(
+                    bonusCap,
+                    Math.max(geometryAuxTargetFloor, identityAnchorTargetFloor)
+                );
+                const geometryAuxBonus = geometryAuxEnabled
+                    ? Math.min(
+                        geometryAuxMaxBonus,
+                        Math.max(0, auxiliaryTargetFloor - baseGeoBonus)
+                    )
+                    : 0;
+                const geoBonus = Math.min(bonusCap, baseGeoBonus + geometryAuxBonus);
+                const finalScore = knnScore + geoBonus;
+                const geoEffect = geoBonus > 0 ? 'boost' : 'neutral';
+                const geometryAuxReason = !geometryAuxEnabled
+                    ? 'disabled'
+                    : shadow?.nodeFieldGuarded === true
+                        ? 'node-field-guarded'
+                        : geometryAuxBonus > 0
+                            ? (identityAnchorTargetFloor >= geometryAuxTargetFloor
+                                ? 'identity-floor-gap'
+                                : 'geometry-floor-gap')
+                            : auxiliaryTargetFloor > 0
+                                ? 'base-bonus-already-satisfies-floor'
+                                : 'reliability-gate-not-met';
+
+                return {
+                    ...item.candidate,
+                    score: finalScore,
+                    original_knn_score: knnScore,
+                    geo_score: item.geoScore,
+                    normalized_geo: normalizedGeo,
+                    geo_bonus: geoBonus,
+                    geo_base_bonus: baseGeoBonus,
+                    geo_aux_bonus: geometryAuxBonus,
+                    geo_aux_target_floor: auxiliaryTargetFloor,
+                    geo_aux_geometry_floor: geometryAuxTargetFloor,
+                    geo_aux_identity_floor: identityAnchorTargetFloor,
+                    geo_aux_enabled: geometryAuxEnabled,
+                    geo_aux_eligible: geometryAuxEligible,
+                    geo_aux_reliability: geometryAuxReliability,
+                    geo_aux_reason: geometryAuxReason,
+                    geo_identity_anchor_eligible: identityAnchorEligible,
+                    geo_identity_anchor_strength: item.identityAnchorStrength || 0,
+                    geo_identity_anchor_reliability: identityAnchorReliability,
+                    geo_direct_exact_max_potential: item.directExactMaxPotential || 0,
+                    geo_direct_exact_best_specificity: item.directExactBestSpecificity || 0,
+                    geo_direct_exact_best_closure: item.directExactBestClosure || 0,
+                    geo_bonus_cap: bonusCap,
+                    geo_effect: geoEffect,
+                    geo_evidence_class: item.evidenceClass || 'neutral',
+                    geo_evidence_reason: item.evidenceReason || item.reason || null,
+                    geo_reward_eligible: item.rewardEligible === true,
+                    geo_hit_count: item.weakHits || 0,
+                    geo_confidence: item.confidence,
+                    geo_curve_samples: item.sampleCount || 0,
+                    geo_exact_hits: item.exactHits || 0,
+                    geo_direct_exact_hits: item.directExactHits || 0,
+                    geo_emergent_exact_hits: item.emergentExactHits || 0,
+                    geo_direct_semantic_hits: item.directSemanticHits || 0,
+                    geo_direct_semantic_strength: item.directSemanticStrength || 0,
+                    geo_reward_strength: rewardStrength,
+                    geo_reward_confidence: rewardConfidence || 0,
+                    geo_strong_hits: item.strongHits || 0,
+                    geo_weighted_coverage: item.weightedCoverage || 0,
+                    geo_mean_potential: item.meanPotential || 0,
+                    geo_max_potential: item.maxPotential || 0,
+                    geo_continuity: item.continuity || 0,
+                    geo_isolated_ratio: item.isolatedRatio ?? 1,
+                    geo_action_quality: item.actionQuality || 0,
+                    geo_closure_quality: item.closureQuality || 0,
+                    geo_contact_tags: item.contactTags || [],
+                    geo_guard_reason: item.reason || null,
+                    // 四层几何仍保留完整诊断；生产只读取受严格门控和独立上限约束的奖励地板。
+                    geo_geometry_shadow: item.geometryShadow || null,
+                    geo_direct_score: item.geometryShadow?.directScore || 0,
+                    geo_structural_score: item.geometryShadow?.structuralScore || 0,
+                    geo_thematic_score: item.geometryShadow?.thematicScore || 0,
+                    geo_closure_score: item.geometryShadow?.closureScore || 0,
+                    geo_fused_shadow_score: item.geometryShadow?.fusedScore || 0,
+                    geo_direction_consistency: item.geometryShadow?.directionConsistency || 0,
+                    geo_vector_lift: item.geometryShadow?.vectorLift || 0
+                };
+            });
+
+            reranked.sort((left, right) =>
+                (right.score - left.score)
+                || ((right.original_knn_score || 0) - (left.original_knn_score || 0))
+            );
+
+            const leader = [...contributors].sort((a, b) => b.geoScore - a.geoScore)[0];
+            const evidenceCounts = geoData.reduce((counts, item) => {
+                const key = item.evidenceClass || 'neutral';
+                counts[key] = (counts[key] || 0) + 1;
+                return counts;
+            }, {});
+            const auxiliaryBoosted = reranked.filter(item => (item.geo_aux_bonus || 0) > 0);
+            const identityProtected = reranked.filter(item => item.geo_aux_reason === 'identity-floor-gap');
+            console.log(
+                `[TagMemo-V9.2 GeodesicCurve] α=${mixAlpha.toFixed(3)}, candidates=${candidates.length}, ` +
+                `contributors=${contributors.length}, fieldTags=${fieldNodes.length}, ` +
+                `evidence=direct:${evidenceCounts.direct || 0}/structural:${evidenceCounts.structural || 0}/thematic:${evidenceCounts.thematic || 0}, ` +
+                `aux=${geometryAuxEnabled ? 'on' : 'off'}:${auxiliaryBoosted.length}, identityProtected=${identityProtected.length}, ` +
+                `curveRange=${minPositiveGeo.toFixed(4)}..${maxGeo.toFixed(4)}, ` +
+                `leaderChunk=${Number(leader?.candidate?.id)}, leaderCoverage=${(leader?.weightedCoverage || 0).toFixed(3)}, ` +
+                `leaderContinuity=${(leader?.continuity || 0).toFixed(3)}, leaderContacts=${leader?.weakHits || 0}`
+            );
             return reranked;
-
-        } catch (e) {
-            console.error('[TagMemoEngine] geodesicRerank failed, falling back to original order:', e.message);
+        } catch (error) {
+            console.error('[TagMemoEngine] geodesicRerank curve evaluation failed, falling back to original order:', error.message);
             return candidates;
         }
     }
@@ -1167,7 +2507,8 @@ class TagMemoEngine {
             }
             if (legacyTags.length > 0) processLegacyFileGroup(legacyTags);
 
-            this.tagCooccurrenceMatrix = matrix;
+            // V9.1 staging 资产完整构建结束后才一次性发布；旧请求继续持有旧 bundle。
+            const publishedRegistry = this._stageAndPublishV91Bundle(matrix);
 
             console.log(
                 `[TagMemoEngine] ✅ V8.2 Ordered-bidirectional matrix built. ` +
@@ -1180,9 +2521,11 @@ class TagMemoEngine {
                 `legacyFiles=${legacyProcessedFiles}, legacySkippedFiles=${legacySkippedFiles}, legacyPairOps≈${Math.round(legacyPairOps)}, ` +
                 `simCacheSize=${this.tagPairSimilarities.size}, elapsed=${Date.now() - matrixBuildStartedAt}ms`
             );
+            return publishedRegistry;
         } catch (e) {
-            console.error('[TagMemoEngine] ❌ Failed to build V8.2 ordered-bidirectional matrix:', e);
-            this.tagCooccurrenceMatrix = new Map();
+            // 构建全程使用 staging Map；失败时必须保留上一代活动 Bundle 及所有兼容别名。
+            console.error('[TagMemoEngine] ❌ Failed to build V8.2 ordered-bidirectional matrix; keeping previous active artifact:', e);
+            throw e;
         }
     }
 
@@ -1339,30 +2682,78 @@ class TagMemoEngine {
         return await this._withRustWriteLease('tagmemo:pairwise-sim', run, { pendingThreshold: 0 });
     }
 
-    // 🌟 TagMemo V7: 加载内生残差
+    // 🌟 TagMemo V7/V9: 加载双语义内生残差
     loadIntrinsicResiduals(options = {}) {
         const { failOnCorruption = false } = options;
 
         const doLoad = () => {
-            const rows = this.db.prepare(
-                'SELECT tag_id, residual_energy FROM tag_intrinsic_residuals'
-            ).all();
+            const rows = this.db.prepare(`
+                SELECT
+                    tag_id,
+                    residual_energy,
+                    raw_residual_ratio,
+                    v9_anchor_gain,
+                    model_sig,
+                    artifact_sig,
+                    algorithm_version,
+                    config_hash
+                FROM tag_intrinsic_residuals
+            `).all();
 
             this.tagIntrinsicResiduals = new Map();
+            this.tagRawResidualRatios = new Map();
+            this.intrinsicResidualArtifact = null;
+
             for (const row of rows) {
-                // 归一化到 [0.5, 2.0] 范围，避免极端值
-                const clamped = Math.max(0.5, Math.min(2.0, row.residual_energy));
-                this.tagIntrinsicResiduals.set(row.tag_id, clamped);
+                // Number(null) === 0，所有 nullable 派生列必须先检查非空，再做数值转换。
+                const hasFiniteValue = value =>
+                    value !== null && value !== undefined && Number.isFinite(Number(value));
+
+                // 老数据库在首次 V9.1 全量重建前可能尚无 v9_anchor_gain；
+                // residual_energy 仅作为一次性启动兼容值，重建后会被 V9.1 数值覆盖。
+                const anchorValue = hasFiniteValue(row.v9_anchor_gain)
+                    ? Number(row.v9_anchor_gain)
+                    : Number(row.residual_energy);
+                this.tagIntrinsicResiduals.set(
+                    row.tag_id,
+                    Math.max(0.5, Math.min(2.0, Number.isFinite(anchorValue) ? anchorValue : 1.0))
+                );
+
+                if (hasFiniteValue(row.raw_residual_ratio)) {
+                    this.tagRawResidualRatios.set(
+                        row.tag_id,
+                        Math.max(0, Math.min(1, Number(row.raw_residual_ratio)))
+                    );
+                }
+
+                if (!this.intrinsicResidualArtifact && row.artifact_sig) {
+                    this.intrinsicResidualArtifact = {
+                        artifactSig: row.artifact_sig,
+                        modelSig: row.model_sig || this.modelSig,
+                        algorithmVersion: row.algorithm_version || null,
+                        configHash: row.config_hash || null
+                    };
+                }
             }
-            return this.tagIntrinsicResiduals.size;
+
+            return {
+                v9Count: this.tagIntrinsicResiduals.size,
+                rawCount: this.tagRawResidualRatios.size
+            };
         };
 
         try {
-            const count = doLoad();
-            console.log(`[TagMemoEngine] ✅ Loaded ${count} intrinsic residuals`);
+            const counts = doLoad();
+            console.log(
+                `[TagMemoEngine] ✅ Loaded V9.1 intrinsic residuals: ` +
+                `anchors=${counts.v9Count}, raw=${counts.rawCount}, ` +
+                `artifact=${this.intrinsicResidualArtifact?.artifactSig || 'legacy'}`
+            );
             return true;
         } catch (e) {
             this.tagIntrinsicResiduals = null;
+            this.tagRawResidualRatios = null;
+            this.intrinsicResidualArtifact = null;
             const isCorruption = this.knowledgeBaseManager?._isSqliteCorruptionError?.(e);
 
             if (failOnCorruption && isCorruption) {
@@ -1376,6 +2767,8 @@ class TagMemoEngine {
                     } catch (retryErr) {
                         console.error('[TagMemoEngine] ❌ Intrinsic residual reload still failed after suspect recovery:', retryErr.message || retryErr);
                         this.tagIntrinsicResiduals = null;
+                        this.tagRawResidualRatios = null;
+                        this.intrinsicResidualArtifact = null;
                         throw retryErr;
                     }
                 }
@@ -1397,6 +2790,7 @@ class TagMemoEngine {
     }
 
     _scheduleThresholdMatrixRebuild(threshold, delayMs = this._getMatrixRebuildQuietMs(), reason = 'threshold') {
+        if (this._shutdownRequested) return false;
         if (this._matrixRebuildTimer) {
             clearTimeout(this._matrixRebuildTimer);
         }
@@ -1414,6 +2808,7 @@ class TagMemoEngine {
             console.log(`[TagMemoEngine] 🛡️ Matrix rebuild ${reason}: newUniqueTags=${this._accumulatedNewTagIds.size} >= ${threshold}. Scheduled after ${Math.round(delayMs / 1000)}s of quiescence.`);
             this._matrixRebuildScheduleLogged = true;
         }
+        return true;
     }
 
     _ensureMatrixRebuildScheduledIfThreshold(reason = 'threshold') {
@@ -1450,8 +2845,80 @@ class TagMemoEngine {
     // 🌟 Legacy 兼容入口：旧的 file_tags 关系数不再驱动 1% 阈值。
     scheduleMatrixRebuild(changeCount = 1) {
         if (changeCount > 0) {
-            console.log(`[TagMemoEngine] 🛡️ Ignored legacy relation-count matrix rebuild signal (${changeCount}); V8.3 threshold uses unique new tag ids.`);
+            console.log(`[TagMemoEngine] 🛡️ Ignored legacy relation-count matrix rebuild signal (${changeCount}); V9.1 threshold uses unique new tag ids.`);
         }
+    }
+
+    /**
+     * 全量训练成功后的单轨收尾。
+     *
+     * 物理列保留以兼容旧 SQLite 文件，但清空 V8.3 数值，并只保留当前模型最新的
+     * V9.1 intrinsic/pairwise artifact 与对应状态。调用方必须已持有 Rust 写租约。
+     */
+    _cleanupRetiredV83DerivedAssets() {
+        const currentIntrinsicSig = this.intrinsicResidualArtifact?.artifactSig || null;
+        const latestPairwise = this.db.prepare(`
+            SELECT artifact_sig
+            FROM tagmemo_artifacts
+            WHERE asset_type = 'pairwise_similarity'
+              AND model_sig = ?
+              AND status = 'ready'
+            ORDER BY updated_at DESC
+            LIMIT 1
+        `).get(this.modelSig);
+        const currentPairwiseSig = latestPairwise?.artifact_sig || null;
+
+        const cleanup = this.db.transaction(() => {
+            let intrinsicStatuses = 0;
+            let pairwiseStatuses = 0;
+            let artifacts = 0;
+
+            if (currentIntrinsicSig) {
+                intrinsicStatuses = this.db.prepare(
+                    'DELETE FROM tag_intrinsic_residual_status WHERE artifact_sig != ?'
+                ).run(currentIntrinsicSig).changes;
+            } else {
+                intrinsicStatuses = this.db.prepare(
+                    'DELETE FROM tag_intrinsic_residual_status'
+                ).run().changes;
+            }
+
+            if (currentPairwiseSig) {
+                pairwiseStatuses = this.db.prepare(
+                    'DELETE FROM tag_pair_similarity_status WHERE artifact_sig != ?'
+                ).run(currentPairwiseSig).changes;
+            } else {
+                pairwiseStatuses = this.db.prepare(
+                    'DELETE FROM tag_pair_similarity_status'
+                ).run().changes;
+            }
+
+            const retained = [currentIntrinsicSig, currentPairwiseSig].filter(Boolean);
+            if (retained.length > 0) {
+                const placeholders = retained.map(() => '?').join(',');
+                artifacts = this.db.prepare(
+                    `DELETE FROM tagmemo_artifacts WHERE artifact_sig NOT IN (${placeholders})`
+                ).run(...retained).changes;
+            } else {
+                artifacts = this.db.prepare('DELETE FROM tagmemo_artifacts').run().changes;
+            }
+
+            const compatValues = this.db.prepare(`
+                UPDATE tag_intrinsic_residuals
+                SET v8_3_compat_gain = NULL
+                WHERE v8_3_compat_gain IS NOT NULL
+            `).run().changes;
+
+            return { intrinsicStatuses, pairwiseStatuses, artifacts, compatValues };
+        });
+
+        const result = cleanup();
+        console.log(
+            `[TagMemoEngine] 🧹 V9.1 single-track cleanup complete: ` +
+            `retiredArtifacts=${result.artifacts}, intrinsicStatuses=${result.intrinsicStatuses}, ` +
+            `pairwiseStatuses=${result.pairwiseStatuses}, v8.3CompatValues=${result.compatValues}.`
+        );
+        return result;
     }
 
     requestActiveFullTraining(options = {}) {
@@ -1470,15 +2937,25 @@ class TagMemoEngine {
         this._matrixRebuildScheduleLogged = false;
 
         const taskId = this._enqueueDerivedTask('active-full-training', async () => {
-            await this.doMatrixRebuild({
+            return await this.doMatrixRebuild({
                 reason,
                 fullRebuildPairwise: true,
                 forceIntrinsicResiduals: true,
                 preservePendingOnFailure: false,
                 allowDuringStartupCooldown: true
             });
-            return true;
         }, { maxAttempts: options.maxAttempts ?? 1 });
+
+        if (!taskId) {
+            return {
+                taskId: null,
+                queued: false,
+                reason,
+                resetPendingNewTags: previousPendingNewTags,
+                threshold: this._getMatrixRebuildThreshold(),
+                error: 'TagMemoEngine is shutting down'
+            };
+        }
 
         console.log(
             `[TagMemoEngine] 🧠 Active full self-training requested. ` +
@@ -1499,12 +2976,18 @@ class TagMemoEngine {
         const preservePendingOnFailure = options.preservePendingOnFailure !== false;
         const fullRebuildPairwise = options.fullRebuildPairwise === true;
         const forceIntrinsicResiduals = options.forceIntrinsicResiduals === true;
+        const cleanupRetiredV83Assets = options.cleanupRetiredV83Assets === true
+            || (fullRebuildPairwise && forceIntrinsicResiduals);
+        if (this._shutdownRequested) {
+            console.warn('[TagMemoEngine] Matrix rebuild refused because shutdown is in progress.');
+            return false;
+        }
         if (this._isMatrixRebuilding) {
             console.warn('[TagMemoEngine] Matrix rebuild already running; keeping accumulated new tags for next debounce window.');
             if (!this._matrixRebuildTimer && this._accumulatedNewTagIds.size > 0) {
                 this._scheduleMatrixRebuildTimer(this._getMatrixRebuildQuietMs(), 'follow-up-threshold');
             }
-            return;
+            return false;
         }
 
         const newTagIdsAtStart = new Set(this._accumulatedNewTagIds);
@@ -1517,8 +3000,8 @@ class TagMemoEngine {
 
         try {
             const rebuilt = await this._withRustWriteLease('tagmemo:matrix-rebuild', async () => {
-                // 🌟 V8.2-γ: 先补齐底座，再构建矩阵
-                // 顺序：sim 预计算 → 屏障 → 加载 sim Map → 内生残差预计算/屏障/加载 → 构建 V8.2 双向矩阵
+                // V9.1 单轨顺序：sim 预计算 → 健康屏障/加载 → intrinsic residual
+                // 预计算/屏障/加载 → 构建并原子发布 V9.1 kernel → 清理退休资产。
                 const pairResult = await this.recomputePairwiseSimilarities({ blocking: true, leaseAlreadyHeld: true, fullRebuild: fullRebuildPairwise });
                 if (!pairResult) return false;
                 // 🛡️ P0: Rust 写后先 checkpoint + 健康屏障（含 suspect 重开），再用健康连接读取派生表，
@@ -1549,7 +3032,11 @@ class TagMemoEngine {
                     this.loadIntrinsicResiduals({ failOnCorruption: true });
                 }
 
-                this.buildDirectedCooccurrenceMatrix();
+                const publishedRegistry = this.buildDirectedCooccurrenceMatrix();
+                if (!publishedRegistry?.bundles?.v9) return false;
+                if (cleanupRetiredV83Assets) {
+                    this._cleanupRetiredV83DerivedAssets();
+                }
                 return true;
             }, {
                 pendingThreshold: 0,
@@ -1562,8 +3049,9 @@ class TagMemoEngine {
                     this._accumulatedTagChanges = this._accumulatedNewTagIds.size;
                     this._scheduleMatrixRebuildTimer(this._getMatrixRebuildQuietMs(), rebuildReason);
                 }
-                return;
+                return false;
             }
+            return true;
         } catch (e) {
             console.error(
                 `[TagMemoEngine] ❌ Matrix rebuild failed${preservePendingOnFailure ? '; preserving accumulated changes and scheduling retry' : ''}:`,
@@ -1575,9 +3063,10 @@ class TagMemoEngine {
                 this._accumulatedTagChanges = this._accumulatedNewTagIds.size;
                 this._scheduleMatrixRebuildTimer(this._getMatrixRebuildQuietMs(), rebuildReason);
             }
+            return false;
         } finally {
             this._isMatrixRebuilding = false;
-            if (this._accumulatedNewTagIds.size > 0) {
+            if (!this._shutdownRequested && this._accumulatedNewTagIds.size > 0) {
                 this._accumulatedTagChanges = this._accumulatedNewTagIds.size;
                 console.log(`[TagMemoEngine] 🔁 ${this._accumulatedNewTagIds.size} new unique tag(s) pending after rebuild attempt; scheduling follow-up debounce.`);
                 this._scheduleMatrixRebuildTimer(this._getMatrixRebuildQuietMs(), 'follow-up-threshold');
@@ -1587,6 +3076,7 @@ class TagMemoEngine {
     }
 
     _scheduleMatrixRebuildTimer(delayMs, reason = 'follow-up-threshold') {
+        if (this._shutdownRequested) return false;
         if (this._matrixRebuildTimer) {
             clearTimeout(this._matrixRebuildTimer);
         }
@@ -1600,9 +3090,84 @@ class TagMemoEngine {
         }, delayMs);
 
         if (this._matrixRebuildTimer.unref) this._matrixRebuildTimer.unref();
+        return true;
     }
 
-    // 🌟 TagMemo V7: 触发 Rust 预计算内生残差
+    _buildIntrinsicResidualConfigSnapshot() {
+        const raw = this.ragParams?.KnowledgeBaseManager?.intrinsicResidual || {};
+        const finiteOr = (value, fallback, min, max) => {
+            if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+                return fallback;
+            }
+            return Math.max(min, Math.min(max, Number(value)));
+        };
+        const integerOr = (value, fallback, min, max) =>
+            Math.floor(finiteOr(value, fallback, min, max));
+        const boolOr = (value, fallback) => {
+            if (value === null || value === undefined) return fallback;
+            if (typeof value === 'boolean') return value;
+            if (typeof value === 'number') return value !== 0;
+            const normalized = String(value).trim().toLowerCase();
+            if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+            if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+            return fallback;
+        };
+
+        const methodRaw = String(raw.method ?? 'anchored_gs').trim().toLowerCase();
+        const method = ['anchored_gs', 'centroid', 'svd'].includes(methodRaw)
+            ? methodRaw
+            : 'anchored_gs';
+
+        return {
+            method,
+            maxNeighbors: integerOr(raw.maxNeighbors, 48, 4, 256),
+            maxBasis: integerOr(raw.maxBasis, 4, 1, 32),
+            minNeighbors: integerOr(raw.minNeighbors, 3, 1, 64),
+            semanticEnabled: boolOr(raw.semanticEnabled, true),
+            semanticPeak: finiteOr(raw.semanticPeak, 0.65, -1, 1),
+            semanticSigma: finiteOr(raw.semanticSigma, 0.25, 0.02, 2),
+            semanticFloor: finiteOr(raw.semanticFloor, 0.35, 0, 1),
+            semanticHardFloor: finiteOr(raw.semanticHardFloor, -1, -1, 1),
+            minGain: finiteOr(raw.minGain, 0.015, 0, 1),
+            positionDecay: finiteOr(raw.positionDecay, 0.15, 0, 4),
+            v9AnchorBase: finiteOr(raw.v9AnchorBase, 0.75, 0, 4),
+            v9AnchorScale: finiteOr(raw.v9AnchorScale, 1.25, 0, 4),
+            v9AnchorGamma: finiteOr(raw.v9AnchorGamma, 1.0, 0.1, 8),
+            v9AnchorMin: finiteOr(raw.v9AnchorMin, 0.5, 0, 4),
+            v9AnchorMax: finiteOr(raw.v9AnchorMax, 2.0, 0, 8)
+        };
+    }
+
+    _validateIntrinsicResidualEffectiveConfig(expected, result) {
+        if (!result?.effectiveConfig) {
+            console.warn('[TagMemoEngine] ⚠️ Rust residual result did not return effectiveConfig; native binary may be stale.');
+            return false;
+        }
+
+        try {
+            const actual = JSON.parse(result.effectiveConfig);
+            const keys = [
+                'method', 'maxNeighbors', 'maxBasis', 'minNeighbors',
+                'semanticEnabled', 'semanticPeak', 'semanticSigma',
+                'semanticFloor', 'semanticHardFloor', 'minGain',
+                'positionDecay', 'v9AnchorBase', 'v9AnchorScale',
+                'v9AnchorGamma', 'v9AnchorMin', 'v9AnchorMax'
+            ];
+            const mismatches = keys.filter(key => actual[key] !== expected[key]);
+            if (mismatches.length > 0) {
+                console.error(
+                    `[TagMemoEngine] ❌ Rust residual effective config mismatch: ${mismatches.join(', ')}`
+                );
+                return false;
+            }
+            return true;
+        } catch (e) {
+            console.error('[TagMemoEngine] ❌ Failed to parse Rust residual effectiveConfig:', e.message);
+            return false;
+        }
+    }
+
+    // 🌟 TagMemo V7/V9: 触发 Rust 预计算内生残差
     async recomputeIntrinsicResiduals(opts = {}) {
         const { leaseAlreadyHeld = false } = opts;
         if (!this.tagIndex || !this.tagIndex.computeIntrinsicResiduals) {
@@ -1611,28 +3176,33 @@ class TagMemoEngine {
         }
 
         const run = async () => {
-            const irConfig = this.ragParams?.KnowledgeBaseManager?.intrinsicResidual || {};
-            const maxBasis = Number.isFinite(Number(irConfig.maxBasis))
-                ? Math.max(1, Math.floor(Number(irConfig.maxBasis)))
-                : 4;
-            const minNeighbors = Number.isFinite(Number(irConfig.minNeighbors))
-                ? Math.max(1, Math.floor(Number(irConfig.minNeighbors)))
-                : 3;
-            const method = process.env.TAGMEMO_IR_METHOD || irConfig.method || 'anchored_gs';
+            const effectiveConfig = this._buildIntrinsicResidualConfigSnapshot();
+            const effectiveConfigJson = JSON.stringify(effectiveConfig);
             console.log(
                 `[TagMemoEngine] ⚡ Triggering Rust intrinsic residual precomputation ` +
-                `(method=${method}, maxBasis=${maxBasis}, minNeighbors=${minNeighbors}, model_sig=${this.modelSig})...`
+                `(config=${effectiveConfigJson}, model_sig=${this.modelSig})...`
             );
             try {
                 const dbPath = path.join(path.dirname(this.db.name), 'knowledge_base.sqlite');
                 const result = await this.tagIndex.computeIntrinsicResiduals(
                     dbPath,
-                    maxBasis,
-                    minNeighbors,
-                    this.modelSig
+                    effectiveConfig.maxBasis,
+                    effectiveConfig.minNeighbors,
+                    this.modelSig,
+                    effectiveConfigJson
                 );
                 if (!result) return null;
-                console.log(`[TagMemoEngine] ✅ Rust precomputation complete: ${result.computedCount} computed, ${result.skippedCount} skipped in ${result.elapsedMs.toFixed(2)}ms`);
+                const configVerified = this._validateIntrinsicResidualEffectiveConfig(effectiveConfig, result);
+                if (!configVerified) {
+                    console.error('[TagMemoEngine] ❌ Refusing residual artifact with unverified effective configuration.');
+                    return null;
+                }
+                console.log(
+                    `[TagMemoEngine] ✅ Rust precomputation complete: ` +
+                    `${result.computedCount} computed, ${result.skippedCount} skipped, ` +
+                    `algorithm=${result.algorithmVersion}, artifact=${result.artifactSig}, ` +
+                    `elapsed=${result.elapsedMs.toFixed(2)}ms`
+                );
 
                 // 🛡️ P0: Rust 写后先 checkpoint + 健康屏障，再读取，避免读端瞬态 malformed。
                 if (!this._assertHealthyAfterRustWrite('intrinsic-residuals load barrier')) return null;
@@ -1651,6 +3221,7 @@ class TagMemoEngine {
     }
 
     schedulePostStartupDerivedRefresh(delayMs = 300000) {
+        if (this._shutdownRequested) return false;
         if (this._postStartupDerivedRefreshTimer) {
             clearTimeout(this._postStartupDerivedRefreshTimer);
         }
@@ -1695,8 +3266,9 @@ class TagMemoEngine {
                     );
                 }
                 this._enqueueDerivedTask('matrix-rebuild', async () => {
-                    await this.doMatrixRebuild({ reason: forceFullDerivedRefresh ? 'startup-full-derived-refresh' : 'startup-bootstrap' });
-                    return true;
+                    return await this.doMatrixRebuild({
+                        reason: forceFullDerivedRefresh ? 'startup-full-derived-refresh' : 'startup-bootstrap'
+                    });
                 });
             } else if (this._accumulatedNewTagIds.size > 0) {
                 const scheduled = this._ensureMatrixRebuildScheduledIfThreshold('post-startup accumulated new unique tags');
@@ -1712,9 +3284,14 @@ class TagMemoEngine {
 
         if (this._postStartupDerivedRefreshTimer.unref) this._postStartupDerivedRefreshTimer.unref();
         console.log(`[TagMemoEngine] 🕒 Post-startup derived refresh scheduled after ${Math.round(delayMs / 1000)}s.`);
+        return true;
     }
 
     _enqueueDerivedTask(type, run, options = {}) {
+        if (this._shutdownRequested) {
+            console.warn(`[TagMemoEngine] Ignored derived task "${type}" because shutdown is in progress.`);
+            return null;
+        }
         const existing = this._derivedTaskQueue.find(task => task.type === type && task.status === 'queued');
         if (existing) {
             existing.run = run;
@@ -1729,6 +3306,7 @@ class TagMemoEngine {
             status: 'queued',
             attempts: 0,
             maxAttempts: options.maxAttempts ?? 3,
+            nextAttemptAt: 0,
             createdAt: Date.now(),
             updatedAt: Date.now()
         };
@@ -1738,10 +3316,11 @@ class TagMemoEngine {
     }
 
     _scheduleDerivedTaskPump(delayMs = 1000) {
+        if (this._shutdownRequested) return;
         if (this._derivedTaskTimer) clearTimeout(this._derivedTaskTimer);
         this._derivedTaskTimer = setTimeout(() => {
             this._derivedTaskTimer = null;
-            this._processDerivedTaskQueue();
+            if (!this._shutdownRequested) this._processDerivedTaskQueue();
         }, Math.max(0, delayMs));
         if (this._derivedTaskTimer.unref) this._derivedTaskTimer.unref();
     }
@@ -1760,9 +3339,17 @@ class TagMemoEngine {
     }
 
     async _processDerivedTaskQueue() {
-        if (this._derivedTaskRunning) return;
-        const task = this._derivedTaskQueue.find(item => item.status === 'queued');
-        if (!task) return;
+        if (this._shutdownRequested || this._derivedTaskRunning) return;
+        const now = Date.now();
+        const queuedTasks = this._derivedTaskQueue.filter(item => item.status === 'queued');
+        if (queuedTasks.length === 0) return;
+
+        const task = queuedTasks.find(item => (item.nextAttemptAt || 0) <= now);
+        if (!task) {
+            const nextAttemptAt = Math.min(...queuedTasks.map(item => item.nextAttemptAt || now));
+            this._scheduleDerivedTaskPump(Math.max(1, nextAttemptAt - now));
+            return;
+        }
 
         const blockReason = this._getDerivedTaskBlockReason();
         if (blockReason) {
@@ -1774,6 +3361,7 @@ class TagMemoEngine {
         this._derivedTaskRunning = true;
         task.status = 'running';
         task.attempts++;
+        task.nextAttemptAt = 0;
         task.updatedAt = Date.now();
 
         try {
@@ -1795,14 +3383,48 @@ class TagMemoEngine {
             } else {
                 task.status = 'queued';
                 const backoffMs = Math.min(15 * 60 * 1000, 60000 * task.attempts);
+                task.nextAttemptAt = Date.now() + backoffMs;
                 console.warn(`[TagMemoEngine] ⚠️ Derived task failed, will retry in ${Math.round(backoffMs / 1000)}s: ${task.type} (${task.id}): ${e.message || e}`);
-                this._scheduleDerivedTaskPump(backoffMs);
             }
         } finally {
             this._derivedTaskRunning = false;
-            if (this._derivedTaskQueue.some(item => item.status === 'queued')) {
-                this._scheduleDerivedTaskPump(this._derivedTaskTimer ? 30000 : 1000);
+            if (!this._shutdownRequested) {
+                const queued = this._derivedTaskQueue.filter(item => item.status === 'queued');
+                if (queued.length > 0) {
+                    const now = Date.now();
+                    const nextAttemptAt = Math.min(...queued.map(item => item.nextAttemptAt || now + 1000));
+                    this._scheduleDerivedTaskPump(Math.max(1, nextAttemptAt - now));
+                }
             }
+        }
+    }
+
+    async shutdown(options = {}) {
+        if (this._shutdownRequested) return;
+        this._shutdownRequested = true;
+
+        for (const timerName of [
+            '_matrixRebuildTimer',
+            '_postStartupDerivedRefreshTimer',
+            '_derivedTaskTimer'
+        ]) {
+            if (this[timerName]) {
+                clearTimeout(this[timerName]);
+                this[timerName] = null;
+            }
+        }
+
+        // queued 任务尚未持有任何资源，关闭时直接取消；running 任务等待其安全释放租约。
+        this._derivedTaskQueue = this._derivedTaskQueue.filter(task => task.status === 'running');
+        const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 30 * 60 * 1000);
+        const startedAt = Date.now();
+        while (this._derivedTaskRunning && Date.now() - startedAt < timeoutMs) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        if (this._derivedTaskRunning) {
+            console.warn(`[TagMemoEngine] ⚠️ Shutdown timed out after ${timeoutMs}ms while a derived task was still running.`);
+        } else {
+            this._derivedTaskQueue = [];
         }
     }
 }
