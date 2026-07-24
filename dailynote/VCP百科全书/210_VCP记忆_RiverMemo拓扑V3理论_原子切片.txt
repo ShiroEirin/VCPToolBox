@@ -1,0 +1,65 @@
+[2026-07-24] - 哈雷酱
+# RiverMemo Topology V3 理论文档
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-24
+适用范围：`docs/RIVERMEMO_TOPOLOGY_V3.md`（1055行）当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\docs\RIVERMEMO_TOPOLOGY_V3.md`（27KB，1055行）
+- 上游commit: `e74006da merge: publish TagMemo v10 unified semantic dynamics engine beta`
+
+## 核心结论
+RiverMemo Topology V3 理论文档是 VCP 记忆系统的核心数学理论文档，定义了连续信息场检索引擎的完整计算结构。文档发布于2026-07-23，记录了 Topology V3 的总方程、基础对象、查询源形成、河网拓扑、候选创新和最终排序的完整理论框架。该文档明确声明 Topology V3 的重计算已下沉至 Rust 原生内核，JS 只负责 V9 查询观测、双场准备和结果组装。
+
+## 拓扑 V3 总方程
+S_i = Π[0,1][S_i^field + Ω_Q^γ · Π[0,C_ri](λ_ri · C_i · [G_i - E(G|Z_i) - z·σ(G|Z_i)]+) + C_A · SmoothStep((A_i·R_i^A - τ_A)/(s_A - τ_A))]
+
+其中：
+- Π[a,b](x) = min(b, max(a, x)) — 区间投影
+- [x]+ = max(0, x) — 正部
+- S_i^field — V9 降噪观测经 RiverMemo 双场读出的语义基线
+- G_i — 候选对查询河网的相对拓扑匹配
+- Z_i — 候选的语义、闭合、直接证据和角色条件
+- E(G|Z_i) — 在条件 Z_i 下该类候选本来应有的拓扑分
+- σ(G|Z_i) — 该条件预测的不确定性
+- z — 创新下置信界的不确定性系数
+- C_i — 查询、候选和统计样本的联合置信度
+- Ω_Q — 查询河网的可观测性
+- C_ri 与 λ_ri — 候选角色对应的奖励上限与倍率
+- A_i·R_i^A — 候选的直接锚点强度
+- τ_A — 本批候选的自适应锚点异常阈值
+- s_A — 锚点激活的饱和尺度
+- C_A — 直接锚点通道的独立奖励上限
+
+## 计算结构三通道
+1. **双场语义基线** (S_i^field) — V9 降噪观测经 RiverMemo 双场读出
+2. **关系拓扑创新** (Ω_Q^γ 授权) — 只奖励候选超出同条件期望及其不确定性上界的正创新
+3. **直接锚点创新** — 与河网密度正交，保护无需复杂河网即可成立的 hop-0 事实接触
+
+两条创新通道均受独立上限约束，最终结果统一投影至 [0,1]。
+
+## 理论边界
+- RiverMemo 不重新发明查询降噪 — V9 的 EPA/Pyramid/Spike 传播作为基线
+- V9 底座负责"哪些记忆被激活"
+- V3 贡献"激活后的候选如何被创新排序"
+- 与层层特判式工程拟合的区别：V3 是完整计算结构而非并列清单
+
+## 代码落点
+| 层级 | 文件 | 入口 |
+|------|------|------|
+| Rust原生 | rivermemo_topology_v3.rs:1756 | `run_native()` |
+| Rust N-API | rivermemo_topology_v3.rs:2121 | `rerank_rivermemo_topology_v3()` |
+| JS门面 | RiverMemoEngine.js:425 | `RiverMemoEngine.rerank()` |
+| V10准备 | TagMemoV10Engine.js:146 | `prepareQuery()` |
+| V10 Artifact | TagMemoV10Engine.js:221 | `buildArtifact()` |
+| V9传播 | TagMemoEngine.js | `_propagateSpikes()` |
+| 双场求解 | scaledFieldSolver.js:358 | `solveDualScaledFields()` |
+
+## 生产状态
+- 当前生产构型: Topology V3
+- 算法标识: `rivermemo.topology-v3.1`
+- 原生内核: `rivermemo.topology-v3.1-rust`
+- experimentArms.js 等旧 JS 实验构型保留在仓库中但不属于 V3 生产执行路径
+
+关联节点：RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), rust-vexus-lite记忆管线(209), TagMemoEngine统一构型(198), TagMemo浪潮算法V5(143)
+Tag: RiverMemo, topology-v3, Ω泛函, 双场语义基线, 关系拓扑创新, 直接锚点创新, 河网, 候选超集, DSTC, SmoothStep, 正部投影, TagMemo V9.1, 2026-07-24

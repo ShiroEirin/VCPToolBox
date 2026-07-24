@@ -1,0 +1,88 @@
+[2026-07-24] - 哈雷酱
+# TagMemoV10Engine 完整架构
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-24
+适用范围：`TagMemoV10Engine.js`（1706行）+ `modules/tagmemoV10/` 目录（17个模块文件）当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\TagMemoV10Engine.js`（70KB，1706行）
+- `D:\github\VCP\VCPToolBox\modules\tagmemoV10\` 目录（17个.js文件）
+- 上游commit: `ab618719 VCPMemo-Rust一体化完整底座引擎已上线`
+
+## 核心结论
+TagMemoV10Engine 是 VCP 记忆系统的 V10 Alpha 实验引擎完整实现。它集成了不可变快照、溯源视图、Artifact仓库、双条件算子、双尺度场求解、候选超集、路径几何、相对拓扑匹配、DSTC观测、直接锚点读出、派生资产管理等16个子模块。V10 Alpha 是实验版本，不替换 V9.2 生产搜索，RiverMemo Topology V3 已接管生产执行路径。
+
+## 版本与算法标识
+| 标识 | 值 |
+|------|-----|
+| VERSION | `v10_alpha` |
+| ALGORITHM_VERSION | `v10.alpha.1` |
+| ARTIFACT_SCHEMA | `tagmemo-v10-alpha-artifact-v1` |
+| QUERY_TRACE_SCHEMA | `tagmemo-v10-alpha-query-trace-v1` |
+
+## 工作机制
+1. **引擎构造** (`TagMemoV10Engine.js:54`):
+   - `constructor(db, tagIndex, config, ragParams, options)`
+   - 持有 `v9Engine` 引用（V9降级兼容）
+   - `_activeArtifact` / `_artifactGeneration` 管理活动 Artifact
+   - `_conditionedOperatorCache`（大小限制1，命中统计 hits/misses）
+   - ArtifactRepository 和 DerivedAssetManager 可注入或自动创建
+
+2. **模块依赖链** (16个导入):
+   - `immutable.js` → hashStable, immutableSnapshot, 只读Map/Set/CSR视图
+   - `provenance.js` → buildProvenanceView, 溯源快照
+   - `riverMemoArtifactRepository.js` → Artifact持久化仓库
+   - `agentConditioner.js` → createDualConditionedOperators（双条件算子）
+   - `scaledFieldSolver.js` → solveDualScaledFields（双尺度场求解）
+   - `candidateSuperset.js` → buildCandidateSuperset（候选超集构建）
+   - `curveProjector.js` → projectCandidateCurves（候选曲线投影）
+   - `unifiedPathGeometry.js` → evaluateCandidateCurves（路径几何评估）
+   - `relativeTopologyMatcher.js` → evaluateRelativeTopologyBatch（相对拓扑匹配）
+   - `dstcObservables.js` → computeDstcBatch（DSTC观测计算）
+   - `directAnchorReadout.js` → computeDirectAnchorBatch（直接锚点读出）
+   - `experimentArms.js` → scoreExperimentArm, runExperimentArms（实验臂）
+   - `fieldWorkspace.js` → createFieldWorkspace（场工作区）
+   - `derivedAssetManager.js` → V10DerivedAssetManager（派生资产管理）
+   - `riverObservability.js` → computeRiverObservability（可观测性计算）
+
+3. **RiverMemo 的传播域**:
+   RiverMemo 的传播域是全局 Tag 图，不是任一 Diary/Chunk ANN 索引。每个活动 Artifact 只常驻一份全局编译算子。
+
+## modules/tagmemoV10/ 模块清单
+| 文件 | 大小 | 功能 |
+|------|------|------|
+| experimentArms.js | 56KB | 实验臂（Pure/Gated/Observed三臂） |
+| agentConditioner.js | 30KB | 双条件算子创建 |
+| derivedAssetManager.js | 20KB | 派生资产管理 |
+| relativeTopologyMatcher.js | 20KB | 相对拓扑批匹配 |
+| immutable.js | 15KB | 不可变快照与只读视图 |
+| dstcObservables.js | 14KB | DSTC观测计算 |
+| riverMemoArtifactRepository.js | 12KB | Artifact仓库 |
+| scaledFieldSolver.js | 13KB | 双尺度场求解 |
+| provenance.js | 12KB | 溯源视图 |
+| directAnchorReadout.js | 12KB | 直接锚点读出 |
+| unifiedPathGeometry.js | 11KB | 统一路径几何 |
+| candidateSuperset.js | 10KB | 候选超集构建 |
+| riverMemoWorker.js | 6KB | RiverMemo Worker |
+| riverMemoWorkerPool.js | 6KB | Worker池 |
+| curveProjector.js | 6KB | 候选曲线投影 |
+| riverObservability.js | 4KB | 可观测性计算 |
+| fieldWorkspace.js | 2.5KB | 场工作区创建 |
+
+## 关键文件与行号
+| 文件 | 行号 | 内容 |
+|------|------|------|
+| TagMemoV10Engine.js | 48-51 | VERSION/ALGORITHM_VERSION/ARTIFACT_SCHEMA 常量 |
+| TagMemoV10Engine.js | 53-80 | class TagMemoV10Engine 构造函数 |
+| TagMemoV10Engine.js | 73-77 | RiverMemo传播域注释 |
+| TagMemoV10Engine.js | 221 | buildArtifact() 方法 |
+| TagMemoV10Engine.js | 146 | prepareQuery() 方法 |
+
+## 生产状态
+- V10 Alpha 是实验版本，不替换 V9.2 生产搜索
+- RiverMemo Topology V3 已接管生产执行路径
+- experimentArms.js 等旧 JS 实验构型保留但不在 V3 生产路径中
+- V10 的 Artifact 系统被 RiverMemo 复用为查询溯源和不可变资产的基础设施
+
+关联节点：RiverMemoEngine与TopologyV3(207), rust-vexus-lite记忆管线(209), RiverMemo拓扑理论(210), TagMemoEngine统一构型(198), LightMemo(59), TagMemo V10 Alpha(206)
+Tag: TagMemoV10Engine, v10_alpha, v10.alpha.1, 实验引擎, immutable, provenance, artifact, 双条件算子, 双尺度场, DSTC, 直接锚点, experimentArms, TagMemo V9.1, 2026-07-24

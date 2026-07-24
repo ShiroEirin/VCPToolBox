@@ -1,0 +1,67 @@
+[2026-07-24] - 哈雷酱
+# RiverMemoEngine 与 Topology V3 生产构型
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-24
+适用范围：`RiverMemoEngine.js`（839行）+ `rust-vexus-lite/src/rivermemo_topology_v3.rs`（2520行）当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\RiverMemoEngine.js`（36KB，839行）
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\rivermemo_topology_v3.rs`（89KB，2520行）
+- `D:\github\VCP\VCPToolBox\docs\RIVERMEMO_TOPOLOGY_V3.md`（1055行）
+- 上游commit: `ab618719 VCPMemo-Rust一体化完整底座引擎已上线`
+
+## 核心结论
+RiverMemo Topology V3 是 VCP 记忆系统的生产级连续信息场检索引擎。它建立在 TagMemo V9 已验证的降噪传播底座之上，首次将查询源形成、拓扑传递、河网生成、候选创新与最终排序放入同一个可计算闭环。Topology V3 的全部重计算已下沉至 Rust 原生内核（rayon 并行），JS 门面只负责 V9 查询观测、双场准备和结果组装。
+
+## 版本与算法标识
+| 标识 | 值 |
+|------|-----|
+| VERSION (JS) | `rivermemo_v1` |
+| ALGORITHM_VERSION (JS) | `rivermemo.topology-v3.1` |
+| ALGORITHM_VERSION (Rust) | `rivermemo.topology-v3.1-rust` |
+| RESULT_SCHEMA | `rivermemo-topology-v3-result-v1` |
+| RESULT_SCHEMA (Rust) | `rivermemo-topology-v3-native-result-v1` |
+
+## 工作机制
+1. **JS 门面** (`RiverMemoEngine.js`):
+   - class `RiverMemoEngine(v10Engine, options)` — 要求传入 TagMemoV10Engine 运行时
+   - `getLegacyNativeTopologyV3()` — 延迟加载 rust-vexus-lite 的 `rerankRivermemoTopologyV3` N-API 函数
+   - 原生不可用时抛出 `RIVERMEMO_NATIVE_TOPOLOGY_V3_UNAVAILABLE` 错误，不静默回退
+   - `rerank()` 方法（行425）只准备连续查询场并消费原生结果
+   - `rebindDatabase(db)` / `getArtifactSnapshot(options)` 委托给 v10Engine
+
+2. **Rust 原生内核** (`rivermemo_topology_v3.rs`):
+   - 2520行，使用 rayon 并行计算、rusqlite 数据库、flate2 Gzip 解压
+   - 关键结构: `NativeArtifact`, `MemoRuntime`, `MemoQueryObservation`
+   - N-API 入口: `rerank_rivermemo_topology_v3()`（行2121）
+   - 内部入口: `run_native()`（行1756）
+   - 边权重计算: `edge_weight()`, `independent_fraction()`
+
+3. **总方程**:
+   S_i = Π[0,1][S_i^field + Ω_Q^γ · Π[0,C_ri](λ_ri · C_i · [G_i - E(G|Z_i) - z·σ(G|Z_i)]+) + C_A · SmoothStep((A_i·R_i^A - τ_A)/(s_A - τ_A))]
+   - 双场语义基线 + 关系拓扑创新 + 直接锚点创新
+   - 关系拓扑通道只奖励候选超出同条件期望及其不确定性上界的正创新
+   - 直接锚点通道保护 hop-0 事实接触
+   - 两条创新通道均受独立上限约束，结果投影至 [0,1]
+
+## 关键文件与行号
+| 文件 | 行号 | 内容 |
+|------|------|------|
+| RiverMemoEngine.js | 23-25 | VERSION/ALGORITHM_VERSION/RESULT_SCHEMA 常量 |
+| RiverMemoEngine.js | 9-21 | getLegacyNativeTopologyV3() 延迟加载 |
+| RiverMemoEngine.js | 53-64 | class RiverMemoEngine 构造函数 |
+| RiverMemoEngine.js | 425 | rerank() 方法入口 |
+| rivermemo_topology_v3.rs | 17-18 | Rust端 ALGORITHM_VERSION/RESULT_SCHEMA |
+| rivermemo_topology_v3.rs | 1756 | run_native() 内部入口 |
+| rivermemo_topology_v3.rs | 2121 | rerank_rivermemo_topology_v3() N-API入口 |
+
+## 调用路径
+LightMemo (enginemode=rivermemo) → RiverMemoEngine.rerank() → V10Engine.prepareQuery() → Rust rerank_rivermemo_topology_v3() → 返回排序结果
+
+## 与 TagMemo V9 的关系
+- RiverMemo 不重新发明查询降噪，V9 的 EPA/Pyramid/Spike 传播作为 S_i^field 基线
+- V9 底座负责"哪些记忆被激活"，V3 贡献"激活后的候选如何被创新排序"
+- experimentArms.js 等旧 JS 实验构型保留在仓库中但不属于 V3 生产执行路径
+
+关联节点：TagMemoV10Engine(208), rust-vexus-lite记忆管线(209), RiverMemo拓扑理论(210), TagMemoEngine统一构型(198), LightMemo(59), TagMemo V10 Alpha(206)
+Tag: RiverMemoEngine, rivermemo, topology-v3, rust-native, rayon, 连续信息场, 双场语义基线, 关系拓扑创新, 直接锚点创新, N-API, vexus-lite, TagMemo V9.1, rivermemo_v1, 2026-07-24

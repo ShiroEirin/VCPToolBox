@@ -1,0 +1,141 @@
+[2026-07-22] - 哈雷酱
+⚠️ 实验版本说明：TagMemo V10 Alpha 是统一认知几何实验，不替换 V9.2 生产搜索
+[VCP百科全书] TagMemo V10 Alpha 与引擎 v10 迭代 - 原子切片
+
+一、模块基本信息
+1. 模块名称：TagMemo V10 Alpha
+2. 模块类型：实验性认知几何引擎
+3. 版本号：V10 Alpha (实验)
+4. 所属项目：VCPToolBox / VCPChat
+5. 前端定义：VCPChat\VCPHumanToolBox\renderer_modules\config.js 行942-955
+6. 后端入口：VCPToolBox\TagMemoEngine.js (V10 Alpha 实验入口)
+7. Git 提交标记：44138506 "继续推进引擎向v10迭代的开始"
+8. 功能一句话总结：TagMemo V10 Alpha 统一认知几何实验，在同一不可变 V10 Artifact 上运行 Local/Transfer 双尺度场、Pure/Gated/Observed 三臂
+
+二、功能定位
+
+TagMemo V10 Alpha 是浪潮算法的下一代实验框架，探索统一认知几何在记忆寻址中的应用。与 V9.1/V9.2 生产搜索并行运行，不影响生产链路。V10 Alpha 在同一不可变 V10 Artifact 与同一对称候选超集上运行多臂实验，返回可供服务器批量脚本解析的 JSON 文本。
+
+三、前端命令定义 (config.js 行942-955)
+
+命令名：tagmemo_v10
+所属插件：LightMemo
+
+描述 (行943)：
+```
+TagMemo V10 Alpha 统一认知几何实验 — 不替换 V9.2 生产搜索；
+在同一不可变 V10 Artifact 与同一对称候选超集上运行 Local/Transfer 双尺度场、
+统一路径几何及 Pure/Gated/Observed 三臂，返回可供服务器批量脚本解析的 JSON 文本。
+```
+
+四、实验参数
+
+1. query (textarea, 必填) — 实验查询文本
+2. folder (text, 可选) — 作用域：文件夹
+3. maid (text, 可选) — 作用域：署名
+4. search_all_knowledge_bases (checkbox, 默认 false) — 全库实验（成本较高；权限实验不建议启用）
+5. k (number, 默认 5) — 每个实验臂返回的 Top-K 数量
+6. source_k (number, 默认 16) — 原始查询向量注入 V10 源场时读取的 Tag 数量
+
+7. experiment_arm (select, 默认 'all') — 实验臂选择 (行951)
+   - all — 三臂共享实验上下文
+   - pure — Pure，不读取观测
+   - gated — Gated，门控实验臂
+   - observed — Observed，完整观测实验臂
+   说明：all 共享同一 Artifact、Query State、双尺度场、候选超集与曲线
+
+8. disabled_observables (checkbox_group, 默认 []) — D/S/T/C 消融列表 (行952)
+   - direct (D) — Direct（直接观测）
+   - structural (S) — Structural（结构观测）
+   - thematic (T) — Thematic（主题观测）
+   - closure (C) — Closure（闭包观测）
+   说明：Observed 中被禁用项的边际贡献严格为 0
+
+9. BM25 (checkbox, 默认 true) — 让 BM25 候选进入 V10 对称候选超集
+10. force_artifact_rebuild (checkbox, 默认 false) — 强制重新编译并发布 V10 内存 Artifact
+    说明：正式跑批建议仅第一条预热请求启用，后续固定 artifactSig
+
+五、核心概念
+
+1. V10 Artifact
+   - 不可变的内存资产包
+   - 通过 artifactSig 签名标识
+   - 首次请求可强制重建（force_artifact_rebuild），后续固定签名
+
+2. Local/Transfer 双尺度场
+   - Local 尺度：局部邻域的脉冲传播场
+   - Transfer 尺度：跨域转移场
+   - 两个尺度在同一 Artifact 上独立运行
+
+3. Pure/Gated/Observed 三臂
+   - Pure 臂：不读取任何观测信息，纯几何驱动
+   - Gated 臂：门控实验，部分读取观测
+   - Observed 臂：完整观测，支持 D/S/T/C 消融
+   - 三臂共享同一实验上下文（Artifact、Query State、双尺度场、候选超集与曲线）
+
+4. 对称候选超集
+   - KNN、V10 源场与可选 BM25 各自的候选进入统一超集
+   - 确保不同臂在同一候选池上比较
+
+5. D/S/T/C 观测消融
+   - Direct：直接观测（查询向量与候选的相似度）
+   - Structural：结构观测（图拓扑信息）
+   - Thematic：主题观测（Tag 语义聚类）
+   - Closure：闭包观测（关系闭包信息）
+   - 消融时被禁用项的边际贡献严格为 0
+
+六、与 V9.1/V9.2 的关系
+
+- V9.1：生产记忆寻址（tagmemo_ab 命令，单轨 ArtifactBundle 对照测试）
+- V9.2：当前生产搜索链路
+- V10 Alpha：实验性统一认知几何，不替换 V9.2
+- V10 与 V9.1/V9.2 共享同一 SQLite 事实层和 Rust 向量引擎
+- V10 的 Artifact 构建独立于 V9.1 的 ArtifactBundle
+
+七、Git 迭代历史
+
+相关提交（VCPToolBox 仓库）：
+- 44138506 — 继续推进引擎向v10迭代的开始
+- 3e65d102 — 新增浪潮统一探针函数
+- 4965392b — 优化浪潮调参界面
+- 52ec0537 — 全量重构浪潮测地线算法
+- 5da5f140 — 调用浪潮系统构建timeline记忆
+- 4a14732e — 新增浪潮运行时监控器
+
+八、LightMemo 插件中的位置
+
+config.js 行895-957 定义了 LightMemo 插件的四个命令：
+1. query — 快速回忆/主动检索
+2. map_distance — 语义测绘
+3. tagmemo_ab — V9.1 单轨记忆寻址对照测试
+4. tagmemo_v10 — V10 Alpha 统一认知几何实验
+
+LightMemo 插件描述 (行897)：
+```
+主动检索日记本或知识库；支持语义距离测绘、
+TagMemo V9.1 单轨记忆寻址对照测试，
+以及 TagMemo V10 Alpha 统一认知几何实验。
+```
+
+九、实验状态声明
+
+⚠️ V10 Alpha 是实验版本：
+- 不替换 V9.2 生产搜索
+- 返回 JSON 文本供服务器批量脚本解析
+- 正式跑批建议固定 artifactSig
+- 权限实验建议明确指定 folder 或 maid
+- 全库实验成本较高，不建议启用
+
+十、2026-07-24 上游更新——VCPMemo-Rust一体化完整底座引擎
+- 上游commit: ab618719 "VCPMemo-Rust一体化完整底座引擎已上线"
+- 上游commit: 9a365430 "将浪潮V10完全重构为rust版本和vexus单元一体化构建内存空间"
+- 上游commit: e74006da "merge: publish TagMemo v10 unified semantic dynamics engine beta"
+- 新增 RiverMemoEngine.js (839行) 作为 Topology V3 生产门面
+- 新增 TagMemoV10Engine.js (1706行) 作为 V10 Alpha 完整引擎
+- 新增 modules/tagmemoV10/ 目录（17个模块文件，总计~250KB）
+- 新增 rust-vexus-lite/src/ 下4个Rust文件（memo_sensing.rs, memo_pipeline.rs, memo_dtsc.rs, rivermemo_topology_v3.rs，总计~210KB）
+- 新增 docs/RIVERMEMO_TOPOLOGY_V3.md (1055行) 完整理论文档
+- LightMemo manifest 升级至 v1.4.0，默认引擎模式改为 rivermemo
+- V10生产执行路径已完全下沉至Rust原生内核，JS只负责查询场准备和结果组装
+
+Tag: TagMemo V10 Alpha, 统一认知几何, Local/Transfer, Pure/Gated/Observed, D/S/T/C消融, V9.2生产搜索, LightMemo, artifactSig, 对称候选超集, RiverMemo, Topology V3, Rust一体化, 2026-07-24

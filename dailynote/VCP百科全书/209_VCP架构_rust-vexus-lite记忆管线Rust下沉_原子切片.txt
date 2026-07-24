@@ -1,0 +1,82 @@
+[2026-07-24] - 哈雷酱
+# rust-vexus-lite 记忆管线 Rust 下沉
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-24
+适用范围：`rust-vexus-lite/src/` 目录下4个新增Rust源文件当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\memo_sensing.rs`（20KB，583行）
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\memo_pipeline.rs`（48KB，1465行）
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\memo_dtsc.rs`（60KB，1656行）
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\rivermemo_topology_v3.rs`（89KB，2520行）
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\Cargo.toml`
+- 编译产物: `vexus-lite.win32-x64-msvc.node`（3.9MB）, `vexus-lite.linux-x64-gnu.node`（4.2MB）
+- 上游commit: `9a365430 将浪潮V10完全重构为rust版本和vexus单元一体化构建内存空间`
+
+## 核心结论
+rust-vexus-lite 是 VCP 记忆系统的 Rust 原生计算底座。本次上游更新新增了4个核心Rust源文件，将 TagMemo V9.1/V9.2 的 Spike 感知、EPA/Pyramid/Spike 融合管线、DSTC 双轨语义一致性以及 RiverMemo Topology V3 的全部重计算下沉至 Rust，使用 rayon 并行计算框架。JS 层只负责查询场准备和结果组装，不再执行任何重量级传播计算。
+
+## 四大Rust模块
+
+### 1. memo_sensing.rs — V9 Spike 感知观测
+- ALGORITHM_VERSION: `tagmemo.spike-v9.1-rust-shared`
+- OBSERVATION_SCHEMA: `vexus-unified-memo-observation-v1`
+- 功能: 将 V9 的 Spike 传播（激活波在Tag图上的传播）实现为Rust原生
+- 关键结构:
+  - `SenseInput` — 包含 queryId, seeds[], config
+  - `SenseSeed` — id, energy(默认1.0), sourceType(默认"seed")
+  - `SenseConfig` — max_safe_hops, base_momentum, firing_threshold, base_decay, wormhole_decay, tension_threshold, max_neighbors_per_node, return_flow_factor, fir_gamma
+  - `SenseOutput` — 观测结果
+  - `ObservationNode` / `ObservationParent` / `ObservationEdge` — 河网结构
+  - `SenseDiagnostics` — 诊断信息
+- 导出函数: `sense_typed()`, `sense()`
+
+### 2. memo_pipeline.rs — V9.2 EPA/Pyramid/Spike 融合管线
+- PIPELINE_ALGORITHM: `tagmemo.epa-pyramid-spike-fusion-v9.2-rust`
+- PIPELINE_SCHEMA: `vexus-unified-memo-pipeline-v1`
+- 功能: 将 V9.2 的 EPA（能量传播）、Pyramid（层级金字塔）、Spike（尖峰传播）三种降噪源融合为统一管线
+- 依赖: `usearch::Index`（向量索引）, `rusqlite`（数据库）, `base64`
+- 内部函数: `positive()`, `clamp01()`, `magnitude()`, `dot()`, `cosine()`, `normalize()`
+- 导出: `MemoPipelineTask`, `run_with_runtime`
+
+### 3. memo_dtsc.rs — DSTC 双轨语义一致性
+- ALGORITHM_VERSION: `tagmemo.dtsc-v9.2.1-rust-js-parity`
+- RESULT_SCHEMA: `vexus-dtsc-native-result-v1`
+- 功能: Dual-Track Semantic Consistency 双轨语义一致性计算，保证 Rust 和 JS 实现的输出一致
+- 使用 rayon 并行计算
+- 依赖: `rivermemo_topology_v3::{load_artifact_from_runtime, MemoRuntime, NativeArtifact}`
+- 导出: `MemoDtscTask`, `rerank_with_runtime`
+
+### 4. rivermemo_topology_v3.rs — RiverMemo Topology V3 原生内核
+- ALGORITHM_VERSION: `rivermemo.topology-v3.1-rust`
+- RESULT_SCHEMA: `rivermemo-topology-v3-native-result-v1`
+- 功能: RiverMemo Topology V3 完整计算内核（详见切片207）
+- 使用 rayon 并行、rusqlite 数据库、flate2 Gzip 解压、serde_json
+- 导出: `NativeArtifact`, `MemoRuntime`, `rerank_rivermemo_topology_v3`
+
+## Cargo.toml 核心依赖
+| 依赖 | 版本 | 用途 |
+|------|------|------|
+| usearch | 2.8 | 向量索引（ANN搜索） |
+| rusqlite | 0.29 | SQLite数据库 |
+| napi | 2.16 (features=napi8) | Node.js N-API绑定 |
+| rayon | — | 并行计算框架 |
+| flate2 | — | Gzip解压 |
+| serde | — | 序列化/反序列化 |
+
+## 编译产物
+| 平台 | 文件 | 大小 |
+|------|------|------|
+| Windows x64 | vexus-lite.win32-x64-msvc.node | 3,985,920 bytes (3.9MB) |
+| Linux x64 | vexus-lite.linux-x64-gnu.node | 4,191,776 bytes (4.0MB) |
+
+## N-API 接口一览
+| Rust导出函数 | 对应JS调用 | 功能 |
+|-------------|-----------|------|
+| sense / sense_typed | V9 Spike传播 | 感知观测 |
+| run_with_runtime | V9.2融合管线 | EPA/Pyramid/Spike融合 |
+| rerank_with_runtime | DSTC双轨 | 双轨语义一致性 |
+| rerank_rivermemo_topology_v3 | RiverMemo V3 | Topology V3生产重排 |
+
+关联节点：RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), RiverMemo拓扑理论(210), rust-vexus-lite向量引擎(197), TagMemoEngine统一构型(198)
+Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology_v3, rayon, N-API, usearch, rusqlite, EPA, Pyramid, Spike, DSTC, V9.1, V9.2, topology-v3, TagMemo V9.1, 2026-07-24
