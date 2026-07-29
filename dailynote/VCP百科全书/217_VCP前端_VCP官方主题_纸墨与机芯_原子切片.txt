@@ -1,0 +1,71 @@
+[2026-07-29] - 哈雷酱
+[VCP百科全书] VCP 官方主题 "纸墨与机芯" (Industrial Core / Editorial Ink)
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-29
+适用范围：`styles/themes.css` 及 `AdminPanel-Vue/src/style/theme-presets.css` 当前源码
+事实来源：
+- `styles/themes.css` (文件头注释，423行新增)
+- `AdminPanel-Vue/src/style/theme-presets.css` (67行新增)
+- `AdminPanel-Vue/src/features/theme-editor/themeEngine.ts` (30行新增)
+- `AdminPanel-Vue/src/stores/app.ts` (10行变更)
+- 上游commit: `ac27171 上架全新vchat默认主题(对齐官网配色)` (VCPChat, 2026-07-29)
+- 上游commit: `86c84b61 添加vcp官方配色主题` (VCPToolBox, 2026-07-29)
+
+一、概述
+VCP 官方主题 "纸墨与机芯" 是由 Coco 为 Professor Ryan 设计的官方视觉主题，对齐 VCP 官网配色。同时更新了 VCPChat 前端和 VCPToolBox AdminPanel-Vue 管理面板。
+
+二、主题设计理念
+视觉语言：石墨舱壁、机械光环、工业排印；温暖的编辑用纸、朱砂标记、青绿状态信号。
+
+Dark 主题：Industrial Core / 工业核心
+- 色调：工业石墨 / 骨白 / 警示黄 / 铜绿
+- 壁纸：vcp_industrial_core_dark.jpg
+
+Light 主题：Editorial Ink / 编辑墨色
+- 色调：编辑纸面 / 朱砂标记 / 青绿信号
+
+三、Dark 主题核心色值 (Industrial Core)
+| CSS 变量 | 值 | 用途 |
+|----------|-----|------|
+| --primary-bg | #171A1D | 主背景（石墨） |
+| --secondary-bg | #20252A | 次级背景 |
+| --tertiary-bg | #171A1D | 三级背景 |
+| --accent-bg | #2A3035 | 强调背景 |
+| --border-color | #3B4449 | 边框色 |
+| --input-bg | rgba(32, 37, 42, 0.92) | 输入框背景 |
+| --chat-wallpaper-dark | url('../assets/wallpaper/vcp_industrial_core_dark.jpg') | 聊天壁纸 |
+
+四、涉及文件
+
+VCPChat 前端：
+| 文件 | 变更 | 说明 |
+|------|------|------|
+| `styles/themes.css` | +423行 | 完整主题定义，Dark/Light 双模式 CSS 变量 |
+| `styles/notifications.css` | +24行变 | 通知样式适配新主题 |
+| 新增配色CSS | +357行 | 主题专属配色文件（文件名含中文） |
+
+VCPToolBox AdminPanel-Vue：
+| 文件 | 变更 | 说明 |
+|------|------|------|
+| `src/style/theme-presets.css` | +67行 | 主题预设 CSS |
+| `src/style/index.css` | +20行变 | 全局样式适配 |
+| `src/features/theme-editor/themeEngine.ts` | +30行 | 主题引擎逻辑更新 |
+| `src/stores/app.ts` | +10行变 | 应用状态存储适配 |
+| `dist/` | 全量重建 | 构建产物更新（14个JS/CSS文件重命名） |
+
+五、AdminPanel-Vue 主题引擎
+themeEngine.ts 新增 30 行逻辑，支持主题预设切换。theme-presets.css 定义了预设主题的 CSS 变量集合，app.ts 状态存储管理当前选中主题。
+
+构建产物变更（dist/）：
+- 14个 JS 文件重命名（hash 变更）
+- 2个 CSS 文件重命名
+- index.html 更新引用
+- 新增 app-BV70X2Qt.js，删除 app-BDU_VqO9.js
+
+六、关联模块
+- Themesmodules (134)：VCPChat 前端主题模块
+- AdminPanel-Vue (198)：VCPToolBox 管理面板，同步更新主题配色
+- notifications.css：通知样式，适配新主题色值
+
+Tag: VCP官方主题, 纸墨与机芯, Industrial Core, Editorial Ink, 官网配色, theme-presets, themeEngine, Dark/Light, 2026-07-29
