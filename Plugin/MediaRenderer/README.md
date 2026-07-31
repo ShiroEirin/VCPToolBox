@@ -1,8 +1,11 @@
 # MediaRenderer
 
-MediaRenderer 使用 VCP 已有的托管 Chrome 运行时，通过 Puppeteer/CDP 将 AI 编写的 HTML 或 SVG 渲染为静态图片。
+MediaRenderer 包含两条彼此独立的生成路径：
 
-插件不通过 ChromeBridge 传输源码或截图，而是直接调用根层浏览器运行时，取得 DevTools WebSocket Endpoint 后创建独立浏览器上下文。
+- 使用 VCP 托管 Chrome 与服务器全局 FFmpeg，将 AI 编写的 HTML/SVG 渲染为静态图片、GIF 或视频。
+- 在独立 Node.js 子进程中运行 AI 编写的音乐合成 JavaScript，直接生成 WAV/PCM16；此路径不启动浏览器，也不需要 FFmpeg 或额外 npm 依赖。
+
+图形渲染不通过 ChromeBridge 传输源码或截图，而是直接调用根层浏览器运行时，取得 DevTools WebSocket Endpoint 后创建独立浏览器上下文。音乐合成则完全绕过浏览器运行时。
 
 ## 功能范围
 
@@ -15,14 +18,21 @@ MediaRenderer 使用 VCP 已有的托管 Chrome 运行时，通过 Puppeteer/CDP
 - PNG/WebP 透明背景
 - JPG 自定义底色
 - 最多 16 步串行批量渲染
-- 使用现有图片作为底图添加 CSS/SVG/Canvas 特效
-- 支持 Data URI、HTTP/HTTPS 和 `file://` 底图
+- HTML/CSS/SVG 源码直接引用 Data URI、HTTP/HTTPS 和 `file://` 图片、视频、字体等资源
+- Node.js 侧安全预取源码资源并改写为 Data URI
 - ImageFileServer 图床 URL
 - 可选 Base64 多模态返回
-- 除显式底图外的外部资源请求阻断
-- HTML JavaScript 默认关闭
-
-当前版本暂不包含 GIF 和 MP4，但渲染器的输出目录及部署环境可在后续接入全局 FFmpeg 编码器。
+- 除源码明确引用并通过校验的资源外，页面运行时网络请求全部阻断
+- HTML JavaScript 默认关闭，动画或内置库模式自动开启
+- GIF、MP4、WebM 确定性逐帧渲染
+- 透明 GIF 与透明 WebM
+- Anime.js 3.2.2、Three.js r160 常见 CDN 标签自动重定向到本地版本
+- 本地、内网和公网图片/音频/视频/字体素材
+- 通过直接 `audioUrl` 进行 MP4/WebM 音频混流
+- AI 自由 JavaScript 程序音乐/音效合成
+- 方波、脉冲波、三角波、锯齿波、正弦波与确定性噪声辅助 API
+- 固定时长、单/双声道 PCM16 WAV 输出
+- 独立子进程、执行超时与进程树回收
 
 ## 运行前提
 
@@ -38,7 +48,9 @@ VCP_BROWSER_RUNTIME_ENABLED=true
 VCP_BROWSER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 ```
 
-插件复用根项目已经安装的 Puppeteer 和 Sharp，不需要在插件目录单独安装依赖。
+插件复用根项目已经安装的 Puppeteer、Sharp 和 mime-types，不需要在插件目录单独安装依赖。GIF/视频还要求系统 PATH 中存在 FFmpeg；也可以通过 `FfmpegPath` 配置绝对路径。
+
+`GenerateAudio` 只依赖当前 Node.js 运行时。只生成 WAV 时，不要求启用托管浏览器，也不要求安装 FFmpeg。
 
 ## 透明图标怎么实现
 
@@ -106,28 +118,28 @@ fileName:「始」gradient-icon「末」
 <<<[END_TOOL_REQUEST]>>>
 ```
 
-## 基于已有图片添加代码特效
+## 在源码中直接引用图片、视频和字体
 
-通过 `sourceImage` 传入底图，并在 HTML 或 SVG 源码中使用 `{{SOURCE_IMAGE}}` 占位符。插件会在渲染前把占位符替换为经过验证的素材地址。
+推荐把资源 URL 直接写进 HTML/CSS/SVG，不需要创建 `assets` JSON，也不需要资源 id 或占位符。
 
-`sourceImage` 支持：
+支持的常见位置：
 
-- `data:image/...;base64,...`
-- HTTP/HTTPS 图片 URL
-- `file://` 本地图片
-- VCP ImageFileServer 图片 URL
+- `<img src>`、`<video src>`、`<audio src>`、`<source src>` 和 `poster`
+- `<img srcset>`
+- SVG `href`、`xlink:href`
+- CSS `url(...)`，包括 `@font-face`
+- `data:`、`file://`、HTTP/HTTPS 和 VCP ImageFileServer URL
 
-对于 `file://`，插件会在 Node.js 侧读取并验证图片，然后转成 Data URI；Chromium 不会直接获得本地文件访问权限。
+插件先在 Node.js 侧提取 URL，逐跳检查远程重定向和目标地址，再读取或下载资源并改写成 Data URI。Chromium 不直接访问本地文件系统，也不能任意联网。
 
-下面使用 CSS 给已有图片增加饱和度、霓虹投影、圆角和边框光效：
+下面直接引用本地图片，并用 CSS 添加饱和度、霓虹投影、圆角和边框光效：
 
 ```text
 <<<[TOOL_REQUEST]>>>
 maid:「始」Nova「末」,
 tool_name:「始」MediaRenderer「末」,
 command:「始」RenderImage「末」,
-sourceImage:「始」file:///path/to/source.png「末」,
-html:「始」<!doctype html><style>html,body{margin:0;width:100%;height:100%;background:#080b16}.stage{position:relative;width:100%;height:100%;display:grid;place-items:center;overflow:hidden}.source{width:78%;height:78%;object-fit:cover;border-radius:12%;filter:saturate(1.35) contrast(1.1) drop-shadow(0 0 28px #22d3eeaa)}.glow{position:absolute;inset:8%;border:4px solid #67e8f9;border-radius:15%;mix-blend-mode:screen;box-shadow:0 0 50px #06b6d4}</style><div class="stage"><img class="source" src="{{SOURCE_IMAGE}}"><div class="glow"></div></div>「末」,
+html:「始」<!doctype html><style>html,body{margin:0;width:100%;height:100%;background:#080b16}.stage{position:relative;width:100%;height:100%;display:grid;place-items:center;overflow:hidden}.source{width:78%;height:78%;object-fit:cover;border-radius:12%;filter:saturate(1.35) contrast(1.1) drop-shadow(0 0 28px #22d3eeaa)}.glow{position:absolute;inset:8%;border:4px solid #67e8f9;border-radius:15%;mix-blend-mode:screen;box-shadow:0 0 50px #06b6d4}</style><div class="stage"><img class="source" src="file:///D:/media/source.png"><div class="glow"></div></div>「末」,
 width:「始」1024「末」,
 height:「始」1024「末」,
 format:「始」png「末」,
@@ -146,7 +158,7 @@ fileName:「始」neon-effect「末」
 - CSS 变换和透视
 - Canvas；使用 Canvas 时需显式设置 `allowJavaScript=true`
 
-如果提供了 `sourceImage`，但源码中没有 `{{SOURCE_IMAGE}}`，插件会拒绝请求，避免素材参数被静默忽略。
+旧版 `sourceImage + {{SOURCE_IMAGE}}` 和 `assets + {{ASSET:id}}` 仍兼容，但新调用不再推荐使用。提供旧版 `sourceImage` 却没有相应占位符时，插件仍会拒绝请求。
 
 ## 壁纸调用
 
@@ -197,16 +209,99 @@ fileName2:「始」cyan-triangle「末」
 
 插件会严格按照步骤顺序执行，并在一个结果中返回所有图片 URL。批量上限为 16 张，以避免一次调用长期占用浏览器和内存。
 
+## 程序化音乐生成
+
+`GenerateAudio` 接受 AI 编写的 JavaScript 合成代码，在专用子进程中生成 WAV。调用必须带有用户提供的 6 位管理员验证码：
+
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」MediaRenderer「末」,
+command:「始」GenerateAudio「末」,
+requireAdmin:「始」用户提供的6位管理员验证码「末」,
+durationMs:「始」8000「末」,
+sampleRate:「始」44100「末」,
+channels:「始」2「末」,
+tempo:「始」160「末」,
+seed:「始」42「末」,
+code:「始」function synthesize(api) {
+    const notes = ['C5', 'E5', 'G5', 'C6', 'G5', 'E5', 'D5', 'G4'];
+    for (let step = 0; step < 32; step++) {
+        api.addNote({
+            note: notes[step % notes.length],
+            start: step * 0.25,
+            duration: 0.2,
+            wave: 'square',
+            duty: 0.25,
+            volume: 0.2,
+            pan: step % 2 ? 0.2 : -0.2,
+            attack: 0.005,
+            release: 0.04
+        });
+    }
+}「末」,
+fileName:「始」eight-bit-theme「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+`code` 必须声明 `synthesize(api)`，可以同步或异步执行。插件预先分配固定长度的 `Float32Array` 声道：
+
+```js
+function synthesize(api) {
+    for (let frame = 0; frame < api.left.length; frame++) {
+        const time = frame / api.sampleRate;
+        const phase = time * 220 % 1;
+        const sample = phase < 0.25 ? 0.15 : -0.15;
+        api.left[frame] += sample;
+        api.right[frame] += sample;
+    }
+}
+```
+
+可用 API：
+
+| 成员 | 说明 |
+|---|---|
+| `sampleRate`、`duration`、`durationMs` | 固定音频时间轴 |
+| `channels`、`channelData`、`left`、`right` | 声道和采样数组；单声道时 right 与 left 指向同一数组 |
+| `tempo`、`secondsPerBeat`、`beatToSeconds()` | 节拍辅助 |
+| `seed`、`random()`、`noise()` | 可复现随机数与白噪声 |
+| `noteToFrequency()` | 将 C4、F#5、Bb3 等音符转换为 Hz |
+| `oscillator()` | sine、square/pulse、triangle、saw/sawtooth |
+| `envelope()` | ADSR 包络计算 |
+| `addNote()` | 快速叠加带波形、包络、音量和声像的音符 |
+| `Math` | 标准 JavaScript 数学对象 |
+
+代码也可以完全忽略便捷 API，自行实现振荡器、滤波、延迟、混响、鼓机、Tracker、算法作曲或其他 DSP。可信 Worker 最后统一处理非有限值、峰值归一化、主音量、尾部淡出和 WAV 编码。
+
+音乐参数：
+
+| 参数 | 必需 | 默认值 | 说明 |
+|---|---|---|---|
+| command | 是 | - | `GenerateAudio` |
+| requireAdmin | 是 | - | 用户提供的 6 位管理员验证码 |
+| code | 是 | - | 声明 `synthesize(api)` 的 JavaScript，最大 1MB |
+| durationMs | 否 | 10000 | 100ms 至管理员配置的最大时长 |
+| sampleRate | 否 | 44100 | 8000-48000 Hz |
+| channels | 否 | 2 | 1 或 2 |
+| tempo | 否 | 120 | 20-400 BPM |
+| seed | 否 | 1 | 0 至 2147483647 |
+| masterVolume | 否 | 0.8 | 0-1 |
+| fadeOutMs | 否 | 30 | 尾部淡出时间 |
+| timeoutMs | 否 | 30000 | 不得超过 `AudioSynthesisTimeoutMs` |
+| fileName | 否 | generated-audio | 输出文件名主体 |
+
+输出固定为 WAV、16-bit PCM。需要 MP3/AAC/Opus 时，可后续通过其他转码流程处理；音乐合成自身不依赖压缩编码器。
+
 ## 参数说明
 
 | 参数 | 必需 | 默认值 | 说明 |
 |---|---|---|---|
 | html | 二选一 | - | HTML 源码 |
 | svg | 二选一 | - | SVG 源码 |
-| sourceImage | 否 | - | 底图；支持 Data URI、HTTP/HTTPS、`file://` |
+| sourceImage | 否 | - | 旧版单底图兼容参数；新调用优先直接在源码写 URL |
 | width | 是 | - | 64-4096 |
 | height | 是 | - | 64-4096 |
-| format | 否 | 透明时 PNG，否则 JPG | png、jpg、webp |
+| format | 否 | 透明时 PNG，否则 JPG | png、jpg、webp、gif、mp4、webm |
 | transparent | 否 | false | 保留 Alpha 通道 |
 | background | 否 | #ffffff | 非透明输出的 Alpha 合成底色 |
 | quality | 否 | 90 | JPG/WebP 质量，1-100 |
@@ -215,31 +310,45 @@ fileName2:「始」cyan-triangle「末」
 | waitMs | 否 | 0 | 截图前额外等待，最大 10000ms |
 | timeoutMs | 否 | 45000 | 单步超时，最大 120000ms |
 | fileName | 否 | UUID | 文件名主体 |
+| libraries | 否 | - | 兼容参数；源码使用受支持 CDN 标签时可省略 |
+| assets | 否 | [] | 旧版占位符/音频兼容参数，普通素材无需使用 |
+| durationMs | 动画 | 5000 | 动画时长，100-60000ms |
+| fps | 动画 | 30 | 每秒帧数，1-60 |
+| readyMode | 否 | 动画为 auto | load、auto、signal |
+| audioUrl | 否 | - | 直接混入 MP4/WebM 的音频 URL，支持 data/file/HTTP(S) |
+| audioAssetId | 否 | - | 旧版兼容：选择 assets 中的音频 id |
 
 ## 安全策略
 
 AI 提供的 HTML/SVG 按不可信输入处理：
 
-1. 默认禁用 HTML JavaScript。
-2. 只有显式声明的 `sourceImage` 可以作为外部图片素材。
-3. HTTP/HTTPS 模式只放行与 `sourceImage` 完全相同的 URL；页面中的其他网络请求继续被阻断。
-4. `file://` 底图由 Node.js 读取并转换为 Data URI，Chromium 不直接访问本地文件系统。
-5. 未声明底图时，仅允许 about:blank、Data URI 和 Blob URL。
-6. 本地或内联底图最大 25MB，每份 HTML/SVG 源码最多 2MB。
-7. 宽高和总像素数受限。
-8. 每一步使用独立浏览器上下文和页面。
-9. 页面完成后立即关闭。
-10. 文件名会移除路径分隔符及危险字符。
-11. 输出只能写入 image/media-renderer。
+1. 默认禁用 HTML JavaScript；动画、显式内置库或受支持 CDN 标签模式自动开启。
+2. 源码中的静态资源 URL、`audioUrl`、旧版 `sourceImage/assets` 都由 Node.js 预取。
+3. 通过校验的资源会改写为 Data URI；页面运行时新增的任意 HTTP/HTTPS/file 请求仍被阻断。
+4. `file://` 素材由 Node.js 读取，Chromium 不直接访问本地文件系统。
+5. 默认允许显式内网素材；可通过 `AllowPrivateNetworkAssets=false` 禁止。
+6. 云元数据地址始终禁止，重定向后的每个 URL 都重新校验。
+7. 单素材最大 50MB、总素材最大 100MB，每份 HTML/SVG 源码最多 2MB。
+8. 宽高、总像素数、时长、FPS 和总帧数受限。
+9. 每一步使用独立浏览器上下文和页面。
+10. 页面完成后立即关闭，逐帧临时目录无论成功失败都会清理。
+11. FFmpeg 使用参数数组启动，不通过 shell 拼接用户输入。
+12. 文件名会移除路径分隔符及危险字符。
+13. 图片/GIF 仅写入 image/media-renderer；MP4/WebM/WAV 仅写入 file/media-renderer。
+14. GenerateAudio 在启动 Worker 前强制比对用户提交的 `requireAdmin` 与 PluginManager 服务端注入的解密验证码。
+15. 合成代码运行在独立 Node.js 子进程；超时会终止进程树，主服务不会执行 AI 合成代码。
+16. 合成代码大小、时长、采样率、声道数、总声道采样数、Worker 输出及 WAV 文件大小均有限制。
+17. Worker 结束后由主进程重新校验 WAV 头、PCM 格式、采样率、声道数、数据长度和实际时长。
 
-普通字体和附加图片仍应使用系统字体、内联 SVG、Data URI 或 CSS 绘制。需要编辑的主图片应通过 `sourceImage` 显式声明，而不是在 HTML 中任意引用网络或本地地址。
+普通字体、图片和视频可以直接在源码中使用 Data URI、`file://` 或 HTTP/HTTPS。旧版 `assets` 与 `sourceImage` 仅用于兼容已有调用。
 
 ## 输出
 
 生成物保存到：
 
 ```text
-image/media-renderer/
+image/media-renderer/   # PNG/JPG/WebP/GIF
+file/media-renderer/    # MP4/WebM/WAV
 ```
 
 返回结果包括：
@@ -254,4 +363,105 @@ image/media-renderer/
 - 文件大小
 - 批量任务的每步结果
 
-默认只返回 URL。只有 showBase64=true 时才额外返回图片 Data URI。
+默认只返回 URL。只有静态图片设置 showBase64=true 时才额外返回图片 Data URI；GIF/视频不内联 Base64。
+
+## GIF 与视频调用
+
+动画使用逻辑时间逐帧渲染，不是让浏览器实时录屏。对于 `durationMs=5000`、`fps=30`，插件生成 150 帧；每一帧都以绝对时间调用页面帧函数，所以机器负载不会改变动画进度。
+
+页面使用以下协议：
+
+```html
+<script>
+window.__MEDIA_RENDERER__.setFrameRenderer(async (timeMs, frameIndex, fps) => {
+    const seconds = timeMs / 1000;
+    // 根据绝对时间更新 DOM、Canvas、Anime.js 或 Three.js 场景。
+});
+
+window.__MEDIA_RENDERER__.setReady();
+</script>
+```
+
+异步加载字体、模型或纹理时，应在全部初始化完成后调用 `setReady()`，并传入：
+
+```text
+readyMode: signal
+```
+
+如果没有注册帧函数，插件会暂停 Web Animations API/CSS 动画并设置其 `currentTime`。复杂 Anime.js、Canvas 和 Three.js 动画应显式注册帧函数，避免依赖真实时钟或 `requestAnimationFrame` 的累计增量。
+
+### 透明 GIF 示例
+
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」MediaRenderer「末」,
+command:「始」RenderAnimation「末」,
+html:「始」<!doctype html><style>html,body{margin:0;width:100%;height:100%;background:transparent}.stage{width:100%;height:100%;display:grid;place-items:center}.dot{width:96px;height:96px;border-radius:50%;background:#22d3ee;box-shadow:0 0 30px #06b6d4}</style><div class="stage"><div class="dot"></div></div><script>const dot=document.querySelector('.dot');window.__MEDIA_RENDERER__.setFrameRenderer((timeMs)=>{const p=(timeMs%2000)/2000;dot.style.transform=`translateX(${Math.sin(p*Math.PI*2)*170}px)`;});window.__MEDIA_RENDERER__.setReady();</script>「末」,
+width:「始」640「末」,
+height:「始」360「末」,
+format:「始」gif「末」,
+transparent:「始」true「末」,
+durationMs:「始」2000「末」,
+fps:「始」24「末」,
+readyMode:「始」signal「末」,
+fileName:「始」moving-dot「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+GIF 只有索引透明色，不具备 PNG 那样的 8-bit 半透明通道。发光、阴影和抗锯齿边缘会被量化；复杂半透明动画优先使用透明 WebM。
+
+## Anime.js 与 Three.js 的 CDN 本地重定向
+
+AI 可以直接输出熟悉的传统全局 CDN 标签：
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+```
+
+插件识别 jsDelivr、unpkg、cdnjs 上路径匹配的 Anime.js/Three.js，移除远程标签并注入本地文件，完全不会请求 CDN：
+
+- Anime.js 提供全局 `window.anime`，本地版本 3.2.2。
+- Three.js 提供全局 `window.THREE`，本地版本 r160。
+- 其他外部脚本一律拒绝执行。
+- ES Module 形式的 Three.js/import map 当前不支持，请使用传统 `three.min.js` 全局脚本。
+
+旧的 `libraries: anime,three` 参数继续兼容。依赖直接复用 `AdminPanel-Vue/vendor`，不复制到插件目录。
+
+## 旧版 assets 兼容
+
+普通素材应直接写在源码中。仅旧调用需要继续使用 `assets` 数组或 JSON 字符串：
+
+```json
+[
+  {
+    "id": "music",
+    "type": "audio",
+    "source": "file:///path/to/music.mp3"
+  },
+  {
+    "id": "titleFont",
+    "type": "font",
+    "source": "http://192.168.1.20/assets/title.woff2"
+  }
+]
+```
+
+源码中通过占位符使用素材：
+
+```css
+@font-face {
+    font-family: TitleFont;
+    src: url("{{ASSET:titleFont}}") format("woff2");
+}
+```
+
+新调用通过 URL 直接指定 MP4/WebM 音轨：
+
+```text
+audioUrl: file:///D:/media/music.mp3
+```
+
+旧调用仍可使用 `audioAssetId: music`。音频由 Node.js 安全读取或下载，再交给 FFmpeg 临时文件混流，不依赖浏览器自动播放。GIF 不包含音频。
+
+默认允许显式声明的 localhost、局域网和公网 HTTP/HTTPS 素材。页面未声明的网络访问仍会被阻断，云元数据地址始终禁止。
