@@ -1,162 +1,161 @@
-[2026-07-29] - 哈雷酱
-[VCP百科全书] MediaRenderer - HTML/SVG 媒体渲染器
+[2026-07-31] - 哈雷酱
+[VCP百科全书] MediaRenderer - HTML/SVG/程序音乐媒体生成器
 
 状态：CURRENT_VERIFIED
-最后核验：2026-07-29
+最后核验：2026-07-31（第7次上游合并后重新核验，v1.1.0→v2.2.0重大升级）
 适用范围：`Plugin/MediaRenderer/` 当前源码
 事实来源：
-- `Plugin/MediaRenderer/plugin-manifest.json` (manifestVersion 1.0.0)
-- `Plugin/MediaRenderer/MediaRenderer.js` (623行)
-- `Plugin/MediaRenderer/README.md` (257行)
-- `Plugin/MediaRenderer/config.env.example`
-- 上游commit: `47f4ffc1 新增插件` (2026-07-29)
+- `Plugin/MediaRenderer/plugin-manifest.json` (v2.2.0, manifestVersion 1.0.0)
+- `Plugin/MediaRenderer/MediaRenderer.js` (623行→大幅扩展)
+- `Plugin/MediaRenderer/AudioSynthesisWorker.js` (255行, 新增)
+- `Plugin/MediaRenderer/README.md` (467行, 从257行扩展)
+- `Plugin/MediaRenderer/config.env.example` (40行, 从21行扩展)
+- 上游commit: `59a92268 完成多媒体代码插件工程化全套落地` (2026-07-31)
 
 一、插件基本信息
-1. 插件名称：MediaRenderer / HTML/SVG 媒体渲染器
+1. 插件名称：MediaRenderer / HTML/SVG/程序音乐媒体生成器
 2. 插件类型：hybridservice
-3. 版本号：1.1.0
+3. 版本号：2.2.0（从v1.1.0升级）
 4. 通信协议：direct, timeout=300000ms (5分钟)
 5. 入口文件：MediaRenderer.js
-6. 功能一句话总结：使用 VCP 托管 Chrome 的 CDP 运行时，将 AI 编写的 HTML 或 SVG 渲染为 64-4096 像素的 PNG、JPG 或 WebP 图片
+6. requiresAdmin: true（v2.2.0新增，因GenerateAudio需管理员验证码）
+7. 功能一句话总结：使用 VCP 托管 Chrome 与系统 FFmpeg 渲染 HTML/SVG 图片和动画；也可在无需浏览器与 FFmpeg 的独立 Node.js 子进程中执行 AI 编写的合成代码，生成 PCM16 WAV 程序音乐
 
-二、功能定位
-MediaRenderer 直接调用根层浏览器运行时（browserRuntimeManager.js），取得 DevTools WebSocket Endpoint 后创建独立浏览器上下文进行渲染。不通过 ChromeBridge 传输源码或截图。
+二、v2.2.0 重大变更（相对v1.1.0）
+1. displayName 从"HTML/SVG 媒体渲染器"改为"HTML/SVG/程序音乐媒体生成器"
+2. 新增 requiresAdmin: true
+3. configSchema 从1项(DebugMode)扩展到7项
+4. 新增 RenderAnimation 命令 — HTML/SVG 逐帧渲染为 GIF/MP4/WebM
+5. 新增 GenerateAudio 命令 — AI 编写 JavaScript 合成代码生成 WAV 音乐
+6. 新增 AudioSynthesisWorker.js (255行) — 音乐合成子进程
+7. 新增资源直引模式 — 源码中直接写 file:///、HTTP/HTTPS URL
+8. 新增 Anime.js 3.2.2 / Three.js r160 本地内置库支持
+9. 新增 readyMode 信号模式 (load/auto/signal)
+10. 安全限制大幅调整：单资源50MB→原25MB，合计100MB，每步24资源
 
-当前版本支持：
-- HTML → PNG、JPG、WebP
-- SVG → PNG、JPG、WebP
-- 宽高各 64-4096 像素
-- 最大总像素 4096x4096
-- PNG/WebP 透明背景
-- JPG 自定义底色
-- 最多 16 步串行批量渲染
-- 使用现有图片作为底图添加 CSS/SVG/Canvas 特效
-- 支持 Data URI、HTTP/HTTPS 和 file:// 底图
-- ImageFileServer 图床 URL 输出
-- 可选 Base64 多模态返回
-- 除显式底图外的外部资源请求阻断
-- HTML JavaScript 默认关闭
-
-暂不包含 GIF 和 MP4，但渲染器的输出目录及部署环境可在后续接入全局 FFmpeg 编码器。
-
-三、配置参数
+三、配置参数 (configSchema)
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| DebugMode | boolean | false | 是否输出 MediaRenderer 的逐步渲染诊断日志 |
+| DebugMode | boolean | false | 逐步渲染诊断日志 |
+| AllowPrivateNetworkAssets | boolean | true | 允许源码直引资源访问 localhost/局域网/私网 |
+| FfmpegPath | string | "ffmpeg" | FFmpeg 命令名或绝对路径（GIF/视频编码用） |
+| FfmpegTimeoutMs | integer | 180000 | FFmpeg 单次编码超时 10000-600000ms |
+| MaxAnimationFrames | integer | 600 | 每个动画任务最大帧数 1-3600 |
+| AudioSynthesisTimeoutMs | integer | 30000 | 音乐合成子进程超时 1000-300000ms |
+| MaxAudioDurationMs | integer | 300000 | 单次最大音频时长 1000-900000ms |
 
-运行前提：根配置必须启用 `VCP_BROWSER_RUNTIME_ENABLED=true`，服务器需具备 Chrome/Chromium/Edge。
-可选指定 `VCP_BROWSER_EXECUTABLE_PATH` 为浏览器可执行文件路径。
-插件复用根项目已安装的 Puppeteer 和 Sharp，不需要在插件目录单独安装依赖。
+四、三条生成路径
 
-四、调用命令列表
+路径A：RenderImage — 静态图片渲染（v1.1.0已有，v2.2.0增强）
+- HTML/SVG → PNG、JPG、WebP
+- 宽高 64-4096 像素，最大总像素 4096x4096
+- PNG/WebP 透明背景，JPG 自定义底色
+- 最多 16 步串行批量渲染
+- v2.2.0新增：源码中直接写 file:///、HTTP/HTTPS URL 引用图片/视频/字体
+- v2.2.0新增：Anime.js/Three.js CDN标签自动重定向到本地版本
+- v2.2.0新增：readyMode (load/auto/signal)
+- 安全限制：单资源50MB，合计100MB，每步24资源，源码2MB
 
-1. RenderImage - HTML/SVG 渲染为图片
-   功能描述：将完整 HTML 源码或 SVG 源码渲染为图片，适合绘制图标、Logo、信息图、卡片和壁纸，也可以基于已有图片用 HTML/CSS/SVG 添加滤镜、遮罩、文字、边框、渐变和光效。服务器直接通过 CDP 连接已有 VCP 托管 Chrome，不经过 ChromeBridge。
+路径B：RenderAnimation — 确定性逐帧动画（v2.2.0全新）
+- HTML/SVG 逐帧截图 → FFmpeg 编码为 GIF/MP4/WebM
+- 确定性逻辑时间：durationMs=5000, fps=30 → 150张PNG帧，每帧调用页面帧函数
+- 页面协议：window.__MEDIA_RENDERER__.setFrameRenderer((timeMs, frameIndex, fps) => {...})
+- 资源初始化后调用 window.__MEDIA_RENDERER__.setReady()，设置 readyMode=signal
+- 视频参数：format(gif/mp4/webm), durationMs(100-60000), fps(1-60)
+- 透明：GIF/WebM 支持，MP4/H.264 不支持
+- audioUrl：MP4/WebM 可选音轨（data:/file:///HTTP/HTTPS）
+- 编码：MP4=H.264 yuv420p, WebM=VP9, 透明WebM=yuva420p
+- 运行前提：需 FFmpeg
 
-   参数列表：
-   - command (可选)：固定为 RenderImage；省略时也按 RenderImage 执行
-   - html (与 svg 二选一)：完整 HTML 文档或 HTML 片段，支持 HTML/CSS/内联 SVG
-   - svg (与 html 二选一)：完整 SVG 源码
-   - sourceImage (可选，兼容 image/image_url/source_image)：需要用代码编辑或添加特效的底图，支持 data:image Data URI、http/https 图片 URL 和 file:// 图片。提供后 html/svg 源码中必须使用 {{SOURCE_IMAGE}} 作为图片地址
-   - width (必需)：输出宽度，整数，64-4096
-   - height (必需)：输出高度，整数，64-4096
-   - format (可选)：png、jpg 或 webp，默认根据 transparent 自动选择。transparent=true 且 format=jpg 时自动改为 png
-   - transparent (可选)：是否保留透明背景，默认 false
-   - background (可选)：非透明输出的底色，默认 #ffffff
-   - quality (可选)：JPG/WebP 质量，1-100，默认 90
-   - showBase64 (可选)：是否额外内联图片 Data URI，默认 false
-   - allowJavaScript (可选)：是否允许 HTML 中的 JavaScript，默认 false
-   - waitMs (可选)：截图前额外等待 0-10000 毫秒，默认 0
-   - timeoutMs (可选)：单步超时 1000-120000 毫秒，默认 45000
-   - fileName (可选)：输出文件名主体，插件会清理危险字符并自动追加唯一尾缀及扩展名
+路径C：GenerateAudio — 程序音乐合成（v2.2.0全新）
+- 在独立 Node.js 子进程中执行 AI 编写的 JavaScript 合成代码
+- 不启动浏览器，不需要 FFmpeg 或额外 npm 依赖
+- 输出 WAV/PCM16
+- 强制管理员验证码：每次调用必须提供 requireAdmin（6位验证码）
 
-   串行批量语法：用 command1/html1/width1/sourceImage1 等数字后缀描述第 1 步，command2/svg2/width2/sourceImage2 等描述第 2 步，依次连续编号，最多 16 步。未带后缀的 format、quality、transparent、background、sourceImage、showBase64、allowJavaScript、waitMs、timeoutMs 等参数作为所有步骤的公共默认值；某一步带后缀参数会覆盖公共值。每一步按顺序渲染，最终一次返回所有图片 URL。
+代码协议：
+- 必须声明 function synthesize(api) 或 const synthesize = api => ...
+- 可以是 async 函数
+- 直接写入 api.left、api.right 或 api.channelData[channel] 的 Float32Array
+- 采样值 -1 到 1，超出时插件归一化
 
-   安全限制：
-   - 除显式 sourceImage 外，其他 HTTP/HTTPS、file: 等资源请求全部阻断
-   - 只允许源码内联资源、data: 和 blob:
-   - sourceImage 本地或内联图片最大 25MB
-   - HTML/SVG 源码最大 2MB
-   - 单次最多 16 张
+内置合成 API：
+| API | 说明 |
+|-----|------|
+| api.sampleRate | 采样率 |
+| api.duration / api.durationMs | 时长（秒/毫秒） |
+| api.channels | 声道数 (1或2) |
+| api.tempo | BPM |
+| api.seed | 随机种子 |
+| api.left / api.right / api.channelData | 预分配 Float32Array 声道数组 |
+| api.noteToFrequency('C#5') | 音符转 Hz |
+| api.oscillator(type, phase, duty) | 波形：sine/square/pulse/triangle/saw |
+| api.envelope(time, duration, options) | ADSR 包络 |
+| api.addNote({note,start,duration,wave,duty,volume,pan,attack,decay,sustain,release}) | 便捷叠加音符 |
+| api.random() / api.noise() | seed 控制的确定性随机/白噪声 |
+| api.secondsPerBeat / api.beatToSeconds(beats) | 节拍换算 |
+| api.Math | 标准数学对象 |
 
-五、使用示例
+GenerateAudio 参数：
+| 参数 | 说明 |
+|------|------|
+| code | 必需，合成代码，最大1MB |
+| durationMs | 默认10000 |
+| sampleRate | 默认44100，范围8000-48000 |
+| channels | 1或2 |
+| tempo | 20-400 |
+| seed | 非负整数 |
+| masterVolume | 0-1 |
+| fadeOutMs | 默认30 |
+| timeoutMs | 不得超过 AudioSynthesisTimeoutMs |
+| fileName | 输出名主体 |
+总声道采样数最多 3000 万。
 
-示例1：单张透明图标
-<<<[TOOL_REQUEST]>>>
-maid:「始」Nova「末」,
-tool_name:「始」MediaRenderer「末」,
-command:「始」RenderImage「末」,
-html:「始」<!doctype html><html><head><style>html,body{margin:0;width:100%;height:100%}.icon{width:100%;height:100%;display:grid;place-items:center}.shape{width:75%;height:75%;border-radius:24%;background:linear-gradient(135deg,#7c3aed,#06b6d4);box-shadow:0 12px 35px rgba(76,29,149,.35)}</style></head><body><div class="icon"><div class="shape"></div></div></body></html>「末」,
-width:「始」512「末」,
-height:「始」512「末」,
-format:「始」png「末」,
-transparent:「始」true「末」,
-fileName:「始」gradient-icon「末」
-<<<[END_TOOL_REQUEST]>>>
+五、调用命令列表
 
-示例2：壁纸渲染
-<<<[TOOL_REQUEST]>>>
-tool_name:「始」MediaRenderer「末」,
-html:「始」<!doctype html><style>html,body{margin:0;width:100%;height:100%}.wallpaper{width:100%;height:100%;background:radial-gradient(circle at 25% 25%,#38bdf8,transparent 35%),linear-gradient(135deg,#0f172a,#312e81)}</style><div class="wallpaper"></div>「末」,
-width:「始」1920「末」,
-height:「始」1080「末」,
-format:「始」jpg「末」,
-quality:「始」94「末」,
-fileName:「始」blue-wallpaper「末」
-<<<[END_TOOL_REQUEST]>>>
+1. RenderImage — HTML/SVG 渲染为静态图片
+   参数：html/svg, width/height, format, transparent, background, quality, allowJavaScript, readyMode, waitMs, timeoutMs, fileName, sourceImage(旧兼容), assets(旧兼容)
 
-示例3：基于已有图片添加特效
-<<<[TOOL_REQUEST]>>>
-maid:「始」Nova「末」,
-tool_name:「始」MediaRenderer「末」,
-command:「始」RenderImage「末」,
-sourceImage:「始」file:///path/to/source.png「末」,
-html:「始」<!doctype html><style>html,body{margin:0;width:100%;height:100%;background:#080b16}.stage{position:relative;width:100%;height:100%;display:grid;place-items:center;overflow:hidden}.source{width:78%;height:78%;object-fit:cover;border-radius:12%;filter:saturate(1.35) contrast(1.1) drop-shadow(0 0 28px #22d3eeaa)}.glow{position:absolute;inset:8%;border:4px solid #67e8f9;border-radius:15%;mix-blend-mode:screen;box-shadow:0 0 50px #06b6d4}</style><div class="stage"><img class="source" src="{{SOURCE_IMAGE}}"><div class="glow"></div></div>「末」,
-width:「始」1024「末」,
-height:「始」1024「末」,
-format:「始」png「末」,
-fileName:「始」neon-effect「末」
-<<<[END_TOOL_REQUEST]>>>
+2. RenderAnimation — HTML/SVG 逐帧渲染为 GIF/MP4/WebM
+   参数：html/svg, width/height, format(gif/mp4/webm), durationMs, fps, transparent, quality, audioUrl, readyMode, timeoutMs, fileName
 
-示例4：串行批量渲染（2步）
-<<<[TOOL_REQUEST]>>>
-maid:「始」Nova「末」,
-tool_name:「始」MediaRenderer「末」,
-format:「始」png「末」,
-transparent:「始」true「末」,
-quality:「始」95「末」,
-command1:「始」RenderImage「末」,
-svg1:「始」<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><circle cx="256" cy="256" r="210" fill="url(#g)"/></svg>「末」,
-width1:「始」512「末」,
-height1:「始」512「末」,
-fileName1:「始」icon-circle「末」,
-command2:「始」RenderImage「末」,
-html2:「始」<!doctype html><style>html,body{width:100%;height:100%;margin:0}.wrap{height:100%;display:grid;place-items:center}.logo{width:72%;aspect-ratio:1;border-radius:28%;background:#111827;color:white;display:grid;place-items:center;font:700 180px sans-serif}</style><div class="wrap"><div class="logo">V</div></div>「末」,
-width2:「始」512「末」,
-height2:「始」512「末」,
-fileName2:「始」icon-v「末」
-<<<[END_TOOL_REQUEST]>>>
+3. GenerateAudio — AI 编写 JavaScript 合成代码生成 WAV
+   参数：requireAdmin(必需), code(必需), durationMs, sampleRate, channels, tempo, seed, masterVolume, fadeOutMs, timeoutMs, fileName
 
-六、源码常量与架构
-| 常量 | 值 | 说明 |
-|------|-----|------|
-| MIN_DIMENSION | 64 | 最小宽高 |
-| MAX_DIMENSION | 4096 | 最大宽高 |
-| MAX_SOURCE_BYTES | 2MB | HTML/SVG 源码最大字节数 |
-| MAX_SOURCE_IMAGE_BYTES | 25MB | 底图最大字节数 |
-| MAX_BATCH_SIZE | 16 | 最大批量步数 |
-| DEFAULT_TIMEOUT_MS | 45000 | 默认单步超时 |
-| MAX_TIMEOUT_MS | 120000 | 最大单步超时 |
-| OUTPUT_SUBDIR | media-renderer | 输出子目录名 |
+六、安全限制
+- 除源码明确引用并通过校验的资源外，页面运行时网络请求全部阻断
+- HTTP 重定向逐跳校验，云元数据地址始终禁止
+- 单资源最大 50MB，所有资源合计最大 100MB
+- 每步最多 24 个资源，源码最大 2MB
+- 最多串行 16 步
+- Anime.js/Three.js 只识别 jsDelivr、unpkg、cdnjs 上符合路径规则的标签
+- 其他远程脚本禁止执行
+- GenerateAudio 需管理员验证码，子进程超时后终止进程树
 
-依赖模块：
-- `puppeteer` — CDP 浏览器控制
-- `sharp` — 图片后处理
-- `browserRuntimeManager.js` — VCP 托管浏览器运行时管理（根层模块）
+七、源码文件
+| 文件 | 说明 |
+|------|------|
+| MediaRenderer.js | 主入口，三条路径路由 |
+| AudioSynthesisWorker.js (255行) | 音乐合成子进程，包含 noteToFrequency/oscillator/envelope/createRandom 等 |
+| README.md (467行) | 完整文档 |
+| config.env.example (40行) | 配置示例 |
 
-七、关联插件
-- ChromeBridge (24)：Chrome 桥接插件，MediaRenderer 不通过 ChromeBridge，直接使用根层 CDP
-- ImageFileServer：提供图床 URL 输出
+AudioSynthesisWorker.js 核心函数：
+- noteToFrequency(note) — 音符(如'C#5')转Hz，基于A4=440Hz
+- oscillator(type, phase, duty) — sine/square/pulse/triangle/saw 波形生成
+- envelope(time, duration, options) — ADSR包络（attack/decay/sustain/release）
+- createRandom(seed) — 确定性PRNG
+
+八、运行前提
+- 图片渲染：VCP_BROWSER_RUNTIME_ENABLED=true + Chrome/Chromium/Edge
+- 动画渲染：上述 + FFmpeg（或 FfmpegPath 指定）
+- 音乐合成：仅需 Node.js（不要求浏览器或 FFmpeg）
+- 插件复用根项目的 Puppeteer、Sharp 和 mime-types
+
+九、关联插件
+- ChromeBridge (24)：MediaRenderer 不通过 ChromeBridge，直接使用根层 CDP
+- ImageFileServer：图片/文件服务 URL 输出
 - GPTImageGen / ZImageTurboGen / VideoGenerator：其他图像/视频生成插件
+- VCPTimeLine：上游同时更新了 VCPTimeLine.js
 
-Tag: MediaRenderer, HTML渲染, SVG渲染, CDP, Puppeteer, 透明图标, 批量渲染, 图片生成, 2026-07-29
+Tag: MediaRenderer, HTML渲染, SVG渲染, 动画渲染, GIF, MP4, WebM, FFmpeg, 程序音乐, WAV合成, PCM16, AudioSynthesisWorker, Anime.js, Three.js, CDP, Puppeteer, requiresAdmin, 2026-07-31
