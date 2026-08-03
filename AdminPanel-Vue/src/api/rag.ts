@@ -5,9 +5,123 @@ import {
 
 const DEFAULT_READ_UI_OPTIONS: RequestUiOptions = { showLoader: false };
 
-export type ParamValue = number | number[] | Record<string, number>;
+export type ParamPrimitive = string | number | boolean | null;
+export type ParamValue = ParamPrimitive | ParamValue[] | { [key: string]: ParamValue };
 export type ParamGroup = Record<string, ParamValue>;
 export type RagParams = Record<string, ParamGroup>;
+
+export interface RagParamTheme {
+  name: string;
+  fileName: string;
+}
+
+export interface RagParamThemesResponse {
+  themes?: RagParamTheme[];
+}
+
+export interface RagParamThemeApplyResponse {
+  message?: string;
+  theme?: RagParamTheme;
+  params?: RagParams;
+}
+
+export interface RagParamThemeSaveResponse {
+  message?: string;
+  theme?: RagParamTheme;
+}
+
+export interface ActiveFullTrainingResult {
+  taskId?: string;
+  queued?: boolean;
+  reason?: string;
+  resetPendingNewTags?: number;
+  threshold?: number;
+  error?: string;
+}
+
+export interface ActiveFullTrainingResponse {
+  success?: boolean;
+  message?: string;
+  result?: ActiveFullTrainingResult;
+  error?: string;
+}
+
+export interface TagConsistencySummary {
+  totalDatabaseFiles: number;
+  scannedFiles: number;
+  ignoredFiles: number;
+  missingFiles: number;
+  affectedFiles: number;
+  relationsToAdd: number;
+  relationsToRemove: number;
+  positionsToUpdate: number;
+  vectorsToCreate: number;
+  vectorsToRemove: number;
+  orphanTagsToRemove: number;
+  finalTagCount: number;
+}
+
+export interface TagConsistencyFileDetail {
+  path: string;
+  status: "scanned" | "ignored" | "missing" | "outside-root";
+  added: string[];
+  removed: string[];
+  positionUpdates: number;
+}
+
+export interface TagConsistencyPreview {
+  token: string;
+  digest: string;
+  createdAt: number;
+  expiresAt: number;
+  summary: TagConsistencySummary;
+  additions: string[];
+  removals: string[];
+  affectedFileDetails: TagConsistencyFileDetail[];
+  detailTruncated: boolean;
+  requiresConfirmation: boolean;
+}
+
+export type TagConsistencyPreviewTaskStatus =
+  | "idle"
+  | "running"
+  | "completed"
+  | "failed"
+  | "expired";
+
+export interface TagConsistencyPreviewTask {
+  taskId: string | null;
+  status: TagConsistencyPreviewTaskStatus;
+  startedAt: number | null;
+  finishedAt: number | null;
+  preview: TagConsistencyPreview | null;
+  error: {
+    code?: string;
+    message: string;
+  } | null;
+}
+
+export interface TagConsistencyPreviewResponse {
+  success?: boolean;
+  task?: TagConsistencyPreviewTask;
+  code?: string;
+  error?: string;
+}
+
+export interface TagConsistencyApplyResult {
+  applied: boolean;
+  summary: TagConsistencySummary;
+  waveAssetsStale: boolean;
+  recommendedAction: "active-full-training";
+  message: string;
+}
+
+export interface TagConsistencyApplyResponse {
+  success?: boolean;
+  result?: TagConsistencyApplyResult;
+  code?: string;
+  error?: string;
+}
 
 export interface SemanticGroupData {
   words?: string[];
@@ -54,6 +168,109 @@ export const ragApi = {
         url: "/admin_api/rag-params",
         method: "POST",
         body: params,
+      },
+      uiOptions
+    );
+  },
+
+  async previewTagConsistency(
+    uiOptions: RequestUiOptions = DEFAULT_READ_UI_OPTIONS
+  ): Promise<TagConsistencyPreviewResponse> {
+    return requestWithUi(
+      {
+        url: "/admin_api/rag-tag-consistency/preview",
+        method: "POST",
+        timeoutMs: 60_000,
+      },
+      uiOptions
+    );
+  },
+
+  async getTagConsistencyPreviewStatus(
+    uiOptions: RequestUiOptions = DEFAULT_READ_UI_OPTIONS
+  ): Promise<TagConsistencyPreviewResponse> {
+    return requestWithUi(
+      {
+        url: "/admin_api/rag-tag-consistency/preview/status",
+        timeoutMs: 60_000,
+      },
+      uiOptions
+    );
+  },
+
+  async applyTagConsistency(
+    token: string,
+    uiOptions: RequestUiOptions = {}
+  ): Promise<TagConsistencyApplyResponse> {
+    return requestWithUi(
+      {
+        url: "/admin_api/rag-tag-consistency/apply",
+        method: "POST",
+        body: { token },
+      },
+      uiOptions
+    );
+  },
+
+  async triggerActiveFullTraining(
+    uiOptions: RequestUiOptions = {}
+  ): Promise<ActiveFullTrainingResponse> {
+    return requestWithUi(
+      {
+        url: "/admin_api/rag-active-full-training",
+        method: "POST",
+      },
+      uiOptions
+    );
+  },
+
+  async getRagParamThemes(
+    uiOptions: RequestUiOptions = DEFAULT_READ_UI_OPTIONS
+  ): Promise<RagParamTheme[]> {
+    const response = await requestWithUi<RagParamThemesResponse>(
+      {
+        url: "/admin_api/rag-param-themes",
+      },
+      uiOptions
+    );
+    return response.themes || [];
+  },
+
+  async getRagParamTheme(
+    themeName: string,
+    uiOptions: RequestUiOptions = DEFAULT_READ_UI_OPTIONS
+  ): Promise<RagParams> {
+    return requestWithUi(
+      {
+        url: `/admin_api/rag-param-themes/${encodeURIComponent(themeName)}`,
+      },
+      uiOptions
+    );
+  },
+
+  async saveRagParamTheme(
+    themeName: string,
+    params: RagParams,
+    uiOptions: RequestUiOptions = {}
+  ): Promise<RagParamThemeSaveResponse> {
+    return requestWithUi(
+      {
+        url: `/admin_api/rag-param-themes/${encodeURIComponent(themeName)}`,
+        method: "POST",
+        body: params,
+      },
+      uiOptions
+    );
+  },
+
+  async applyRagParamTheme(
+    themeName: string,
+    uiOptions: RequestUiOptions = {}
+  ): Promise<RagParamThemeApplyResponse> {
+    return requestWithUi(
+      {
+        url: `/admin_api/rag-param-themes/${encodeURIComponent(themeName)}/apply`,
+        method: "POST",
       },
       uiOptions
     );

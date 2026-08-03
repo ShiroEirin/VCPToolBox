@@ -5,6 +5,8 @@ const path = require('path');
 module.exports = function(options) {
     const router = express.Router();
     const { dailyNoteRootPath, vectorDBManager } = options;
+    const ragParamsPath = path.join(__dirname, '..', '..', 'rag_params.json');
+    const ragParamThemesDir = path.join(__dirname, '..', '..', 'rag_params_themes');
 
     const readJsonFile = async (filePath, fallback = {}) => {
         try {
@@ -16,15 +18,103 @@ module.exports = function(options) {
         }
     };
 
-    const saveMergedJsonFile = async (filePath, body) => {
-        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    const assertJsonValue = (value, pathLabel = 'body') => {
+        if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+        if (typeof value === 'number') {
+            if (Number.isFinite(value)) return;
+            const err = new Error(`Invalid non-finite number at ${pathLabel}`);
+            err.statusCode = 400;
+            throw err;
+        }
+        if (Array.isArray(value)) {
+            value.forEach((item, index) => assertJsonValue(item, `${pathLabel}[${index}]`));
+            return;
+        }
+        if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+            Object.entries(value).forEach(([key, item]) => {
+                assertJsonValue(item, `${pathLabel}.${key}`);
+            });
+            return;
+        }
+        const err = new Error(`Invalid JSON value at ${pathLabel}`);
+        err.statusCode = 400;
+        throw err;
+    };
+
+    const assertPlainObject = (body) => {
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.getPrototypeOf(body) !== Object.prototype) {
             const err = new Error('Invalid request body');
             err.statusCode = 400;
             throw err;
         }
+        assertJsonValue(body);
+    };
+
+    const mergeRagParams = (base, override) => {
+        if (
+            base && override
+            && typeof base === 'object' && !Array.isArray(base)
+            && typeof override === 'object' && !Array.isArray(override)
+        ) {
+            const merged = { ...base };
+            for (const [key, value] of Object.entries(override)) {
+                merged[key] = key in base ? mergeRagParams(base[key], value) : value;
+            }
+            return merged;
+        }
+        // 数组、布尔、字符串与数值都是完整叶子；主题值必须整体覆盖。
+        return override;
+    };
+
+    const writeJsonFileAtomic = async (filePath, body) => {
+        assertPlainObject(body);
+        const dir = path.dirname(filePath);
+        const base = path.basename(filePath);
+        const tempPath = path.join(dir, `.${base}.${process.pid}.${Date.now()}.tmp`);
+        const content = JSON.stringify(body, null, 2);
+
+        await fs.writeFile(tempPath, content, 'utf-8');
+        await fs.rename(tempPath, filePath);
+    };
+
+    const saveMergedJsonFile = async (filePath, body) => {
+        assertPlainObject(body);
 
         const existing = await readJsonFile(filePath, {});
-        await fs.writeFile(filePath, JSON.stringify({ ...existing, ...body }, null, 2), 'utf-8');
+        await writeJsonFileAtomic(filePath, { ...existing, ...body });
+    };
+
+    const normalizeThemeName = (rawName) => {
+        const value = String(rawName || '').trim();
+        const withoutExtension = value.replace(/\.json$/i, '');
+        const withoutPrefix = withoutExtension.replace(/^rag_params_/i, '');
+        const safeName = withoutPrefix.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+
+        if (!safeName) {
+            const err = new Error('Invalid theme name');
+            err.statusCode = 400;
+            throw err;
+        }
+
+        if (safeName.length > 120) {
+            const err = new Error('Theme name is too long');
+            err.statusCode = 400;
+            throw err;
+        }
+
+        return safeName;
+    };
+
+    const getThemeFileName = (themeName) => `rag_params_${normalizeThemeName(themeName)}.json`;
+
+    const getThemeFilePath = (themeName) => path.join(ragParamThemesDir, getThemeFileName(themeName));
+
+    const ensureThemeDir = async () => {
+        await fs.mkdir(ragParamThemesDir, { recursive: true });
+    };
+
+    const writeJsonFile = async (filePath, body) => {
+        await writeJsonFileAtomic(filePath, body);
     };
 
     const createJsonConfigRoutes = (routePath, fileName) => {
@@ -52,7 +142,6 @@ module.exports = function(options) {
     createJsonConfigRoutes('/tdb-tags', 'tdb_tags.json');
 
     router.get('/rag-params', async (req, res) => {
-        const ragParamsPath = path.join(__dirname, '..', '..', 'rag_params.json');
         try {
             const content = await fs.readFile(ragParamsPath, 'utf-8');
             res.json(JSON.parse(content));
@@ -60,11 +149,63 @@ module.exports = function(options) {
     });
 
     router.post('/rag-params', async (req, res) => {
-        const ragParamsPath = path.join(__dirname, '..', '..', 'rag_params.json');
         try {
-            await fs.writeFile(ragParamsPath, JSON.stringify(req.body, null, 2), 'utf-8');
+            await writeJsonFile(ragParamsPath, req.body);
             res.json({ message: 'Saved' });
+        } catch (error) { res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed' }); }
+    });
+
+    router.get('/rag-param-themes', async (req, res) => {
+        try {
+            await ensureThemeDir();
+            const entries = await fs.readdir(ragParamThemesDir, { withFileTypes: true });
+            const themes = entries
+                .filter((entry) => entry.isFile() && /^rag_params_.+\.json$/i.test(entry.name))
+                .map((entry) => {
+                    const name = entry.name.replace(/^rag_params_/i, '').replace(/\.json$/i, '');
+                    return {
+                        name,
+                        fileName: entry.name,
+                    };
+                })
+                .sort((left, right) => left.name.localeCompare(right.name));
+
+            res.json({ themes });
         } catch (error) { res.status(500).json({ error: 'Failed' }); }
+    });
+
+    router.get('/rag-param-themes/:themeName', async (req, res) => {
+        try {
+            const themePath = getThemeFilePath(req.params.themeName);
+            const [baseParams, themePatch] = await Promise.all([
+                readJsonFile(ragParamsPath, {}),
+                readJsonFile(themePath, {})
+            ]);
+            res.json(mergeRagParams(baseParams, themePatch));
+        } catch (error) { res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed' }); }
+    });
+
+    router.post('/rag-param-themes/:themeName', async (req, res) => {
+        try {
+            await ensureThemeDir();
+            const themeName = normalizeThemeName(req.params.themeName);
+            const themePath = getThemeFilePath(themeName);
+            await writeJsonFile(themePath, req.body);
+            res.json({ message: 'Saved', theme: { name: themeName, fileName: getThemeFileName(themeName) } });
+        } catch (error) { res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed' }); }
+    });
+
+    router.post('/rag-param-themes/:themeName/apply', async (req, res) => {
+        try {
+            const themeName = normalizeThemeName(req.params.themeName);
+            const [baseParams, themePatch] = await Promise.all([
+                readJsonFile(ragParamsPath, {}),
+                readJsonFile(getThemeFilePath(themeName))
+            ]);
+            const themeParams = mergeRagParams(baseParams, themePatch);
+            await writeJsonFile(ragParamsPath, themeParams);
+            res.json({ message: 'Applied', theme: { name: themeName, fileName: getThemeFileName(themeName) }, params: themeParams });
+        } catch (error) { res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed' }); }
     });
 
     router.get('/semantic-groups', async (req, res) => {
@@ -79,7 +220,7 @@ module.exports = function(options) {
     router.post('/semantic-groups', async (req, res) => {
         const editFilePath = path.join(__dirname, '..', '..', 'Plugin', 'RAGDiaryPlugin', 'semantic_groups.edit.json');
         try {
-            await fs.writeFile(editFilePath, JSON.stringify(req.body, null, 2), 'utf-8');
+            await writeJsonFile(editFilePath, req.body);
             res.json({ message: 'Saved' });
         } catch (error) { res.status(500).json({ error: 'Failed' }); }
     });
@@ -95,7 +236,7 @@ module.exports = function(options) {
     router.post('/thinking-chains', async (req, res) => {
         const chainsPath = path.join(__dirname, '..', '..', 'Plugin', 'RAGDiaryPlugin', 'meta_thinking_chains.json');
         try {
-            await fs.writeFile(chainsPath, JSON.stringify(req.body, null, 2), 'utf-8');
+            await writeJsonFile(chainsPath, req.body);
             res.json({ message: 'Saved' });
         } catch (error) { res.status(500).json({ error: 'Failed' }); }
     });
@@ -111,6 +252,108 @@ module.exports = function(options) {
         if (vectorDBManager && typeof vectorDBManager.getHealthStatus === 'function') {
             res.json({ success: true, status: vectorDBManager.getHealthStatus() });
         } else res.status(503).json({ error: 'Unavailable' });
+    });
+
+    router.post('/rag-tag-consistency/preview', (req, res) => {
+        try {
+            if (!vectorDBManager || typeof vectorDBManager.startTagConsistencyPreview !== 'function') {
+                return res.status(503).json({
+                    success: false,
+                    error: 'Tag consistency preview is unavailable'
+                });
+            }
+
+            const task = vectorDBManager.startTagConsistencyPreview();
+            res.status(task.status === 'running' ? 202 : 200).json({
+                success: true,
+                task
+            });
+        } catch (error) {
+            res.status(error.statusCode || 500).json({
+                success: false,
+                code: error.code,
+                error: error.message || 'Failed to start Tag consistency preview'
+            });
+        }
+    });
+
+    router.get('/rag-tag-consistency/preview/status', (req, res) => {
+        try {
+            if (!vectorDBManager || typeof vectorDBManager.getTagConsistencyPreviewStatus !== 'function') {
+                return res.status(503).json({
+                    success: false,
+                    error: 'Tag consistency preview status is unavailable'
+                });
+            }
+
+            res.json({
+                success: true,
+                task: vectorDBManager.getTagConsistencyPreviewStatus()
+            });
+        } catch (error) {
+            res.status(error.statusCode || 500).json({
+                success: false,
+                code: error.code,
+                error: error.message || 'Failed to query Tag consistency preview status'
+            });
+        }
+    });
+
+    router.post('/rag-tag-consistency/apply', async (req, res) => {
+        try {
+            if (!vectorDBManager || typeof vectorDBManager.applyTagConsistencyPreview !== 'function') {
+                return res.status(503).json({
+                    success: false,
+                    error: 'Tag consistency reconciliation is unavailable'
+                });
+            }
+
+            const token = String(req.body?.token || '').trim();
+            if (!token || !/^[a-f0-9]{48}$/i.test(token)) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'TAG_CONSISTENCY_INVALID_TOKEN',
+                    error: 'A valid preview token is required'
+                });
+            }
+
+            const result = await vectorDBManager.applyTagConsistencyPreview(token);
+            res.json({ success: true, result });
+        } catch (error) {
+            res.status(error.statusCode || 500).json({
+                success: false,
+                code: error.code,
+                error: error.message || 'Failed to apply Tag consistency reconciliation'
+            });
+        }
+    });
+
+    router.post('/rag-active-full-training', (req, res) => {
+        try {
+            if (!vectorDBManager || typeof vectorDBManager.requestActiveFullTraining !== 'function') {
+                return res.status(503).json({ success: false, error: 'TagMemo active full training is unavailable' });
+            }
+
+            const result = vectorDBManager.requestActiveFullTraining({
+                reason: 'admin-panel-active-full-training'
+            });
+
+            if (!result || result.queued === false) {
+                return res.status(503).json({
+                    success: false,
+                    error: result?.error || 'Failed to queue active full training',
+                    result
+                });
+            }
+
+            res.json({
+                success: true,
+                message: 'Active full training queued',
+                result
+            });
+        } catch (error) {
+            res.status(500).json({ success: false, error: error.message || 'Failed' });
+        }
     });
 
     return router;

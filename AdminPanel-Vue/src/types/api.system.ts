@@ -1,7 +1,16 @@
+export interface SystemCpuTemperatureInfo {
+  value: number;
+  unit?: string;
+  source?: string;
+  sensorId?: string;
+  updatedAt?: string;
+}
+
 export interface SystemCpuInfo {
   usage: number;
   cores?: number;
   model?: string;
+  temperature?: SystemCpuTemperatureInfo | null;
 }
 
 export interface SystemMemorySnapshot {
@@ -69,6 +78,133 @@ export interface PM2Process {
 export interface PM2ProcessesResponse {
   success?: boolean;
   processes?: PM2Process[];
+}
+
+export interface IndexStatsInfo {
+  available?: boolean;
+  totalVectors: number;
+  [key: string]: unknown;
+}
+
+export interface KnowledgeBaseDiaryIndexMemoryItem {
+  name: string;
+  stats: IndexStatsInfo;
+  estimatedBytes: number;
+  lastUsedAt: number | null;
+  idleMs: number | null;
+  dateIndexItems: number;
+}
+
+export interface KnowledgeBaseMemoryProfile {
+  module: string;
+  initialized: boolean;
+  dimension: number;
+  rootPath: string;
+  storePath: string;
+  dbHealthState: string;
+  databaseCorruptionDetected: boolean;
+  queues: {
+    pendingFiles: number;
+    pendingDeletes: number;
+    saveTimers: number;
+    isProcessing: boolean;
+    isProcessingDeletes: boolean;
+  };
+  tagIndex: {
+    stats: IndexStatsInfo;
+    estimatedBytes: number;
+  };
+  diaryIndices: {
+    loadedCount: number;
+    trackedCount: number;
+    idleTtlMs: number;
+    estimatedBytes: number;
+    items: KnowledgeBaseDiaryIndexMemoryItem[];
+  };
+  caches: {
+    diaryNameVectorCount: number;
+    diaryNameVectorEstimatedBytes: number;
+    diaryDateIndexCount: number;
+    diaryDateIndexEstimatedBytes: number;
+  };
+  tagMemo: {
+    available: boolean;
+    modelSig?: string | null;
+    pairwiseSimilarities?: number;
+    pairwiseEstimatedBytes?: number;
+    cooccurrenceSources?: number;
+    cooccurrenceEdges?: number;
+    cooccurrenceEstimatedBytes?: number;
+    intrinsicResiduals?: number;
+    intrinsicEstimatedBytes?: number;
+    matrixRebuilding?: boolean;
+    derivedQueueLength?: number;
+    estimatedBytes: number;
+  };
+  estimatedBytes: number;
+  generatedAt: string;
+  elapsedMs: number;
+}
+
+export interface TdbKnowledgeLibraryMemoryItem {
+  name: string;
+  path: string;
+  openedAt: number | null;
+  lastUsedAt: number | null;
+  idleMs: number | null;
+  busyCount: number;
+  diskSize: number;
+  estimatedBytes: number;
+  stats?: unknown;
+}
+
+export interface TdbKnowledgeMemoryProfile {
+  module: string;
+  enabled: boolean;
+  initialized: boolean;
+  dimension: number;
+  rootPath: string;
+  storePath: string;
+  syncMode: string;
+  idleUnloadHours: number;
+  queues: {
+    pending: number;
+    retry: number;
+    processing: number;
+    failed: number;
+    isProcessing: boolean;
+    isQueueWorkerRunning: boolean;
+    libraryQueues: number;
+    fileEventVersions: number;
+    pendingFileVersions: number;
+    [key: string]: number | boolean;
+  };
+  libraries: {
+    openedCount: number;
+    estimatedBytes: number;
+    items: TdbKnowledgeLibraryMemoryItem[];
+  };
+  metaDb: {
+    open: boolean;
+    estimatedBytes: number;
+  };
+  estimatedBytes: number;
+  generatedAt: string;
+  elapsedMs: number;
+}
+
+export interface MemoryProfile {
+  estimatedBytes: number;
+  processMemory: NodeProcessMemoryInfo;
+  knowledgeBase: KnowledgeBaseMemoryProfile;
+  tdbKnowledge: TdbKnowledgeMemoryProfile;
+  note: string;
+  generatedAt: string;
+}
+
+export interface MemoryProfileResponse {
+  success?: boolean;
+  profile: MemoryProfile;
 }
 
 export interface ServerLogResponse {
@@ -181,11 +317,89 @@ export interface MultiModalConfigResponse {
   message?: string;
 }
 
+export interface OneRingMemoConfig {
+  enabled: boolean;
+  autoGenerate: boolean;
+  updateIntervalMinutes: number;
+  timelineDays: number;
+  fallbackMessageCount: number;
+  model: string;
+  maxContextTokens: number;
+  maxOutputTokens: number;
+}
+
 export interface OneRingConfig {
   enabled: boolean;
   tailTagPlacement: 'inline' | 'system_user_block';
   maxContextBlocks: number;
   timeInsert: boolean;
+  timeInsertPrepend: boolean;
+  timeInsertMiddle: boolean;
+  asyncOnlyMode: boolean;
+  memo: OneRingMemoConfig;
+}
+
+export interface OneRingMemo {
+  agentName: string;
+  summary: string;
+  generatedAt?: string | null;
+  editedAt?: string | null;
+  source?: string;
+  model?: string;
+  timelineDays?: number;
+  fallbackMessageCount?: number;
+  sourceMessageCount?: number;
+  sourceFirstTimestamp?: string | null;
+  sourceLastTimestamp?: string | null;
+}
+
+export type OneRingMemoGenerationPhase =
+  | 'idle'
+  | 'preparing'
+  | 'summarizing'
+  | 'merging'
+  | 'writing'
+  | 'completed'
+  | 'failed';
+
+export interface OneRingMemoGenerationStatus {
+  agentName: string;
+  running: boolean;
+  phase: OneRingMemoGenerationPhase;
+  phaseLabel: string;
+  completed: number;
+  total: number;
+  mergeRound: number;
+  reason?: string | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+  finishedAt?: string | null;
+  error?: string | null;
+}
+
+export interface OneRingMemoAgent {
+  agentName: string;
+  memo: OneRingMemo | null;
+}
+
+export interface OneRingMemoListResponse {
+  success?: boolean;
+  agents: OneRingMemoAgent[];
+}
+
+export interface OneRingMemoResponse {
+  success?: boolean;
+  agentName: string;
+  memo: OneRingMemo | null;
+  status?: OneRingMemoGenerationStatus;
+  message?: string;
+}
+
+export interface OneRingMemoStatusResponse {
+  success?: boolean;
+  agentName: string;
+  memo: OneRingMemo | null;
+  status: OneRingMemoGenerationStatus;
 }
 
 export interface BridgeHijackConfig {
@@ -271,4 +485,17 @@ export interface BridgeHijackConfigSaveResponse {
 export interface SystemMonitorResponse {
   system: SystemResources;
   pm2?: PM2Process[];
+}
+
+export interface NotificationsConnectionInfo {
+  vcpKey: string;
+  port: number;
+  hostname: string;
+  wsUrl: string;
+}
+
+export interface NotificationsConnectionResponse {
+  success?: boolean;
+  connection: NotificationsConnectionInfo;
+  error?: string;
 }

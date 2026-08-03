@@ -19,6 +19,7 @@ let DELEGATION_TIMEOUT;
 let DELEGATION_SYSTEM_PROMPT;
 let DELEGATION_HEARTBEAT_PROMPT;
 
+const DEFAULT_PLUGIN_COMMUNICATION_TIMEOUT_MS = 900000; // 15分钟，需与 chat 总线上游长超时默认值保持一致
 const AGENTS = {};
 const agentContexts = new Map();
 const activeSessionLocks = new Set(); // 追踪正在进行中的持久对话 session
@@ -853,7 +854,7 @@ async function processToolCall(args) {
 
         const responseFromVCP = await axios.post(`${VCP_API_TARGET_URL}/chat/completions`, payloadForVCP, {
             headers: { 'Authorization': `Bearer ${VCP_SERVER_ACCESS_KEY}`, 'Content-Type': 'application/json' },
-            timeout: (parseInt(process.env.PLUGIN_COMMUNICATION_TIMEOUT) || 358000)
+            timeout: (parseInt(process.env.PLUGIN_COMMUNICATION_TIMEOUT) || DEFAULT_PLUGIN_COMMUNICATION_TIMEOUT_MS)
         });
 
         const assistantResponseContent = responseFromVCP.data?.choices?.[0]?.message?.content;
@@ -950,9 +951,10 @@ async function executeDelegation(delegationId, agentConfig, taskPromptContent, t
 
     let finalReport = null;
     let completionStatus = 'Failed';
+    let taskPromptForSystem = '';
 
     try {
-        const taskPromptForSystem = String(taskPromptText ?? (
+        taskPromptForSystem = String(taskPromptText ?? (
             typeof taskPromptContent === 'string'
                 ? taskPromptContent
                 : (Array.isArray(taskPromptContent)
@@ -1009,7 +1011,7 @@ async function executeDelegation(delegationId, agentConfig, taskPromptContent, t
 
             const responseFromVCP = await axios.post(`${VCP_API_TARGET_URL}/chat/completions`, payloadForVCP, {
                 headers: { 'Authorization': `Bearer ${VCP_SERVER_ACCESS_KEY}`, 'Content-Type': 'application/json' },
-                timeout: (parseInt(process.env.PLUGIN_COMMUNICATION_TIMEOUT) || 358000)
+                timeout: (parseInt(process.env.PLUGIN_COMMUNICATION_TIMEOUT) || DEFAULT_PLUGIN_COMMUNICATION_TIMEOUT_MS)
             });
 
             const assistantResponseContent = responseFromVCP.data?.choices?.[0]?.message?.content;

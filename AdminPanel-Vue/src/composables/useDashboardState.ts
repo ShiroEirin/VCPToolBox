@@ -23,7 +23,7 @@ import { usePolling } from "@/composables/usePolling";
 import type { DashboardWeatherDisplay, NewsItem } from "@/dashboard/types";
 import { createLogger } from "@/utils/logger";
 import { sanitizeExternalUrl } from "@/utils/url";
-import type { NodeProcessInfo } from "@/types/api.system";
+import type { MemoryProfile, NodeProcessInfo, SystemCpuTemperatureInfo } from "@/types/api.system";
 
 interface PollingController {
   start: () => void;
@@ -42,7 +42,7 @@ const LOG_RETRY_POLICY = {
   maxRetries: 2,
   retryDelayMs: 500,
 } as const;
-const SYSTEM_MONITOR_COMPONENT_KEYS = ["cpu", "memory", "process", "node-info"] as const;
+const SYSTEM_MONITOR_COMPONENT_KEYS = ["cpu", "memory", "process", "node-info", "memory-profile"] as const;
 const AUTH_CODE_COMPONENT_KEYS = ["process"] as const;
 const WEATHER_COMPONENT_KEYS = ["weather"] as const;
 const NEWS_COMPONENT_KEYS = ["news"] as const;
@@ -176,6 +176,21 @@ export function useDashboardState(
     }
   );
 
+  const { data: memoryProfileData, execute: fetchMemoryProfile } =
+    useRequest<Awaited<ReturnType<typeof systemApi.getMemoryProfile>>>(
+      (context) =>
+        systemApi.getMemoryProfile(
+          {
+            signal: context?.signal,
+            timeoutMs: 10000,
+          },
+          { showLoader: false }
+        ),
+      {
+        globalLoadingKey: "dashboard.memory-profile",
+      }
+    );
+
   const { data: authCodeData, execute: fetchAuthCode } =
     useRequest<Awaited<ReturnType<typeof systemApi.getUserAuthCode>>>(
       (context) =>
@@ -194,11 +209,16 @@ export function useDashboardState(
   const cpuUsage = ref(0);
   const cpuPlatform = ref("");
   const cpuArch = ref("");
+  const cpuTemperature = ref<SystemCpuTemperatureInfo | null>(null);
   const memUsage = ref(0);
   const memInfo = ref("加载中…");
+  const memTotal = ref(0);
+  const memUsed = ref(0);
   const vcpMemUsage = ref(0);
+  const vcpMemBytes = ref(0);
   const pm2Processes = ref<Awaited<ReturnType<typeof systemApi.getPM2Processes>>>([]);
   const nodeInfo = ref<Partial<NodeProcessInfo>>({});
+  const memoryProfile = ref<MemoryProfile | null>(null);
   const userAuthCode = ref("加载中…");
   const weather = ref<DashboardWeatherDisplay>({
     icon: "--",
@@ -269,12 +289,13 @@ export function useDashboardState(
   let authCodeLoadPromise: Promise<void> | null = null;
 
   async function monitorSystemResources() {
-    await Promise.all([fetchSystemData(), fetchPM2Data()]);
+    await Promise.all([fetchSystemData(), fetchPM2Data(), fetchMemoryProfile()]);
 
     if (systemData.value?.cpu?.usage !== undefined) {
       cpuUsage.value = systemData.value.cpu.usage;
       cpuPlatform.value = systemData.value.nodeProcess?.platform || "";
       cpuArch.value = systemData.value.nodeProcess?.arch || "";
+      cpuTemperature.value = systemData.value.cpu.temperature ?? null;
     }
 
     if (
@@ -287,17 +308,22 @@ export function useDashboardState(
       memInfo.value = `已用：${usedGB.toFixed(2)} GB / 总共：${totalGB.toFixed(
         2
       )} GB`;
-
-      if (systemData.value.nodeProcess?.memory?.rss) {
-        vcpMemUsage.value =
-          (systemData.value.nodeProcess.memory.rss /
-            systemData.value.memory.total) *
-          100;
-      }
+      memTotal.value = systemData.value.memory.total;
+      memUsed.value = systemData.value.memory.used;
     }
 
     if (pm2Data.value) {
       pm2Processes.value = pm2Data.value;
+      // VCP 内存 = vcp-main + vcp-admin 两个 PM2 进程的内存总和
+      const vcpProcessNames = ["vcp-main", "vcp-admin"];
+      const vcpTotalBytes = pm2Data.value
+        .filter((proc) => vcpProcessNames.includes(proc.name))
+        .reduce((sum, proc) => sum + (proc.memory || 0), 0);
+      vcpMemBytes.value = vcpTotalBytes;
+      if (systemData.value?.memory?.total && vcpTotalBytes > 0) {
+        vcpMemUsage.value =
+          (vcpTotalBytes / systemData.value.memory.total) * 100;
+      }
     }
 
     if (systemData.value?.nodeProcess) {
@@ -307,6 +333,10 @@ export function useDashboardState(
         memory: systemData.value.nodeProcess.memory,
         uptime: systemData.value.nodeProcess.uptime,
       };
+    }
+
+    if (memoryProfileData.value) {
+      memoryProfile.value = memoryProfileData.value;
     }
   }
 
@@ -857,11 +887,16 @@ export function useDashboardState(
     cpuUsage,
     cpuPlatform,
     cpuArch,
+    cpuTemperature,
     memUsage,
     memInfo,
+    memTotal,
+    memUsed,
     vcpMemUsage,
+    vcpMemBytes,
     pm2Processes,
     nodeInfo,
+    memoryProfile,
     userAuthCode,
     weather,
     newsItems,

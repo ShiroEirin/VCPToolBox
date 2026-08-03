@@ -1,5 +1,13 @@
 #![deny(clippy::all)]
 
+mod memo_artifact_builder;
+mod memo_dtsc;
+mod memo_pipeline;
+mod memo_sensing;
+mod rivermemo_topology_v3;
+
+use rivermemo_topology_v3::MemoRuntime;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use rusqlite::{Connection, OpenFlags};
@@ -45,11 +53,37 @@ pub struct ProjectResult {
 }
 
 #[napi(object)]
+pub struct DualWeightedProjectionResult {
+    pub local_vector: Option<Vec<f64>>,
+    pub transfer_vector: Option<Vec<f64>>,
+    pub requested_count: u32,
+    pub found_count: u32,
+    pub missing_count: u32,
+    pub local_total_weight: f64,
+    pub transfer_total_weight: f64,
+    pub elapsed_ms: f64,
+}
+
+#[napi(object)]
+pub struct MemoFusionResult {
+    pub vector: Vec<f64>,
+    pub selected_tag_ids: Vec<i64>,
+    pub requested_count: u32,
+    pub found_count: u32,
+    pub deduplicated_count: u32,
+    pub total_weight: f64,
+    pub elapsed_ms: f64,
+}
+
+#[napi(object)]
 pub struct IntrinsicResidualResult {
     pub tag_count: u32,
     pub computed_count: u32,
     pub skipped_count: u32,
     pub elapsed_ms: f64,
+    pub algorithm_version: String,
+    pub artifact_sig: String,
+    pub effective_config: String,
 }
 
 /// 🌟 EPA Rust 基底重算结果
@@ -88,12 +122,25 @@ pub struct VexusStats {
     pub memory_usage: f64,
 }
 
+/// VexusIndex 内部统一 Memo 运行时诊断。
+#[napi(object)]
+pub struct MemoRuntimeStats {
+    pub active_artifact_sig: Option<String>,
+    pub generation: i64,
+    pub node_count: u32,
+    pub edge_count: u32,
+    pub resident: bool,
+}
+
 /// 核心索引结构 (无状态，只存向量)
 #[napi]
 pub struct VexusIndex {
     index: Arc<RwLock<Index>>,
     dimensions: u32,
     epa_pending_cache: Arc<std::sync::Mutex<Option<EpaPendingCache>>>,
+    /// TagMemo 与 RiverMemo 共用的原生图资产运行时。
+    /// 与本 VexusIndex 实例同生命周期，禁止使用进程全局生产缓存。
+    memo_runtime: Arc<MemoRuntime>,
 }
 
 #[napi]
@@ -120,6 +167,7 @@ impl VexusIndex {
             index: Arc::new(RwLock::new(index)),
             dimensions: dim,
             epa_pending_cache: Arc::new(std::sync::Mutex::new(None)),
+            memo_runtime: Arc::new(MemoRuntime::new()),
         })
     }
 
@@ -165,6 +213,7 @@ impl VexusIndex {
             index: Arc::new(RwLock::new(index)),
             dimensions: dim,
             epa_pending_cache: Arc::new(std::sync::Mutex::new(None)),
+            memo_runtime: Arc::new(MemoRuntime::new()),
         })
     }
 
@@ -183,14 +232,52 @@ impl VexusIndex {
             .save(&temp_path)
             .map_err(|e| Error::from_reason(format!("Failed to save index: {:?}", e)))?;
 
-        // 🛡️ Windows 兼容性修复：目标文件存在时 rename 会失败
+        // Windows 不支持 rename 覆盖现有文件。先把旧索引移到备份，
+        // 新文件替换失败时再回滚，避免“先删除旧文件”造成不可恢复的数据丢失。
         #[cfg(target_os = "windows")]
         {
-            if std::path::Path::new(&index_path).exists() {
-                let _ = std::fs::remove_file(&index_path);
+            let target = std::path::Path::new(&index_path);
+            let backup_path = format!("{}.bak", index_path);
+            let backup = std::path::Path::new(&backup_path);
+            let had_target = target.exists();
+
+            if had_target {
+                if backup.exists() {
+                    std::fs::remove_file(backup).map_err(|e| {
+                        Error::from_reason(format!("Failed to remove stale index backup: {}", e))
+                    })?;
+                }
+                std::fs::rename(target, backup).map_err(|e| {
+                    Error::from_reason(format!("Failed to stage existing index backup: {}", e))
+                })?;
+            }
+
+            if let Err(replace_error) = std::fs::rename(&temp_path, target) {
+                let rollback_error = if had_target {
+                    std::fs::rename(backup, target).err()
+                } else {
+                    None
+                };
+                return Err(Error::from_reason(match rollback_error {
+                    Some(error) => format!(
+                        "Failed to replace index file: {}; rollback also failed: {}",
+                        replace_error, error
+                    ),
+                    None => format!("Failed to replace index file: {}", replace_error),
+                }));
+            }
+
+            if had_target {
+                std::fs::remove_file(backup).map_err(|e| {
+                    Error::from_reason(format!(
+                        "Index replaced but failed to remove backup {}: {}",
+                        backup_path, e
+                    ))
+                })?;
             }
         }
 
+        #[cfg(not(target_os = "windows"))]
         std::fs::rename(&temp_path, &index_path)
             .map_err(|e| Error::from_reason(format!("Failed to rename index file: {}", e)))?;
 
@@ -308,6 +395,378 @@ impl VexusIndex {
         }
 
         Ok(results)
+    }
+
+    /// RiverMemo 全局双场投影。
+    ///
+    /// Tag 向量直接从当前常驻 usearch F32 索引按 key 读取；整个查询只复用一个
+    /// dimension 大小的临时缓冲区，不维护第二份全库向量矩阵。
+    #[napi]
+    pub fn project_dual_weighted(
+        &self,
+        tag_ids: Vec<i64>,
+        local_masses: Float64Array,
+        transfer_masses: Float64Array,
+    ) -> Result<DualWeightedProjectionResult> {
+        let started_at = std::time::Instant::now();
+        let dim = self.dimensions as usize;
+        let local_weights: &[f64] = &local_masses;
+        let transfer_weights: &[f64] = &transfer_masses;
+
+        if local_weights.len() != tag_ids.len() || transfer_weights.len() != tag_ids.len() {
+            return Err(Error::from_reason(format!(
+                "Dual projection size mismatch: ids={}, local={}, transfer={}",
+                tag_ids.len(),
+                local_weights.len(),
+                transfer_weights.len()
+            )));
+        }
+
+        let index = self
+            .index
+            .read()
+            .map_err(|e| Error::from_reason(format!("Lock failed: {}", e)))?;
+        let mut tag_vector = vec![0.0f32; dim];
+        let mut local_output = vec![0.0f64; dim];
+        let mut transfer_output = vec![0.0f64; dim];
+        let mut local_total_weight = 0.0f64;
+        let mut transfer_total_weight = 0.0f64;
+        let mut found_count = 0usize;
+
+        for (position, &tag_id) in tag_ids.iter().enumerate() {
+            let local_mass = local_weights[position].max(0.0);
+            let transfer_mass = transfer_weights[position].max(0.0);
+            if tag_id <= 0
+                || (!local_mass.is_finite() && !transfer_mass.is_finite())
+                || (local_mass <= 0.0 && transfer_mass <= 0.0)
+            {
+                continue;
+            }
+
+            let local_mass = if local_mass.is_finite() {
+                local_mass
+            } else {
+                0.0
+            };
+            let transfer_mass = if transfer_mass.is_finite() {
+                transfer_mass
+            } else {
+                0.0
+            };
+            let matches = index.get(tag_id as u64, &mut tag_vector).map_err(|e| {
+                Error::from_reason(format!(
+                    "Failed to read Tag vector {} from usearch: {:?}",
+                    tag_id, e
+                ))
+            })?;
+            if matches == 0 {
+                continue;
+            }
+
+            found_count += 1;
+            for dimension in 0..dim {
+                let value = tag_vector[dimension] as f64;
+                if local_mass > 0.0 {
+                    local_output[dimension] += value * local_mass;
+                }
+                if transfer_mass > 0.0 {
+                    transfer_output[dimension] += value * transfer_mass;
+                }
+            }
+            local_total_weight += local_mass;
+            transfer_total_weight += transfer_mass;
+        }
+
+        let finalize = |mut output: Vec<f64>, total_weight: f64| -> Option<Vec<f64>> {
+            if total_weight <= 0.0 {
+                return None;
+            }
+            let mut norm_sq = 0.0f64;
+            for value in output.iter_mut() {
+                *value /= total_weight;
+                norm_sq += *value * *value;
+            }
+            let norm = norm_sq.sqrt();
+            if norm <= 1e-12 {
+                return None;
+            }
+            for value in output.iter_mut() {
+                *value /= norm;
+            }
+            Some(output)
+        };
+
+        Ok(DualWeightedProjectionResult {
+            local_vector: finalize(local_output, local_total_weight),
+            transfer_vector: finalize(transfer_output, transfer_total_weight),
+            requested_count: tag_ids.len() as u32,
+            found_count: found_count as u32,
+            missing_count: tag_ids.len().saturating_sub(found_count) as u32,
+            local_total_weight,
+            transfer_total_weight,
+            elapsed_ms: started_at.elapsed().as_secs_f64() * 1000.0,
+        })
+    }
+
+    /// 使用当前 VexusIndex 唯一 Tag 向量空间完成 TagMemo 上下文融合。
+    ///
+    /// 只在批量读取请求涉及的 Tag 向量时短持 usearch 读锁；语义去重、
+    /// 上下文加权和最终融合均在释放索引锁后执行，不维护第二份全库向量。
+    #[napi]
+    pub fn fuse_memo_context(
+        &self,
+        original: Float32Array,
+        tag_ids: Vec<i64>,
+        tag_weights: Float64Array,
+        alpha: f64,
+        dedup_threshold: Option<f64>,
+        max_tags: Option<u32>,
+    ) -> Result<MemoFusionResult> {
+        let started_at = std::time::Instant::now();
+        let dim = self.dimensions as usize;
+        let source: &[f32] = &original;
+        let weights: &[f64] = &tag_weights;
+        if source.len() != dim {
+            return Err(Error::from_reason(format!(
+                "Memo fusion dimension mismatch: expected {}, got {}",
+                dim,
+                source.len()
+            )));
+        }
+        if tag_ids.len() != weights.len() {
+            return Err(Error::from_reason(format!(
+                "Memo fusion input mismatch: ids={}, weights={}",
+                tag_ids.len(),
+                weights.len()
+            )));
+        }
+
+        let requested_count = tag_ids.len();
+        let mut requested: Vec<(i64, f64)> = tag_ids
+            .into_iter()
+            .zip(weights.iter().copied())
+            .filter_map(|(id, weight)| {
+                let weight = if weight.is_finite() {
+                    weight.max(0.0)
+                } else {
+                    0.0
+                };
+                (id > 0 && weight > 0.0).then_some((id, weight))
+            })
+            .collect();
+        requested.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        requested.truncate(max_tags.unwrap_or(128).clamp(1, 1024) as usize);
+
+        let mut vectors: Vec<(i64, f64, Vec<f32>, f64)> = Vec::with_capacity(requested.len());
+        {
+            let index = self.index.read().map_err(|error| {
+                Error::from_reason(format!("Memo fusion index lock failed: {}", error))
+            })?;
+            let mut buffer = vec![0.0f32; dim];
+            for (id, weight) in requested {
+                let matches = index.get(id as u64, &mut buffer).map_err(|error| {
+                    Error::from_reason(format!(
+                        "Memo fusion failed to read Tag vector {}: {:?}",
+                        id, error
+                    ))
+                })?;
+                if matches == 0 {
+                    continue;
+                }
+                let norm = buffer
+                    .iter()
+                    .map(|value| (*value as f64) * (*value as f64))
+                    .sum::<f64>()
+                    .sqrt();
+                if norm <= 1e-12 {
+                    continue;
+                }
+                vectors.push((id, weight, buffer.clone(), norm));
+            }
+        }
+
+        let found_count = vectors.len();
+        let threshold = dedup_threshold.unwrap_or(0.88).clamp(-1.0, 1.0);
+        let mut selected: Vec<(i64, f64, Vec<f32>, f64)> = Vec::new();
+        for (id, weight, vector, norm) in vectors {
+            let redundant = selected.iter().any(|(_, _, existing, existing_norm)| {
+                let dot = vector
+                    .iter()
+                    .zip(existing.iter())
+                    .map(|(left, right)| (*left as f64) * (*right as f64))
+                    .sum::<f64>();
+                dot / (norm * *existing_norm) > threshold
+            });
+            if !redundant {
+                selected.push((id, weight, vector, norm));
+            }
+        }
+
+        let mut context = vec![0.0f64; dim];
+        let total_weight: f64 = selected.iter().map(|entry| entry.1).sum();
+        if total_weight > 0.0 {
+            for (_, weight, vector, _) in &selected {
+                for dimension in 0..dim {
+                    context[dimension] += vector[dimension] as f64 * *weight;
+                }
+            }
+            for value in &mut context {
+                *value /= total_weight;
+            }
+            let context_norm = context
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                .sqrt();
+            if context_norm > 1e-12 {
+                for value in &mut context {
+                    *value /= context_norm;
+                }
+            }
+        }
+
+        let mix = if alpha.is_finite() {
+            alpha.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let mut fused: Vec<f64> = source
+            .iter()
+            .zip(context.iter())
+            .map(|(source_value, context_value)| {
+                (1.0 - mix) * (*source_value as f64) + mix * *context_value
+            })
+            .collect();
+        let fused_norm = fused.iter().map(|value| value * value).sum::<f64>().sqrt();
+        if fused_norm > 1e-12 {
+            for value in &mut fused {
+                *value /= fused_norm;
+            }
+        }
+
+        Ok(MemoFusionResult {
+            vector: fused,
+            selected_tag_ids: selected.iter().map(|entry| entry.0).collect(),
+            requested_count: requested_count as u32,
+            found_count: found_count as u32,
+            deduplicated_count: selected.len() as u32,
+            total_weight,
+            elapsed_ms: started_at.elapsed().as_secs_f64() * 1000.0,
+        })
+    }
+
+    /// 在本 Tag 向量索引与 MemoRuntime 上执行统一查询数学管线。
+    ///
+    /// EPA、Residual Pyramid、Core/语言/层级门控、Spike 与向量融合全部在
+    /// 同一 Rust 后台任务中完成；返回值同时供 DTSC 和 Topology V3 读出复用。
+    #[napi]
+    pub fn run_memo_pipeline(
+        &self,
+        db_path: String,
+        artifact_sig: String,
+        input_json: String,
+    ) -> AsyncTask<memo_pipeline::MemoPipelineTask> {
+        memo_pipeline::run_with_runtime(
+            self.index.clone(),
+            self.memo_runtime.clone(),
+            db_path,
+            artifact_sig,
+            self.dimensions as usize,
+            input_json,
+        )
+    }
+
+    /// 在本 Tag 向量索引拥有的统一 MemoRuntime 上执行共同 Spike 感应。
+    ///
+    /// 输入只包含 EPA/Pyramid 门控后的初始 Tag 种子与传播参数；输出的
+    /// QueryObservation 同时供 DTSC 和 RiverMemo Topology V3 两个读出头消费。
+    #[napi]
+    pub fn sense_memo_query(
+        &self,
+        db_path: String,
+        artifact_sig: String,
+        input_json: String,
+    ) -> AsyncTask<memo_sensing::MemoSensingTask> {
+        memo_sensing::sense_with_runtime(
+            self.memo_runtime.clone(),
+            db_path,
+            artifact_sig,
+            input_json,
+        )
+    }
+
+    /// 在统一 QueryObservation 上执行 DTSC 测地曲线读出。
+    ///
+    /// 与 RiverMemo Topology V3 读取同一个 MemoRuntime 活动图快照；
+    /// 差异只存在于读出方程，不再拥有独立图资产。
+    #[napi]
+    pub fn rerank_memo_dtsc(
+        &self,
+        db_path: String,
+        artifact_sig: String,
+        input_json: String,
+    ) -> AsyncTask<memo_dtsc::MemoDtscTask> {
+        memo_dtsc::rerank_with_runtime(self.memo_runtime.clone(), db_path, artifact_sig, input_json)
+    }
+
+    /// 在本 Tag 向量索引拥有的统一 MemoRuntime 上执行 RiverMemo Topology V3。
+    ///
+    /// 首次请求从持久化资产恢复 CSR，随后由本 VexusIndex 实例持有活动 Arc 快照；
+    /// 查询只克隆快照，不再访问进程全局生产缓存。
+    #[napi]
+    pub fn rerank_rivermemo_topology_v3(
+        &self,
+        db_path: String,
+        artifact_sig: String,
+        input_json: String,
+    ) -> AsyncTask<rivermemo_topology_v3::RiverMemoTopologyV3Task> {
+        rivermemo_topology_v3::rerank_with_runtime(
+            self.memo_runtime.clone(),
+            db_path,
+            artifact_sig,
+            input_json,
+        )
+    }
+
+    /// 从 SQLite 事实层和 Rust 派生表原生编译统一 Memo 图资产。
+    ///
+    /// 完整图、CSR、provenance、持久化 payload 与活动 Arc 均不跨越
+    /// N-API 边界；JavaScript 只接收签名、代际与规模摘要。
+    #[napi]
+    pub fn rebuild_memo_artifact(
+        &self,
+        db_path: String,
+        input_json: String,
+    ) -> AsyncTask<memo_artifact_builder::NativeMemoArtifactBuildTask> {
+        memo_artifact_builder::rebuild_with_runtime(self.memo_runtime.clone(), db_path, input_json)
+    }
+
+    /// 释放本索引持有的统一 Memo 图快照。
+    #[napi]
+    pub fn clear_memo_runtime(&self) -> Result<()> {
+        self.memo_runtime.clear().map_err(Error::from_reason)
+    }
+
+    /// 获取统一 Memo 图快照的常驻诊断。
+    #[napi]
+    pub fn memo_runtime_stats(&self) -> Result<MemoRuntimeStats> {
+        let (signature, generation, node_count, edge_count) = self
+            .memo_runtime
+            .diagnostics()
+            .map_err(Error::from_reason)?;
+        Ok(MemoRuntimeStats {
+            resident: signature.is_some(),
+            active_artifact_sig: signature,
+            generation: generation as i64,
+            node_count: node_count as u32,
+            edge_count: edge_count as u32,
+        })
     }
 
     /// 删除 (按 ID)
@@ -507,6 +966,21 @@ impl VexusIndex {
 
         let q: &[f32] = &query;
         let tags: &[f32] = &flattened_tags;
+        let expected_tags_len = n.checked_mul(dim).ok_or_else(|| {
+            Error::from_reason(format!(
+                "Handshake input size overflow: n_tags={}, dimension={}",
+                n, dim
+            ))
+        })?;
+        if q.len() != dim || tags.len() != expected_tags_len {
+            return Err(Error::from_reason(format!(
+                "Handshake dimension mismatch: query expected {}, got {}; tags expected {}, got {}",
+                dim,
+                q.len(),
+                expected_tags_len,
+                tags.len()
+            )));
+        }
 
         let mut magnitudes = Vec::with_capacity(n);
         let mut directions = Vec::with_capacity(n * dim);
@@ -634,11 +1108,11 @@ impl VexusIndex {
     #[napi]
     pub fn publish_epa_basis_cache(&self, db_path: String) -> Result<EpaBasisResult> {
         let pending = {
-            let mut guard = self
+            let guard = self
                 .epa_pending_cache
                 .lock()
                 .map_err(|e| Error::from_reason(format!("EPA pending cache lock failed: {}", e)))?;
-            guard.take()
+            guard.clone()
         };
 
         let pending = match pending {
@@ -661,6 +1135,14 @@ impl VexusIndex {
             }
         };
 
+        let target_db_identity = sqlite_database_identity(&db_path);
+        if target_db_identity != pending.db_identity {
+            return Err(Error::from_reason(format!(
+                "EPA pending cache database mismatch: computed for {}, publish requested for {}",
+                pending.db_identity, target_db_identity
+            )));
+        }
+
         println!(
             "[Vexus-Lite][EPA] publish_epa_basis_cache started: db={}, tags={}, clusters={}, basis={}",
             db_path,
@@ -682,6 +1164,18 @@ impl VexusIndex {
         .map_err(|e| Error::from_reason(format!("EPA cache write failed: {}", e)))?;
         tx.commit()
             .map_err(|e| Error::from_reason(format!("EPA cache commit failed: {}", e)))?;
+
+        {
+            let mut guard = self
+                .epa_pending_cache
+                .lock()
+                .map_err(|e| Error::from_reason(format!("EPA pending cache lock failed: {}", e)))?;
+            if guard.as_ref().map(|cache| cache.cache_sig.as_str())
+                == Some(pending.cache_sig.as_str())
+            {
+                *guard = None;
+            }
+        }
 
         let publish_ms = started_at.elapsed().as_secs_f64() * 1000.0;
         println!(
@@ -714,6 +1208,7 @@ impl VexusIndex {
         max_svd_rank: Option<u32>,
         min_neighbors: Option<u32>,
         model_sig: Option<String>,
+        effective_config_json: Option<String>,
     ) -> AsyncTask<IntrinsicResidualTask> {
         AsyncTask::new(IntrinsicResidualTask {
             db_path,
@@ -721,6 +1216,7 @@ impl VexusIndex {
             max_basis: max_svd_rank.unwrap_or(4),
             min_neighbors: min_neighbors.unwrap_or(3),
             model_sig,
+            effective_config_json,
         })
     }
 
@@ -776,18 +1272,12 @@ fn open_sqlite_readwrite(db_path: &str) -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
-fn checkpoint_sqlite_wal(conn: &Connection, mode: &str) -> rusqlite::Result<()> {
-    let sql = match mode {
-        "TRUNCATE" => "PRAGMA wal_checkpoint(TRUNCATE)",
-        "FULL" => "PRAGMA wal_checkpoint(FULL)",
-        _ => "PRAGMA wal_checkpoint(PASSIVE)",
-    };
-    conn.execute_batch(sql)
-}
-
 /// 🌟 EPA: Rust 侧 K-Means + 加权 PCA 计算结果暂存。
+#[derive(Clone)]
 pub struct EpaPendingCache {
     cache_json: String,
+    cache_sig: String,
+    db_identity: String,
     tag_count: u32,
     cluster_count: u32,
     basis_count: u32,
@@ -808,6 +1298,21 @@ pub struct EpaBasisTask {
     cluster_count: u32,
     max_basis_dim: u32,
     pending_cache: Arc<std::sync::Mutex<Option<EpaPendingCache>>>,
+}
+
+fn stable_sha256_hex(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn sqlite_database_identity(db_path: &str) -> String {
+    std::fs::canonicalize(db_path)
+        .unwrap_or_else(|_| std::path::PathBuf::from(db_path))
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_lowercase()
 }
 
 fn json_escape(value: &str) -> String {
@@ -1145,18 +1650,18 @@ impl Task for EpaBasisTask {
                 .map_err(|e| Error::from_reason(format!("Query tags failed: {}", e)))?;
 
             for row in rows {
-                if let Ok((name, bytes)) = row {
-                    if bytes.len() != dim * 4 {
-                        continue;
-                    }
-                    let mut vector: Vec<f32> = bytes
-                        .chunks_exact(4)
-                        .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    normalize_f32_vector(&mut vector);
-                    tag_names.push(name);
-                    tag_vectors.push(vector);
+                let (name, bytes) = row
+                    .map_err(|e| Error::from_reason(format!("Decode EPA Tag row failed: {}", e)))?;
+                if bytes.len() != dim * 4 {
+                    continue;
                 }
+                let mut vector: Vec<f32> = bytes
+                    .chunks_exact(4)
+                    .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+                    .collect();
+                normalize_f32_vector(&mut vector);
+                tag_names.push(name);
+                tag_vectors.push(vector);
             }
         }
 
@@ -1344,6 +1849,8 @@ impl Task for EpaBasisTask {
         );
 
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let cache_sig = stable_sha256_hex(&cache_json);
+        let db_identity = sqlite_database_identity(&self.db_path);
         {
             let mut guard = self
                 .pending_cache
@@ -1351,6 +1858,8 @@ impl Task for EpaBasisTask {
                 .map_err(|e| Error::from_reason(format!("EPA pending cache lock failed: {}", e)))?;
             *guard = Some(EpaPendingCache {
                 cache_json,
+                cache_sig,
+                db_identity,
                 tag_count: tag_count as u32,
                 cluster_count: k_clusters as u32,
                 basis_count: selected_k as u32,
@@ -1416,6 +1925,7 @@ pub struct IntrinsicResidualTask {
     max_basis: u32,
     min_neighbors: u32,
     model_sig: Option<String>,
+    effective_config_json: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -1443,68 +1953,44 @@ struct IntrinsicResidualConfig {
     semantic_floor: f64,
     semantic_hard_floor: f64,
     min_gain: f64,
+    v9_anchor_base: f64,
+    v9_anchor_scale: f64,
+    v9_anchor_gamma: f64,
+    v9_anchor_min: f64,
+    v9_anchor_max: f64,
 }
 
-fn env_usize_with_source(
-    name: &str,
-    default_value: usize,
-    default_source: &'static str,
-    min_value: usize,
-    max_value: usize,
-) -> (usize, &'static str) {
-    match std::env::var(name) {
-        Ok(raw) => match raw.parse::<usize>() {
-            Ok(value) => (value.clamp(min_value, max_value), "env"),
-            Err(_) => (default_value.clamp(min_value, max_value), default_source),
-        },
-        Err(_) => (default_value.clamp(min_value, max_value), default_source),
-    }
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct IntrinsicResidualConfigInput {
+    method: Option<String>,
+    max_neighbors: Option<usize>,
+    max_basis: Option<usize>,
+    min_neighbors: Option<usize>,
+    semantic_enabled: Option<bool>,
+    semantic_peak: Option<f64>,
+    semantic_sigma: Option<f64>,
+    semantic_floor: Option<f64>,
+    semantic_hard_floor: Option<f64>,
+    min_gain: Option<f64>,
+    position_decay: Option<f64>,
+    v9_anchor_base: Option<f64>,
+    v9_anchor_scale: Option<f64>,
+    v9_anchor_gamma: Option<f64>,
+    v9_anchor_min: Option<f64>,
+    v9_anchor_max: Option<f64>,
 }
 
-fn env_f64_with_source(
-    name: &str,
-    default_value: f64,
-    default_source: &'static str,
-    min_value: f64,
-    max_value: f64,
-) -> (f64, &'static str) {
-    match std::env::var(name) {
-        Ok(raw) => match raw.parse::<f64>() {
-            Ok(value) if value.is_finite() => (value.clamp(min_value, max_value), "env"),
-            _ => (default_value.clamp(min_value, max_value), default_source),
-        },
-        Err(_) => (default_value.clamp(min_value, max_value), default_source),
-    }
-}
-
-fn env_bool_with_source(
-    name: &str,
-    default_value: bool,
-    default_source: &'static str,
-) -> (bool, &'static str) {
-    match std::env::var(name) {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            (
-                normalized == "true" || normalized == "1" || normalized == "yes" || normalized == "on",
-                "env",
-            )
-        }
-        Err(_) => (default_value, default_source),
-    }
-}
-
-fn intrinsic_method_from_env() -> (IntrinsicResidualMethod, &'static str) {
-    match std::env::var("TAGMEMO_IR_METHOD") {
-        Ok(raw) => {
-            let method = match raw.trim().to_ascii_lowercase().as_str() {
-                "centroid" => IntrinsicResidualMethod::Centroid,
-                "svd" => IntrinsicResidualMethod::Svd,
-                _ => IntrinsicResidualMethod::AnchoredGs,
-            };
-            (method, "env")
-        }
-        Err(_) => (IntrinsicResidualMethod::AnchoredGs, "default"),
+fn intrinsic_method_from_name(value: Option<&str>) -> IntrinsicResidualMethod {
+    match value
+        .unwrap_or("anchored_gs")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "centroid" => IntrinsicResidualMethod::Centroid,
+        "svd" => IntrinsicResidualMethod::Svd,
+        _ => IntrinsicResidualMethod::AnchoredGs,
     }
 }
 
@@ -1736,35 +2222,46 @@ impl Task for IntrinsicResidualTask {
 
         let start = Instant::now();
         let dim = self.dimensions as usize;
-        let (method, method_source) = intrinsic_method_from_env();
-        let (max_neighbors, max_neighbors_source) =
-            env_usize_with_source("TAGMEMO_IR_MAX_NEIGHBORS", 48, "default", 4, 256);
-        let (max_basis, max_basis_source) = env_usize_with_source(
-            "TAGMEMO_IR_MAX_BASIS",
-            self.max_basis as usize,
-            "js_arg",
-            1,
-            32,
-        );
-        let (min_neighbors, min_neighbors_source) = env_usize_with_source(
-            "TAGMEMO_IR_MIN_NEIGHBORS",
-            self.min_neighbors as usize,
-            "js_arg",
-            1,
-            64,
-        );
-        let (semantic_enabled, semantic_enabled_source) =
-            env_bool_with_source("TAGMEMO_IR_SEMANTIC_GATE_ENABLED", true, "default");
-        let (semantic_peak, semantic_peak_source) =
-            env_f64_with_source("TAGMEMO_IR_SEMANTIC_PEAK", 0.65, "default", -1.0, 1.0);
-        let (semantic_sigma, semantic_sigma_source) =
-            env_f64_with_source("TAGMEMO_IR_SEMANTIC_SIGMA", 0.25, "default", 0.02, 2.0);
-        let (semantic_floor, semantic_floor_source) =
-            env_f64_with_source("TAGMEMO_IR_SEMANTIC_FLOOR", 0.35, "default", 0.0, 1.0);
-        let (semantic_hard_floor, semantic_hard_floor_source) =
-            env_f64_with_source("TAGMEMO_IR_SEMANTIC_HARD_FLOOR", -1.0, "default", -1.0, 1.0);
-        let (min_gain, min_gain_source) =
-            env_f64_with_source("TAGMEMO_IR_MIN_GAIN", 0.015, "default", 0.0, 1.0);
+        let config_input: IntrinsicResidualConfigInput = match self.effective_config_json.as_deref()
+        {
+            Some(raw) => serde_json::from_str(raw).map_err(|e| {
+                Error::from_reason(format!(
+                    "Invalid intrinsic residual effective config JSON: {}",
+                    e
+                ))
+            })?,
+            None => IntrinsicResidualConfigInput::default(),
+        };
+        let config_source = if self.effective_config_json.is_some() {
+            "js_snapshot"
+        } else {
+            "legacy_args_and_defaults"
+        };
+        let method = intrinsic_method_from_name(config_input.method.as_deref());
+        let max_neighbors = config_input.max_neighbors.unwrap_or(48).clamp(4, 256);
+        let max_basis = config_input
+            .max_basis
+            .unwrap_or(self.max_basis as usize)
+            .clamp(1, 32);
+        let min_neighbors = config_input
+            .min_neighbors
+            .unwrap_or(self.min_neighbors as usize)
+            .clamp(1, 64);
+        let semantic_enabled = config_input.semantic_enabled.unwrap_or(true);
+        let semantic_peak = config_input.semantic_peak.unwrap_or(0.65).clamp(-1.0, 1.0);
+        let semantic_sigma = config_input.semantic_sigma.unwrap_or(0.25).clamp(0.02, 2.0);
+        let semantic_floor = config_input.semantic_floor.unwrap_or(0.35).clamp(0.0, 1.0);
+        let semantic_hard_floor = config_input
+            .semantic_hard_floor
+            .unwrap_or(-1.0)
+            .clamp(-1.0, 1.0);
+        let min_gain = config_input.min_gain.unwrap_or(0.015).clamp(0.0, 1.0);
+        let distance_decay = config_input.position_decay.unwrap_or(0.15).clamp(0.0, 4.0);
+        let v9_anchor_base = config_input.v9_anchor_base.unwrap_or(0.75).clamp(0.0, 4.0);
+        let v9_anchor_scale = config_input.v9_anchor_scale.unwrap_or(1.25).clamp(0.0, 4.0);
+        let v9_anchor_gamma = config_input.v9_anchor_gamma.unwrap_or(1.0).clamp(0.1, 8.0);
+        let v9_anchor_min = config_input.v9_anchor_min.unwrap_or(0.5).clamp(0.0, 4.0);
+        let v9_anchor_max = config_input.v9_anchor_max.unwrap_or(2.0).clamp(0.0, 8.0);
 
         let cfg = IntrinsicResidualConfig {
             method,
@@ -1777,7 +2274,35 @@ impl Task for IntrinsicResidualTask {
             semantic_floor,
             semantic_hard_floor,
             min_gain,
+            v9_anchor_base,
+            v9_anchor_scale,
+            v9_anchor_gamma,
+            v9_anchor_min: v9_anchor_min.min(v9_anchor_max),
+            v9_anchor_max: v9_anchor_max.max(v9_anchor_min),
         };
+        const INTRINSIC_ALGORITHM_VERSION: &str = "intrinsic_residual_ratio_v9_1_single_track";
+        let effective_config = format!(
+            "{{\"algorithm\":\"{}\",\"method\":\"{}\",\"dimension\":{},\"maxNeighbors\":{},\"maxBasis\":{},\"minNeighbors\":{},\"semanticEnabled\":{},\"semanticPeak\":{},\"semanticSigma\":{},\"semanticFloor\":{},\"semanticHardFloor\":{},\"minGain\":{},\"positionDecay\":{},\"v9AnchorBase\":{},\"v9AnchorScale\":{},\"v9AnchorGamma\":{},\"v9AnchorMin\":{},\"v9AnchorMax\":{}}}",
+            INTRINSIC_ALGORITHM_VERSION,
+            intrinsic_method_name(cfg.method),
+            dim,
+            cfg.max_neighbors,
+            cfg.max_basis,
+            cfg.min_neighbors,
+            cfg.semantic_enabled,
+            cfg.semantic_peak,
+            cfg.semantic_sigma,
+            cfg.semantic_floor,
+            cfg.semantic_hard_floor,
+            cfg.min_gain,
+            distance_decay,
+            cfg.v9_anchor_base,
+            cfg.v9_anchor_scale,
+            cfg.v9_anchor_gamma,
+            cfg.v9_anchor_min,
+            cfg.v9_anchor_max
+        );
+        let config_hash = stable_sha256_hex(&effective_config);
 
         let mut tag_vectors: HashMap<i64, Vec<f32>> = HashMap::new();
         let mut adjacency: HashMap<i64, HashMap<i64, f64>> = HashMap::new();
@@ -1785,15 +2310,17 @@ impl Task for IntrinsicResidualTask {
         let mut skipped_files = 0usize;
         let mut edge_updates = 0usize;
         let load_started = Instant::now();
-        let (distance_decay, distance_decay_source) =
-            env_f64_with_source("TAGMEMO_IR_POSITION_DECAY", 0.15, "default", 0.0, 4.0);
+        let mut content_hasher = {
+            use sha2::Digest;
+            sha2::Sha256::new()
+        };
 
         {
             let conn = open_sqlite_readonly(&self.db_path).map_err(|e| {
                 Error::from_reason(format!("DB readonly open/config failed: {}", e))
             })?;
             let mut stmt = conn
-                .prepare("SELECT id, vector FROM tags WHERE vector IS NOT NULL")
+                .prepare("SELECT id, vector FROM tags WHERE vector IS NOT NULL ORDER BY id")
                 .map_err(|e| Error::from_reason(format!("Prepare failed: {}", e)))?;
             let rows = stmt
                 .query_map([], |row| {
@@ -1802,14 +2329,24 @@ impl Task for IntrinsicResidualTask {
                 .map_err(|e| Error::from_reason(format!("Query failed: {}", e)))?;
 
             for row in rows {
-                if let Ok((id, bytes)) = row {
-                    if bytes.len() == dim * 4 {
-                        let vec: Vec<f32> = bytes
-                            .chunks_exact(4)
-                            .map(|c| f32::from_ne_bytes(c.try_into().unwrap()))
-                            .collect();
-                        tag_vectors.insert(id, vec);
-                    }
+                let (id, bytes) = row.map_err(|e| {
+                    Error::from_reason(format!("Decode intrinsic Tag row failed: {}", e))
+                })?;
+                {
+                    use sha2::Digest;
+                    content_hasher.update(id.to_le_bytes());
+                    content_hasher.update((bytes.len() as u64).to_le_bytes());
+                    content_hasher.update(&bytes);
+                }
+                if bytes.len() == dim * 4 {
+                    let mut vec: Vec<f32> = bytes
+                        .chunks_exact(4)
+                        .map(|c| f32::from_ne_bytes(c.try_into().unwrap()))
+                        .collect();
+                    // P0: residual 必须是单位向量相对于局部子空间的不可解释比例。
+                    // 不再隐含依赖 embedding 服务已经归一化。
+                    normalize_f32_vector(&mut vec);
+                    tag_vectors.insert(id, vec);
                 }
             }
 
@@ -1820,40 +2357,7 @@ impl Task for IntrinsicResidualTask {
                 })
                 .unwrap_or(false);
 
-            if !force_recompute && !tag_vectors.is_empty() {
-                let cached_count: u32 = conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM tag_intrinsic_residuals WHERE tag_id IN (SELECT id FROM tags WHERE vector IS NOT NULL)",
-                        [],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .unwrap_or(0)
-                    .max(0) as u32;
-                let tag_count = tag_vectors.len() as u32;
-
-                if cached_count >= tag_count {
-                    let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-                    println!(
-                        "[Vexus-Lite][IntrinsicResidual] cache complete; skipping full recompute: cached={}, tags={}, elapsed={:.2}ms",
-                        cached_count,
-                        tag_count,
-                        elapsed
-                    );
-
-                    return Ok(IntrinsicResidualResult {
-                        tag_count,
-                        computed_count: 0,
-                        skipped_count: tag_count,
-                        elapsed_ms: elapsed,
-                    });
-                }
-
-                println!(
-                    "[Vexus-Lite][IntrinsicResidual] cache incomplete; full-table recompute required for min/max normalization: cached={}, tags={}, force=false",
-                    cached_count,
-                    tag_count
-                );
-            } else if force_recompute {
+            if force_recompute {
                 println!("[Vexus-Lite][IntrinsicResidual] force recompute enabled by TAGMEMO_INTRINSIC_RESIDUAL_FORCE_RECOMPUTE.");
             }
 
@@ -1915,19 +2419,26 @@ impl Task for IntrinsicResidualTask {
             let mut file_tags: Vec<(i64, i64)> = Vec::with_capacity(64);
 
             for row in rows {
-                if let Ok((fid, tid, position)) = row {
-                    if fid != current_file_id {
-                        flush(
-                            &file_tags,
-                            &mut adjacency,
-                            &mut edge_updates,
-                            &mut skipped_files,
-                        );
-                        file_tags.clear();
-                        current_file_id = fid;
-                    }
-                    file_tags.push((tid, position));
+                let (fid, tid, position) = row.map_err(|e| {
+                    Error::from_reason(format!("Decode intrinsic adjacency row failed: {}", e))
+                })?;
+                {
+                    use sha2::Digest;
+                    content_hasher.update(fid.to_le_bytes());
+                    content_hasher.update(tid.to_le_bytes());
+                    content_hasher.update(position.to_le_bytes());
                 }
+                if fid != current_file_id {
+                    flush(
+                        &file_tags,
+                        &mut adjacency,
+                        &mut edge_updates,
+                        &mut skipped_files,
+                    );
+                    file_tags.clear();
+                    current_file_id = fid;
+                }
+                file_tags.push((tid, position));
             }
             flush(
                 &file_tags,
@@ -1963,9 +2474,13 @@ impl Task for IntrinsicResidualTask {
                         })?;
 
                     for row in rows {
-                        if let Ok((a, b, sim)) = row {
-                            pairwise_similarity.insert((a, b), sim);
-                        }
+                        let (a, b, sim) = row.map_err(|e| {
+                            Error::from_reason(format!(
+                                "Decode pairwise similarity row failed: {}",
+                                e
+                            ))
+                        })?;
+                        pairwise_similarity.insert(pair_key(a, b), sim);
                     }
                     println!(
                         "[Vexus-Lite][IntrinsicResidual] semantic cache loaded: pairs={}, model_sig={}, elapsed={:.2}ms",
@@ -1979,31 +2494,76 @@ impl Task for IntrinsicResidualTask {
             }
         }
 
-        println!(
-            "[Vexus-Lite][IntrinsicResidual] input loaded: tags={}, method={}({}), max_neighbors={}({}), max_basis={}({}), min_neighbors={}({}), position_decay={}({}), semantic_enabled={}({}), semantic_peak={}({}), semantic_sigma={}({}), semantic_floor={}({}), semantic_hard_floor={}({}), min_gain={}({}), load_elapsed={:.2}ms",
+        let content_digest = {
+            use sha2::Digest;
+            format!("{:x}", content_hasher.finalize())
+        };
+        let graph_generation = format!(
+            "content:{}:tags:{}:sources:{}:edge_updates:{}:skipped_files:{}",
+            content_digest,
             tag_vectors.len(),
-            intrinsic_method_name(cfg.method),
-            method_source,
-            cfg.max_neighbors,
-            max_neighbors_source,
-            cfg.max_basis,
-            max_basis_source,
-            cfg.min_neighbors,
-            min_neighbors_source,
-            distance_decay,
-            distance_decay_source,
-            cfg.semantic_enabled,
-            semantic_enabled_source,
-            cfg.semantic_peak,
-            semantic_peak_source,
-            cfg.semantic_sigma,
-            semantic_sigma_source,
-            cfg.semantic_floor,
-            semantic_floor_source,
-            cfg.semantic_hard_floor,
-            semantic_hard_floor_source,
-            cfg.min_gain,
-            min_gain_source,
+            adjacency.len(),
+            edge_updates,
+            skipped_files
+        );
+        let model_sig_value = self.model_sig.as_deref().unwrap_or("missing-model-sig");
+        let artifact_sig = stable_sha256_hex(&format!(
+            "{}|{}|{}|{}",
+            model_sig_value, graph_generation, INTRINSIC_ALGORITHM_VERSION, config_hash
+        ));
+
+        let force_recompute = std::env::var("TAGMEMO_INTRINSIC_RESIDUAL_FORCE_RECOMPUTE")
+            .map(|value| {
+                let normalized = value.trim().to_ascii_lowercase();
+                normalized == "true" || normalized == "1" || normalized == "yes"
+            })
+            .unwrap_or(false);
+        if !force_recompute && !tag_vectors.is_empty() {
+            let conn = open_sqlite_readonly(&self.db_path).map_err(|e| {
+                Error::from_reason(format!("DB readonly cache open/config failed: {}", e))
+            })?;
+            let cached_count = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM tag_intrinsic_residual_status WHERE artifact_sig = ?1",
+                    rusqlite::params![&artifact_sig],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                .max(0) as usize;
+
+            if cached_count >= tag_vectors.len() {
+                let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                println!(
+                    "[Vexus-Lite][IntrinsicResidual] artifact cache complete; skipping recompute: artifact={}, processed={}, tags={}, elapsed={:.2}ms",
+                    artifact_sig,
+                    cached_count,
+                    tag_vectors.len(),
+                    elapsed
+                );
+                return Ok(IntrinsicResidualResult {
+                    tag_count: tag_vectors.len() as u32,
+                    computed_count: 0,
+                    skipped_count: tag_vectors.len() as u32,
+                    elapsed_ms: elapsed,
+                    algorithm_version: INTRINSIC_ALGORITHM_VERSION.to_string(),
+                    artifact_sig,
+                    effective_config,
+                });
+            }
+            println!(
+                "[Vexus-Lite][IntrinsicResidual] artifact cache incomplete: artifact={}, processed={}, tags={}",
+                artifact_sig,
+                cached_count,
+                tag_vectors.len()
+            );
+        }
+
+        println!(
+            "[Vexus-Lite][IntrinsicResidual] input loaded: tags={}, config_source={}, effective_config={}, artifact={}, load_elapsed={:.2}ms",
+            tag_vectors.len(),
+            config_source,
+            effective_config,
+            artifact_sig,
             load_started.elapsed().as_secs_f64() * 1000.0
         );
 
@@ -2012,6 +2572,8 @@ impl Task for IntrinsicResidualTask {
         let mut skipped = 0u32;
         let mut total_neighbors = 0usize;
         let mut results: Vec<(i64, f64, usize)> = Vec::new();
+        let mut status_results: Vec<(i64, &'static str, usize, Option<String>)> =
+            Vec::with_capacity(tag_vectors.len());
         let compute_started = Instant::now();
 
         for (&tag_id, tag_vec) in &tag_vectors {
@@ -2035,6 +2597,7 @@ impl Task for IntrinsicResidualTask {
                 Some(value) => value,
                 None => {
                     skipped += 1;
+                    status_results.push((tag_id, "insufficient_neighbors", 0, None));
                     continue;
                 }
             };
@@ -2070,6 +2633,7 @@ impl Task for IntrinsicResidualTask {
 
             if candidates.len() < cfg.min_neighbors {
                 skipped += 1;
+                status_results.push((tag_id, "insufficient_neighbors", candidates.len(), None));
                 continue;
             }
 
@@ -2087,10 +2651,19 @@ impl Task for IntrinsicResidualTask {
 
             if let Some(value) = residual_energy {
                 total_neighbors += candidates.len();
-                results.push((tag_id, value, candidates.len()));
+                // 输入已单位化且基底正交，理论范围为 [0,1]；夹逼仅吸收浮点误差。
+                let raw_residual_ratio = value.clamp(0.0, 1.0);
+                results.push((tag_id, raw_residual_ratio, candidates.len()));
+                status_results.push((tag_id, "computed", candidates.len(), None));
                 computed += 1;
             } else {
                 skipped += 1;
+                status_results.push((
+                    tag_id,
+                    "failed",
+                    candidates.len(),
+                    Some("residual method produced no usable basis".to_string()),
+                ));
             }
         }
 
@@ -2102,11 +2675,18 @@ impl Task for IntrinsicResidualTask {
             compute_started.elapsed().as_secs_f64() * 1000.0
         );
 
-        if !results.is_empty() {
+        if !status_results.is_empty() {
             let write_started = Instant::now();
             let max_r = results.iter().map(|r| r.1).fold(0.0f64, f64::max);
             let min_r = results.iter().map(|r| r.1).fold(f64::MAX, f64::min);
-            let range = max_r - min_r;
+
+            // V9.1 单轨：原始 residual ratio 直接进入固定、数据库无关的锚增益映射。
+            // 不再计算依赖全库分布的 V8.3 median/MAD 兼容增益，避免任一离群标签
+            // 重新标定其他节点，也避免退休资产在全量重建后被原生侧重新写回。
+            let computed_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as i64)
+                .unwrap_or(0);
 
             let mut conn = open_sqlite_readwrite(&self.db_path)
                 .map_err(|e| Error::from_reason(format!("DB write open/config failed: {}", e)))?;
@@ -2114,32 +2694,99 @@ impl Task for IntrinsicResidualTask {
                 .transaction()
                 .map_err(|e| Error::from_reason(format!("Transaction failed: {}", e)))?;
 
+            // 数值表保存当前健康 V9.1 artifact；residual_energy 作为 V9.1 锚增益的
+            // 通用兼容镜像。退休的 v8_3_compat_gain 列保留物理结构但写入 NULL。
+            // 状态表按 artifact 版本化保留，允许 skipped/failed 也参与完整性判断。
             tx.execute("DELETE FROM tag_intrinsic_residuals", [])
-                .map_err(|e| Error::from_reason(format!("Clear failed: {}", e)))?;
+                .map_err(|e| Error::from_reason(format!("Residual value clear failed: {}", e)))?;
+            tx.execute(
+                "DELETE FROM tag_intrinsic_residual_status WHERE artifact_sig = ?1",
+                rusqlite::params![&artifact_sig],
+            )
+            .map_err(|e| Error::from_reason(format!("Residual status clear failed: {}", e)))?;
+
+            tx.execute(
+                "INSERT OR REPLACE INTO tagmemo_artifacts \
+                 (artifact_sig, asset_type, model_sig, graph_generation, algorithm_version, config_hash, effective_config, status, created_at, updated_at) \
+                 VALUES (?1, 'intrinsic_residual', ?2, ?3, ?4, ?5, ?6, 'ready', ?7, ?7)",
+                rusqlite::params![
+                    &artifact_sig,
+                    model_sig_value,
+                    &graph_generation,
+                    INTRINSIC_ALGORITHM_VERSION,
+                    &config_hash,
+                    &effective_config,
+                    computed_at
+                ],
+            )
+            .map_err(|e| Error::from_reason(format!("Residual artifact registration failed: {}", e)))?;
 
             {
                 let mut insert = tx.prepare(
-                    "INSERT INTO tag_intrinsic_residuals (tag_id, residual_energy, neighbor_count) VALUES (?1, ?2, ?3)"
-                ).map_err(|e| Error::from_reason(format!("Prepare insert failed: {}", e)))?;
+                    "INSERT INTO tag_intrinsic_residuals \
+                     (tag_id, residual_energy, neighbor_count, raw_residual_ratio, v8_3_compat_gain, v9_anchor_gain, model_sig, artifact_sig, algorithm_version, config_hash, status) \
+                     VALUES (?1, ?2, ?3, ?4, NULL, ?2, ?5, ?6, ?7, ?8, 'computed')"
+                ).map_err(|e| Error::from_reason(format!("Prepare residual value insert failed: {}", e)))?;
 
                 for (tag_id, raw_residual, n_count) in &results {
-                    let normalized = if range > 1e-9 {
-                        0.5 + 1.5 * ((raw_residual - min_r) / range)
-                    } else {
-                        1.0
-                    };
+                    // V9.1 使用数据库无关的固定单调映射；该值同时作为 residual_energy
+                    // 通用镜像，旧读取器仍能获得有效增益，但不再生成 V8.3 专属数值。
+                    let v9_anchor_gain = (cfg.v9_anchor_base
+                        + cfg.v9_anchor_scale * raw_residual.powf(cfg.v9_anchor_gamma))
+                    .clamp(cfg.v9_anchor_min, cfg.v9_anchor_max);
                     insert
-                        .execute(rusqlite::params![tag_id, normalized, *n_count as i64])
-                        .map_err(|e| Error::from_reason(format!("Insert failed: {}", e)))?;
+                        .execute(rusqlite::params![
+                            tag_id,
+                            v9_anchor_gain,
+                            *n_count as i64,
+                            raw_residual,
+                            model_sig_value,
+                            &artifact_sig,
+                            INTRINSIC_ALGORITHM_VERSION,
+                            &config_hash
+                        ])
+                        .map_err(|e| {
+                            Error::from_reason(format!("Residual value insert failed: {}", e))
+                        })?;
                 }
             }
+
+            {
+                let mut insert_status = tx
+                    .prepare(
+                        "INSERT OR REPLACE INTO tag_intrinsic_residual_status \
+                     (tag_id, artifact_sig, status, neighbor_count, error_message, computed_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    )
+                    .map_err(|e| {
+                        Error::from_reason(format!("Prepare residual status insert failed: {}", e))
+                    })?;
+
+                for (tag_id, status, neighbor_count, error_message) in &status_results {
+                    insert_status
+                        .execute(rusqlite::params![
+                            tag_id,
+                            &artifact_sig,
+                            status,
+                            *neighbor_count as i64,
+                            error_message,
+                            computed_at
+                        ])
+                        .map_err(|e| {
+                            Error::from_reason(format!("Residual status insert failed: {}", e))
+                        })?;
+                }
+            }
+
             tx.commit()
                 .map_err(|e| Error::from_reason(format!("Commit failed: {}", e)))?;
 
             println!(
-                "[Vexus-Lite][IntrinsicResidual] write phase finished: rows={}, raw_min={:.6}, raw_max={:.6}, elapsed={:.2}ms",
+                "[Vexus-Lite][IntrinsicResidual] V9.1 single-track write finished: values={}, statuses={}, artifact={}, raw_min={:.6}, raw_max={:.6}, elapsed={:.2}ms",
                 results.len(),
-                min_r,
+                status_results.len(),
+                artifact_sig,
+                if results.is_empty() { 0.0 } else { min_r },
                 max_r,
                 write_started.elapsed().as_secs_f64() * 1000.0
             );
@@ -2152,6 +2799,9 @@ impl Task for IntrinsicResidualTask {
             computed_count: computed,
             skipped_count: skipped,
             elapsed_ms: elapsed,
+            algorithm_version: INTRINSIC_ALGORITHM_VERSION.to_string(),
+            artifact_sig,
+            effective_config,
         })
     }
 
@@ -2180,6 +2830,7 @@ impl Task for PairwiseSimTask {
 
         let start = Instant::now();
         let dim = self.dimensions as usize;
+        const PAIRWISE_ALGORITHM_VERSION: &str = "pairwise_cosine_v9_1_single_track";
 
         // ====================================================================
         // Step 1-3: 只读加载 Tag 向量、共现 pair 与缓存集合
@@ -2187,12 +2838,18 @@ impl Task for PairwiseSimTask {
         let mut tag_vectors: HashMap<i64, Vec<f32>> = HashMap::new();
         let mut pair_set: HashSet<(i64, i64)> = HashSet::new();
         let mut cached: HashSet<(i64, i64)> = HashSet::new();
-        {
+        let mut max_tag_id = 0_i64;
+        let mut file_tag_rows = 0_u64;
+        let (pair_count, graph_generation) = {
             let conn = open_sqlite_readonly(&self.db_path).map_err(|e| {
                 Error::from_reason(format!("DB readonly open/config failed: {}", e))
             })?;
+            let mut content_hasher = {
+                use sha2::Digest;
+                sha2::Sha256::new()
+            };
             let mut stmt = conn
-                .prepare("SELECT id, vector FROM tags WHERE vector IS NOT NULL")
+                .prepare("SELECT id, vector FROM tags WHERE vector IS NOT NULL ORDER BY id")
                 .map_err(|e| Error::from_reason(format!("Prepare tags query failed: {}", e)))?;
             let rows = stmt
                 .query_map([], |row| {
@@ -2201,14 +2858,22 @@ impl Task for PairwiseSimTask {
                 .map_err(|e| Error::from_reason(format!("Query tags failed: {}", e)))?;
 
             for row in rows {
-                if let Ok((id, bytes)) = row {
-                    if bytes.len() == dim * 4 {
-                        let vec: Vec<f32> = bytes
-                            .chunks_exact(4)
-                            .map(|c| f32::from_ne_bytes(c.try_into().unwrap()))
-                            .collect();
-                        tag_vectors.insert(id, vec);
-                    }
+                let (id, bytes) = row.map_err(|e| {
+                    Error::from_reason(format!("Decode pairwise Tag row failed: {}", e))
+                })?;
+                max_tag_id = max_tag_id.max(id);
+                {
+                    use sha2::Digest;
+                    content_hasher.update(id.to_le_bytes());
+                    content_hasher.update((bytes.len() as u64).to_le_bytes());
+                    content_hasher.update(&bytes);
+                }
+                if bytes.len() == dim * 4 {
+                    let vec: Vec<f32> = bytes
+                        .chunks_exact(4)
+                        .map(|c| f32::from_ne_bytes(c.try_into().unwrap()))
+                        .collect();
+                    tag_vectors.insert(id, vec);
                 }
             }
 
@@ -2218,7 +2883,7 @@ impl Task for PairwiseSimTask {
             // 约定 tag_a < tag_b
             // ====================================================================
             let mut stmt = conn
-                .prepare("SELECT file_id, tag_id FROM file_tags ORDER BY file_id")
+                .prepare("SELECT file_id, tag_id FROM file_tags ORDER BY file_id, tag_id")
                 .map_err(|e| {
                     Error::from_reason(format!("Prepare file_tags query failed: {}", e))
                 })?;
@@ -2248,22 +2913,56 @@ impl Task for PairwiseSimTask {
             };
 
             for row in rows {
-                if let Ok((fid, tid)) = row {
-                    if fid != current_file_id {
-                        flush(&file_tags, &mut pair_set);
-                        file_tags.clear();
-                        current_file_id = fid;
-                    }
-                    file_tags.push(tid);
+                let (fid, tid) = row.map_err(|e| {
+                    Error::from_reason(format!("Decode pairwise file_tags row failed: {}", e))
+                })?;
+                file_tag_rows += 1;
+                max_tag_id = max_tag_id.max(tid);
+                {
+                    use sha2::Digest;
+                    content_hasher.update(fid.to_le_bytes());
+                    content_hasher.update(tid.to_le_bytes());
                 }
+                if fid != current_file_id {
+                    flush(&file_tags, &mut pair_set);
+                    file_tags.clear();
+                    current_file_id = fid;
+                }
+                file_tags.push(tid);
             }
             flush(&file_tags, &mut pair_set);
-        }
 
-        let pair_count = pair_set.len() as u32;
+            let content_digest = {
+                use sha2::Digest;
+                format!("{:x}", content_hasher.finalize())
+            };
+            let pair_count = pair_set.len() as u32;
+            let graph_generation = format!(
+                "content:{}:tags:{}:max_tag:{}:file_tag_rows:{}:pairs:{}",
+                content_digest,
+                tag_vectors.len(),
+                max_tag_id,
+                file_tag_rows,
+                pair_count
+            );
+            (pair_count, graph_generation)
+        };
+
+        let effective_config = format!(
+            "{{\"algorithm\":\"{}\",\"dimension\":{},\"minSimilarity\":{},\"modelSig\":\"{}\"}}",
+            PAIRWISE_ALGORITHM_VERSION,
+            dim,
+            self.min_similarity,
+            json_escape(&self.model_sig)
+        );
+        let config_hash = stable_sha256_hex(&effective_config);
+        let artifact_sig = stable_sha256_hex(&format!(
+            "{}|{}|{}|{}",
+            self.model_sig, graph_generation, PAIRWISE_ALGORITHM_VERSION, config_hash
+        ));
 
         // ====================================================================
-        // Step 3: 增量模式 — 加载已缓存且 model_sig 一致的 pair 集合
+        // Step 3: 增量模式 — 加载当前 artifact 已处理的正/负 pair 集合
         // full_rebuild = true 时才按显式重建语义清空整张旧表。
         //
         // 注意：非 full_rebuild 冷启动不能在 Rust 侧主动删除旧 model_sig。
@@ -2271,25 +2970,38 @@ impl Task for PairwiseSimTask {
         // 如果此时先 DELETE 旧模型行，而本轮 pair_set 又为 0，就会造成旧缓存被清空且新缓存未生成。
         // 旧模型行的安全清理交给 JS 侧在确认当前 model_sig 已有可用缓存后执行。
         // ====================================================================
-        {
+        if !self.full_rebuild {
             let conn = open_sqlite_readonly(&self.db_path).map_err(|e| {
                 Error::from_reason(format!("DB readonly open/config failed: {}", e))
             })?;
             let mut stmt = conn
-                .prepare("SELECT tag_a, tag_b FROM tag_pair_similarity WHERE model_sig = ?1")
-                .map_err(|e| Error::from_reason(format!("Prepare cached query failed: {}", e)))?;
+                .prepare(
+                    "SELECT tag_a, tag_b FROM tag_pair_similarity_status \
+                     WHERE artifact_sig = ?1 AND status IN ('computed', 'below_threshold', 'missing_vector')",
+                )
+                .map_err(|e| Error::from_reason(format!("Prepare pairwise status cache query failed: {}", e)))?;
             let rows = stmt
-                .query_map(rusqlite::params![&self.model_sig], |row| {
+                .query_map(rusqlite::params![&artifact_sig], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
                 })
-                .map_err(|e| Error::from_reason(format!("Query cached failed: {}", e)))?;
+                .map_err(|e| {
+                    Error::from_reason(format!("Query pairwise status cache failed: {}", e))
+                })?;
 
             for row in rows {
-                if let Ok((a, b)) = row {
-                    cached.insert((a, b));
-                }
+                let (a, b) = row.map_err(|e| {
+                    Error::from_reason(format!("Decode pairwise status cache row failed: {}", e))
+                })?;
+                cached.insert(pair_key(a, b));
             }
         }
+
+        println!(
+            "[Vexus-Lite][Pairwise] artifact={} graph_generation={} cached_statuses={}",
+            artifact_sig,
+            graph_generation,
+            cached.len()
+        );
 
         // ====================================================================
         // Step 4: 遍历待计算 pair，计算余弦相似度
@@ -2297,6 +3009,7 @@ impl Task for PairwiseSimTask {
         // 若未归一化，下方会按需 fallback 到带分母的余弦
         // ====================================================================
         let mut to_insert: Vec<(i64, i64, f64, i64)> = Vec::new();
+        let mut status_rows: Vec<(i64, i64, &'static str, Option<f64>, i64)> = Vec::new();
         let mut computed = 0_u32;
         let mut skipped = 0_u32;
         let now_ms = std::time::SystemTime::now()
@@ -2329,6 +3042,7 @@ impl Task for PairwiseSimTask {
                 Some(v) => v,
                 None => {
                     skipped += 1;
+                    status_rows.push((a, b, "missing_vector", None, now_ms));
                     continue;
                 }
             };
@@ -2336,6 +3050,7 @@ impl Task for PairwiseSimTask {
                 Some(v) => v,
                 None => {
                     skipped += 1;
+                    status_rows.push((a, b, "missing_vector", None, now_ms));
                     continue;
                 }
             };
@@ -2354,84 +3069,123 @@ impl Task for PairwiseSimTask {
             computed += 1;
 
             if sim < self.min_similarity {
-                // 噪声阈值以下不写入数据库（既减表大小又自带去噪）
+                // 数值不写旧正值表，但写入状态表形成真正的增量负缓存。
                 skipped += 1;
+                status_rows.push((a, b, "below_threshold", Some(sim), now_ms));
                 continue;
             }
 
             to_insert.push((a, b, sim, now_ms));
+            status_rows.push((a, b, "computed", Some(sim), now_ms));
         }
 
         // ====================================================================
         // Step 5: 流式分包写入
         // ====================================================================
         let stored_count = to_insert.len() as u32;
-
-        if !to_insert.is_empty() || self.full_rebuild {
-            const WRITE_CHUNK_SIZE: usize = 1000;
-            let passive_checkpoint_every_chunks =
-                std::env::var("VEXUS_PAIRWISE_PASSIVE_CHECKPOINT_EVERY_CHUNKS")
-                    .ok()
-                    .and_then(|value| value.parse::<usize>().ok())
-                    .unwrap_or(0);
+        if !status_rows.is_empty() || self.full_rebuild {
             let mut conn = open_sqlite_readwrite(&self.db_path)
                 .map_err(|e| Error::from_reason(format!("DB write open/config failed: {}", e)))?;
+            let tx = conn.transaction().map_err(|e| {
+                Error::from_reason(format!("Begin atomic pairwise publish failed: {}", e))
+            })?;
 
             if self.full_rebuild {
-                conn.execute("DELETE FROM tag_pair_similarity", [])
-                    .map_err(|e| Error::from_reason(format!("Full rebuild clear failed: {}", e)))?;
+                tx.execute("DELETE FROM tag_pair_similarity", [])
+                    .map_err(|e| {
+                        Error::from_reason(format!(
+                            "Full rebuild positive cache clear failed: {}",
+                            e
+                        ))
+                    })?;
+                tx.execute("DELETE FROM tag_pair_similarity_status", [])
+                    .map_err(|e| {
+                        Error::from_reason(format!("Full rebuild status cache clear failed: {}", e))
+                    })?;
             }
 
-            for (chunk_index, chunk) in to_insert.chunks(WRITE_CHUNK_SIZE).enumerate() {
-                {
-                    let tx = conn.transaction().map_err(|e| {
-                        Error::from_reason(format!("Begin tx chunk {} failed: {}", chunk_index, e))
+            let artifact_now = now_ms;
+            tx.execute(
+        "INSERT OR REPLACE INTO tagmemo_artifacts \
+         (artifact_sig, asset_type, model_sig, graph_generation, algorithm_version, config_hash, effective_config, status, created_at, updated_at) \
+         VALUES (?1, 'pairwise_similarity', ?2, ?3, ?4, ?5, ?6, 'building', ?7, ?7)",
+        rusqlite::params![
+            &artifact_sig,
+            &self.model_sig,
+            &graph_generation,
+            PAIRWISE_ALGORITHM_VERSION,
+            &config_hash,
+            &effective_config,
+            artifact_now
+        ],
+    )
+    .map_err(|e| {
+        Error::from_reason(format!("Pairwise building registration failed: {}", e))
+    })?;
+
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT OR REPLACE INTO tag_pair_similarity \
+                 (tag_a, tag_b, similarity, model_sig, computed_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                    )
+                    .map_err(|e| {
+                        Error::from_reason(format!("Prepare pairwise value insert failed: {}", e))
                     })?;
-
-                    {
-                        let mut stmt = tx
-                            .prepare(
-                                "INSERT OR REPLACE INTO tag_pair_similarity \
-                                 (tag_a, tag_b, similarity, model_sig, computed_at) \
-                                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                            )
-                            .map_err(|e| {
-                                Error::from_reason(format!(
-                                    "Prepare insert chunk {} failed: {}",
-                                    chunk_index, e
-                                ))
-                            })?;
-
-                        for (a, b, sim, ts) in chunk {
-                            stmt.execute(rusqlite::params![a, b, sim, &self.model_sig, ts])
-                                .map_err(|e| {
-                                    Error::from_reason(format!(
-                                        "Insert pair chunk {} failed: {}",
-                                        chunk_index, e
-                                    ))
-                                })?;
-                        }
-                    }
-
-                    tx.commit().map_err(|e| {
-                        Error::from_reason(format!("Commit tx chunk {} failed: {}", chunk_index, e))
-                    })?;
+                for (a, b, sim, ts) in &to_insert {
+                    stmt.execute(rusqlite::params![a, b, sim, &self.model_sig, ts])
+                        .map_err(|e| {
+                            Error::from_reason(format!(
+                                "Insert pairwise value ({}, {}) failed: {}",
+                                a, b, e
+                            ))
+                        })?;
                 }
+            }
 
-                if passive_checkpoint_every_chunks > 0
-                    && (chunk_index + 1) % passive_checkpoint_every_chunks == 0
-                {
-                    checkpoint_sqlite_wal(&conn, "PASSIVE").map_err(|e| {
+            {
+                let mut stmt = tx
+            .prepare(
+                "INSERT OR REPLACE INTO tag_pair_similarity_status \
+                 (tag_a, tag_b, model_sig, artifact_sig, status, similarity, min_similarity, computed_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .map_err(|e| {
+                Error::from_reason(format!("Prepare pairwise status insert failed: {}", e))
+            })?;
+                for (a, b, status, similarity, ts) in &status_rows {
+                    stmt.execute(rusqlite::params![
+                        a,
+                        b,
+                        &self.model_sig,
+                        &artifact_sig,
+                        status,
+                        similarity,
+                        self.min_similarity,
+                        ts
+                    ])
+                    .map_err(|e| {
                         Error::from_reason(format!(
-                            "Passive WAL checkpoint after chunk {} failed: {}",
-                            chunk_index, e
+                            "Insert pairwise status ({}, {}) failed: {}",
+                            a, b, e
                         ))
                     })?;
                 }
             }
 
-            // 最终 TRUNCATE checkpoint 由 JS coordinator 统一执行，避免 Rust/JS 跨连接轮流 TRUNCATE
-            // 导致 better-sqlite3 旧连接看到 transient malformed 视图。
+            tx.execute(
+                "UPDATE tagmemo_artifacts SET status = 'ready', updated_at = ?2 \
+         WHERE artifact_sig = ?1",
+                rusqlite::params![&artifact_sig, artifact_now],
+            )
+            .map_err(|e| Error::from_reason(format!("Pairwise ready transition failed: {}", e)))?;
+
+            tx.commit().map_err(|e| {
+                Error::from_reason(format!("Commit atomic pairwise publish failed: {}", e))
+            })?;
+
+            // 最终 TRUNCATE checkpoint 仍由 JS coordinator 统一执行。
         }
 
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
@@ -2493,8 +3247,9 @@ impl Task for RecoverTask {
             .write()
             .map_err(|e| Error::from_reason(format!("Lock failed: {}", e)))?;
 
-        // 定义处理单行的闭包
-        let mut process_row = |id: i64, vector_bytes: Vec<u8>| {
+        // 维度不匹配仍按兼容契约跳过；索引内部失败必须显式返回，
+        // 避免调用方把部分恢复误认为完整成功。
+        let mut process_row = |id: i64, vector_bytes: Vec<u8>| -> Result<()> {
             if vector_bytes.len() == expected_byte_len {
                 let vec_slice: Vec<f32> = vector_bytes
                     .chunks_exact(4)
@@ -2503,15 +3258,22 @@ impl Task for RecoverTask {
 
                 if index.size() + 1 >= index.capacity() {
                     let new_cap = (index.capacity() as f64 * 1.5) as usize;
-                    let _ = index.reserve(new_cap); // AsyncTask 中 reserve 失败暂不中断，因为是后台恢复
+                    index.reserve(new_cap).map_err(|e| {
+                        Error::from_reason(format!(
+                            "Recover reserve failed before vector {}: {:?}",
+                            id, e
+                        ))
+                    })?;
                 }
 
-                if index.add(id as u64, &vec_slice).is_ok() {
-                    count += 1;
-                }
+                index.add(id as u64, &vec_slice).map_err(|e| {
+                    Error::from_reason(format!("Recover add failed for vector {}: {:?}", id, e))
+                })?;
+                count += 1;
             } else {
                 skipped_dim_mismatch += 1;
             }
+            Ok(())
         };
 
         if let Some(name) = &self.filter_diary_name {
@@ -2522,9 +3284,10 @@ impl Task for RecoverTask {
                 .map_err(|e| Error::from_reason(format!("Query failed: {}", e)))?;
 
             for row_result in rows {
-                if let Ok((id, vector_bytes)) = row_result {
-                    process_row(id, vector_bytes);
-                }
+                let (id, vector_bytes) = row_result.map_err(|e| {
+                    Error::from_reason(format!("Decode recovery row failed: {}", e))
+                })?;
+                process_row(id, vector_bytes)?;
             }
         } else {
             let rows = stmt
@@ -2534,9 +3297,10 @@ impl Task for RecoverTask {
                 .map_err(|e| Error::from_reason(format!("Query failed: {}", e)))?;
 
             for row_result in rows {
-                if let Ok((id, vector_bytes)) = row_result {
-                    process_row(id, vector_bytes);
-                }
+                let (id, vector_bytes) = row_result.map_err(|e| {
+                    Error::from_reason(format!("Decode recovery row failed: {}", e))
+                })?;
+                process_row(id, vector_bytes)?;
             }
         }
 
@@ -2559,9 +3323,11 @@ impl Task for RecoverTask {
 
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[napi(object)]
 pub struct WatcherConfig {
@@ -2571,11 +3337,99 @@ pub struct WatcherConfig {
     pub ignore_suffixes: Vec<String>,
     /// 可选扩展名白名单。为空时保持旧行为：仅监听 .md / .txt。
     pub extensions: Option<Vec<String>>,
+    /// 路径事件静默窗口。窗口内的新事件会使旧 generation 自动失效。
+    pub debounce_ms: Option<u32>,
+    /// 两次文件元数据采样之间的稳定确认间隔。
+    pub stability_ms: Option<u32>,
+    /// 同一 generation 内最多执行的稳定采样次数。
+    pub stability_retries: Option<u32>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct WatchFileSnapshot {
+    size: u64,
+    modified_ms: u128,
+}
+
+#[derive(Clone, Copy)]
+struct WatchPendingPath {
+    generation: u64,
+    observed_as_create: bool,
+}
+
+fn watch_file_snapshot(path: &Path) -> Option<WatchFileSnapshot> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let modified_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_millis())
+        .unwrap_or(0);
+    Some(WatchFileSnapshot {
+        size: metadata.len(),
+        modified_ms,
+    })
+}
+
+fn watcher_path_allowed(
+    path: &Path,
+    root_path: &Path,
+    allowed_extensions: &HashSet<String>,
+    ignore_folders: &HashSet<String>,
+    ignore_prefixes: &[String],
+    ignore_suffixes: &[String],
+) -> bool {
+    let ext = match path.extension() {
+        Some(value) => value.to_string_lossy().to_lowercase(),
+        None => return false,
+    };
+    if !allowed_extensions.contains(&ext) {
+        return false;
+    }
+
+    let rel_path = match path.strip_prefix(root_path) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let diary_name = rel_path
+        .components()
+        .next()
+        .map(|value| value.as_os_str().to_string_lossy().to_string())
+        .unwrap_or_else(|| "Root".to_string());
+    if ignore_folders.contains(&diary_name) {
+        return false;
+    }
+
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if ignore_prefixes
+        .iter()
+        .any(|prefix| diary_name.starts_with(prefix) || file_name.starts_with(prefix))
+    {
+        return false;
+    }
+    if ignore_suffixes
+        .iter()
+        .any(|suffix| diary_name.ends_with(suffix) || file_name.ends_with(suffix))
+    {
+        return false;
+    }
+
+    true
 }
 
 #[napi]
 pub struct VexusWatcher {
     watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    // 同一路径只保留一个可重置状态和一个 worker；重复 notify 事件仅刷新 generation。
+    path_generations: Arc<Mutex<HashMap<PathBuf, WatchPendingPath>>>,
+    generation_counter: Arc<AtomicU64>,
+    running: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -2584,6 +3438,9 @@ impl VexusWatcher {
     pub fn new() -> Self {
         Self {
             watcher: Arc::new(Mutex::new(None)),
+            path_generations: Arc::new(Mutex::new(HashMap::new())),
+            generation_counter: Arc::new(AtomicU64::new(0)),
+            running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -2596,87 +3453,221 @@ impl VexusWatcher {
     ) -> Result<()> {
         let root_path_buf = PathBuf::from(&config.root_path);
         let root_path_buf_clone = root_path_buf.clone();
-        let ignore_folders: HashSet<String> = config.ignore_folders.into_iter().collect();
-        let ignore_prefixes = config.ignore_prefixes;
-        let ignore_suffixes = config.ignore_suffixes;
-        let allowed_extensions: HashSet<String> = config
-            .extensions
-            .unwrap_or_else(|| vec!["md".to_string(), "txt".to_string()])
-            .into_iter()
-            .map(|ext| ext.trim().trim_start_matches('.').to_lowercase())
-            .filter(|ext| !ext.is_empty())
-            .collect();
+        let ignore_folders: Arc<HashSet<String>> =
+            Arc::new(config.ignore_folders.into_iter().collect());
+        let ignore_prefixes = Arc::new(config.ignore_prefixes);
+        let ignore_suffixes = Arc::new(config.ignore_suffixes);
+        let allowed_extensions: Arc<HashSet<String>> = Arc::new(
+            config
+                .extensions
+                .unwrap_or_else(|| vec!["md".to_string(), "txt".to_string()])
+                .into_iter()
+                .map(|ext| ext.trim().trim_start_matches('.').to_lowercase())
+                .filter(|ext| !ext.is_empty())
+                .collect(),
+        );
+        let debounce_ms = config.debounce_ms.unwrap_or(350).clamp(25, 30_000) as u64;
+        let stability_ms = config.stability_ms.unwrap_or(150).clamp(25, 10_000) as u64;
+        let stability_retries = config.stability_retries.unwrap_or(6).clamp(2, 100);
 
         let js_cb = Arc::new(js_callback);
         let watcher_ref = self.watcher.clone();
+        let path_generations = self.path_generations.clone();
+        let generation_counter = self.generation_counter.clone();
+        let running = self.running.clone();
+        running.store(true, Ordering::Release);
+        if let Ok(mut generations) = path_generations.lock() {
+            generations.clear();
+        }
 
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
             match res {
                 Ok(event) => {
-                    if let Some(path) = event.paths.first() {
-                        // 1. 基础后缀拦截：默认只允许 .md/.txt；调用方可通过 extensions 泛化。
-                        if let Some(ext) = path.extension() {
-                            let ext_str = ext.to_string_lossy().to_lowercase();
-                            if !allowed_extensions.contains(&ext_str) {
-                                return;
-                            }
-                        } else {
-                            return;
+                    // notify 的 rename 事件通常同时携带旧路径与新路径。
+                    // 必须遍历全部路径；最终事件类型由静默窗口结束时的真实存在性决定：
+                    // 旧路径不存在 => unlink，新路径存在 => add/change。
+                    if !matches!(
+                        event.kind,
+                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                    ) {
+                        return;
+                    }
+
+                    for path in event.paths {
+                        if !watcher_path_allowed(
+                            &path,
+                            &root_path_buf_clone,
+                            &allowed_extensions,
+                            &ignore_folders,
+                            &ignore_prefixes,
+                            &ignore_suffixes,
+                        ) {
+                            continue;
                         }
 
-                        // 2. 计算相对路径
-                        if let Ok(rel_path) = path.strip_prefix(&root_path_buf_clone) {
-                            // 提取第一级目录作为日记本名称 (diary_name)
-                            let mut components = rel_path.components();
-                            let diary_name = components
-                                .next()
-                                .map(|c| c.as_os_str().to_string_lossy().to_string())
-                                .unwrap_or_else(|| "Root".to_string());
-
-                            // 3. 匹配 ignore_folders
-                            if ignore_folders.contains(&diary_name) {
-                                return;
-                            }
-
-                            // 4. 匹配 ignore_prefixes 和 ignore_suffixes
-                            let file_name = path
-                                .file_name()
-                                .map(|f| f.to_string_lossy().to_string())
-                                .unwrap_or_default();
-
-                            // 检查日记本名或文件名是否匹配前缀
-                            if ignore_prefixes
-                                .iter()
-                                .any(|p| diary_name.starts_with(p) || file_name.starts_with(p))
-                            {
-                                return;
-                            }
-
-                            // 检查日记本名或文件名是否匹配后缀
-                            if ignore_suffixes
-                                .iter()
-                                .any(|s| diary_name.ends_with(s) || file_name.ends_with(s))
-                            {
-                                return;
-                            }
-
-                            // 5. 识别事件类型 (Create, Modify, Remove)
-                            let event_type = match event.kind {
-                                EventKind::Create(_) => "add",
-                                EventKind::Modify(_) => "change",
-                                EventKind::Remove(_) => "unlink",
-                                _ => return,
-                            };
-
-                            // 组装 JSON 传递给 JS。路径需完整 JSON 转义，避免 Linux/macOS 文件名中的引号/控制字符破坏 payload。
-                            let payload = format!(
-                                r#"{{"event":"{}","path":"{}"}}"#,
-                                json_escape(event_type),
-                                json_escape(&path.to_string_lossy().replace('\\', "/"))
+                        let generation = generation_counter.fetch_add(1, Ordering::AcqRel) + 1;
+                        let observed_as_create = matches!(event.kind, EventKind::Create(_));
+                        let should_spawn = if let Ok(mut generations) = path_generations.lock() {
+                            let should_spawn = !generations.contains_key(&path);
+                            generations.insert(
+                                path.clone(),
+                                WatchPendingPath {
+                                    generation,
+                                    observed_as_create,
+                                },
                             );
+                            should_spawn
+                        } else {
+                            continue;
+                        };
 
-                            // 6. 通过线程安全函数，无阻塞地推送到 Node.js
-                            js_cb.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
+                        // 乐观防御：同一路径已有 worker 时只刷新其状态，不再创建额外线程。
+                        if !should_spawn {
+                            continue;
+                        }
+
+                        let callback = js_cb.clone();
+                        let pending = path_generations.clone();
+                        let task_running = running.clone();
+                        let task_path = path.clone();
+                        let cleanup_path = path.clone();
+                        let cleanup_pending = path_generations.clone();
+
+                        let spawn_result = std::thread::Builder::new()
+                            .name("vexus-watch-path".to_string())
+                            .spawn(move || {
+                                'generation: loop {
+                                    if !task_running.load(Ordering::Acquire) {
+                                        return;
+                                    }
+                                    let current = match pending
+                                        .lock()
+                                        .ok()
+                                        .and_then(|generations| generations.get(&task_path).copied())
+                                    {
+                                        Some(value) => value,
+                                        None => return,
+                                    };
+                                    let generation = current.generation;
+
+                                    std::thread::sleep(Duration::from_millis(debounce_ms));
+                                    if !task_running.load(Ordering::Acquire) {
+                                        return;
+                                    }
+
+                                    // 静默窗口内若收到新事件，当前 worker 继续存活并为最新代际重启窗口。
+                                    let after_debounce = pending
+                                        .lock()
+                                        .ok()
+                                        .and_then(|generations| generations.get(&task_path).copied());
+                                    if after_debounce.map(|value| value.generation) != Some(generation) {
+                                        continue 'generation;
+                                    }
+
+                                    // 文件存在时要求连续两次 metadata 完全一致。
+                                    // 同一 generation 内有限重采样，防止某些文件系统只发一次 notify、
+                                    // 首轮采样仍在变化而后续没有新事件时永久漏入库。
+                                    let mut previous_snapshot = watch_file_snapshot(&task_path);
+                                    let mut final_snapshot = None;
+                                    let mut stable = false;
+
+                                    for _ in 0..stability_retries {
+                                        std::thread::sleep(Duration::from_millis(stability_ms));
+                                        if !task_running.load(Ordering::Acquire) {
+                                            return;
+                                        }
+                                        let latest = pending
+                                            .lock()
+                                            .ok()
+                                            .and_then(|generations| generations.get(&task_path).copied());
+                                        if latest.map(|value| value.generation) != Some(generation) {
+                                            continue 'generation;
+                                        }
+
+                                        let next_snapshot = watch_file_snapshot(&task_path);
+                                        if next_snapshot == previous_snapshot {
+                                            stable = true;
+                                            final_snapshot = next_snapshot;
+                                            break;
+                                        }
+                                        previous_snapshot = next_snapshot;
+                                    }
+
+                                    if !stable {
+                                        // 本代际明确结束，避免留下无法自行恢复的 generation 状态。
+                                        if let Ok(mut generations) = pending.lock() {
+                                            if generations
+                                                .get(&task_path)
+                                                .map(|value| value.generation)
+                                                == Some(generation)
+                                            {
+                                                generations.remove(&task_path);
+                                            } else {
+                                                continue 'generation;
+                                            }
+                                        }
+                                        eprintln!(
+                                            "[VexusWatcher] ⚠️ Path did not stabilize after {} samples; generation {} dropped: {}",
+                                            stability_retries,
+                                            generation,
+                                            task_path.to_string_lossy()
+                                        );
+                                        return;
+                                    }
+
+                                    let observed_as_create = if let Ok(mut generations) = pending.lock() {
+                                        match generations.get(&task_path).copied() {
+                                            Some(value) if value.generation == generation => {
+                                                generations.remove(&task_path);
+                                                value.observed_as_create
+                                            }
+                                            Some(_) => continue 'generation,
+                                            None => return,
+                                        }
+                                    } else {
+                                        return;
+                                    };
+
+                                    let (event_type, size, modified_ms) = match final_snapshot {
+                                        Some(snapshot) => (
+                                            if observed_as_create { "add" } else { "change" },
+                                            snapshot.size,
+                                            snapshot.modified_ms,
+                                        ),
+                                        None => ("unlink", 0, 0),
+                                    };
+                                    let emitted_at = SystemTime::now()
+                                        .duration_since(UNIX_EPOCH)
+                                        .map(|value| value.as_millis())
+                                        .unwrap_or(0);
+                                    let payload = format!(
+                                        r#"{{"event":"{}","path":"{}","generation":{},"stable":true,"size":{},"mtimeMs":{},"emittedAt":{}}}"#,
+                                        json_escape(event_type),
+                                        json_escape(&task_path.to_string_lossy().replace('\\', "/")),
+                                        generation,
+                                        size,
+                                        modified_ms,
+                                        emitted_at
+                                    );
+                                    callback.call(
+                                        Ok(payload),
+                                        ThreadsafeFunctionCallMode::NonBlocking,
+                                    );
+                                    return;
+                                }
+                            });
+
+                        if let Err(error) = spawn_result {
+                            // spawn 已明确失败，此路径不可能存在活跃 worker；无条件清理，
+                            // 避免并发刷新的新 generation 留下“有状态、无执行者”的孤儿项。
+                            if let Ok(mut generations) = cleanup_pending.lock() {
+                                generations.remove(&cleanup_path);
+                            }
+                            eprintln!(
+                                "[VexusWatcher] ❌ Failed to spawn path worker for {}: {}",
+                                cleanup_path.to_string_lossy(),
+                                error
+                            );
                         }
                     }
                 }
@@ -2698,8 +3689,8 @@ impl VexusWatcher {
         *lock = Some(watcher);
 
         println!(
-            "[VexusWatcher] 🦀 Native high-performance watcher started for: {}",
-            config.root_path
+            "[VexusWatcher] 🦀 Stable native watcher started for: {} (debounce={}ms, stability={}ms, retries={})",
+            config.root_path, debounce_ms, stability_ms, stability_retries
         );
         Ok(())
     }
@@ -2707,6 +3698,10 @@ impl VexusWatcher {
     /// 停止监听
     #[napi]
     pub fn stop_watch(&self) -> Result<()> {
+        self.running.store(false, Ordering::Release);
+        if let Ok(mut generations) = self.path_generations.lock() {
+            generations.clear();
+        }
         let mut lock = self
             .watcher
             .lock()

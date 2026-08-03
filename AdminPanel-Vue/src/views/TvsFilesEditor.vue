@@ -1,169 +1,101 @@
 <template>
   <section class="config-section active-section tvs-files-editor-page">
-    <p class="description">
-      TVS 变量文件用于存储系统自定义变量，每行一个 <code>KEY=VALUE</code> 对。
-    </p>
+    <Teleport to="#page-header-actions">
+      <UiPageActions>
+        <p class="tvs-page-summary">
+          管理 TVS 变量文件，每行一个 <code>KEY=VALUE</code> 对。
+        </p>
+        <UiBadge :variant="isDirty ? 'warning' : 'success'">
+          {{ isDirty ? '未保存' : '已同步' }}
+        </UiBadge>
+        <UiButton variant="outline" size="lg" :loading="loadingFiles" @click="reloadFiles">
+          <template #leading>
+            <span class="material-symbols-outlined">refresh</span>
+          </template>
+          刷新
+        </UiButton>
+        <UiButton variant="outline" size="lg" :disabled="isCreating" @click="beginCreateFile">
+          <template #leading>
+            <span class="material-symbols-outlined">add</span>
+          </template>
+          新建
+        </UiButton>
+        <UiButton
+          variant="primary"
+          size="lg"
+          :disabled="!selectedFile || !isDirty"
+          :title="selectedFile ? '保存 (Ctrl+S)' : ''"
+          @click="saveFile"
+        >
+          <template #leading>
+            <span class="material-symbols-outlined">save</span>
+          </template>
+          保存
+        </UiButton>
+      </UiPageActions>
+    </Teleport>
 
-    <div class="tvs-files-editor" :class="{ 'is-sidebar-collapsed': sidebarCollapsed }">
-      <!-- 左侧：文件列表（操作台风格） -->
-      <aside
-        class="tvs-console card"
-        :class="{ 'is-collapsed': sidebarCollapsed }"
-        :aria-label="sidebarCollapsed ? '变量文件操作台（已折叠）' : '变量文件操作台'"
-      >
-        <template v-if="sidebarCollapsed">
-          <div class="console-rail">
-            <button
-              type="button"
-              class="console-rail-toggle"
-              aria-label="展开操作台"
-              title="展开操作台"
-              @click="toggleSidebar"
-            >
-              <span class="material-symbols-outlined">left_panel_open</span>
-            </button>
-            <div class="console-rail-divider"></div>
-            <button
-              type="button"
-              class="console-rail-icon"
-              aria-label="新建文件"
-              title="新建文件"
-              :disabled="isCreating"
-              @click="beginCreateFile"
-            >
-              <span class="material-symbols-outlined">add</span>
-            </button>
-            <button
-              v-for="file in filteredFiles.slice(0, 8)"
-              :key="file"
-              type="button"
-              class="console-rail-icon"
-              :class="{ 'is-active': file === selectedFile }"
-              :title="file"
-              @click="requestSelectFile(file)"
-            >
-              <span class="material-symbols-outlined">description</span>
-            </button>
-          </div>
-        </template>
-        <template v-else>
-        <div class="tvs-console__section">
-          <span class="tvs-console__label">操作台</span>
-          <div class="tvs-console__header">
-            <h3>变量文件</h3>
-            <div class="sidebar-header-meta">
-              <span class="tvs-file-count">
-                {{ filteredFiles.length }}/{{ files.length }} 个
-              </span>
-              <button
-                type="button"
-                class="console-rail-toggle"
-                aria-label="折叠操作台"
-                title="折叠操作台"
-                @click="toggleSidebar"
-              >
-                <span class="material-symbols-outlined">left_panel_close</span>
-              </button>
-            </div>
-          </div>
+    <div class="tvs-files-editor">
+      <aside class="tvs-console" aria-label="变量文件列表">
+        <div class="tvs-search">
+          <span class="material-symbols-outlined search-icon">search</span>
+          <UiInput
+            id="tvs-file-search-input"
+            v-model="searchQuery"
+            type="search"
+            class="tvs-search-input"
+            placeholder="搜索变量文件…"
+          />
+          <UiIconButton v-if="searchQuery" class="search-clear" label="清除搜索" title="清除" @click="searchQuery = ''">
+            <span class="material-symbols-outlined">close</span>
+          </UiIconButton>
         </div>
 
-        <div class="tvs-console__section">
-          <label class="tvs-search-label" for="tvs-file-search-input">搜索筛选</label>
-          <div class="tvs-search-box">
-            <input
-              id="tvs-file-search-input"
-              v-model="searchQuery"
-              type="search"
-              class="tvs-search-input"
-              placeholder="按文件名筛选..."
-            />
-            <button
-              v-if="searchQuery"
-              type="button"
-              class="btn-secondary btn-sm"
-              aria-label="清空筛选"
-              @click="searchQuery = ''"
-            >
-              清空
-            </button>
-          </div>
-        </div>
-
-        <div class="tvs-console__actions">
-          <button
-            type="button"
-            class="btn-secondary btn-sm"
-            title="刷新"
-            :disabled="loadingFiles"
-            @click="reloadFiles"
-          >
-            ↻
-          </button>
-          <button
-            type="button"
-            class="btn-secondary btn-sm"
-            :disabled="isCreating"
-            @click="beginCreateFile"
-          >
-            新建
-          </button>
-        </div>
-
-        <div v-if="isCreating" class="tvs-console__section tvs-new-file">
-          <label class="tvs-search-label" for="tvs-new-file-input">新建文件</label>
-          <div class="tvs-search-box">
-            <input
-              id="tvs-new-file-input"
-              ref="newFileInputRef"
-              v-model="newFileName"
-              type="text"
-              class="tvs-search-input"
-              placeholder="文件名（自动补 .txt）"
-              @keydown.enter.prevent="confirmCreateFile"
-              @keydown.esc.prevent="cancelCreateFile"
-            />
-          </div>
+        <div v-if="isCreating" class="tvs-new-file">
+          <UiInput
+            id="tvs-new-file-input"
+            ref="newFileInputRef"
+            v-model="newFileName"
+            type="text"
+            placeholder="文件名（自动补 .txt）"
+            @keydown.enter.prevent="confirmCreateFile"
+            @keydown.esc.prevent="cancelCreateFile"
+          />
           <div class="tvs-new-file__actions">
-            <button
-              type="button"
-              class="btn-success btn-sm"
-              @click="confirmCreateFile"
-            >
-              创建
-            </button>
-            <button
-              type="button"
-              class="btn-secondary btn-sm"
-              @click="cancelCreateFile"
-            >
-              取消
-            </button>
+            <UiButton variant="primary" size="sm" @click="confirmCreateFile">创建</UiButton>
+            <UiButton variant="outline" size="sm" @click="cancelCreateFile">取消</UiButton>
           </div>
           <p v-if="createError" class="tvs-new-file__error">{{ createError }}</p>
         </div>
 
-        <div v-if="loadingFiles" class="tvs-file-loading">
-          <span class="loading-spinner loading-spinner--sm"></span>
-          <p>正在加载文件列表…</p>
-        </div>
+        <UiEmptyState
+          v-if="loadingFiles"
+          title="正在加载文件列表…"
+          description="请稍候，面板正在读取 TVS 变量文件。"
+        >
+          <template #icon>
+            <span class="material-symbols-outlined spinning">progress_activity</span>
+          </template>
+        </UiEmptyState>
 
-        <div v-else-if="files.length === 0" class="tvs-file-empty">
-          <span class="material-symbols-outlined">edit_note</span>
-          <h4>暂无变量文件</h4>
-          <p>点击上方「新建」创建第一个 TVS 变量文件。</p>
-        </div>
+        <UiEmptyState
+          v-else-if="files.length === 0"
+          title="暂无变量文件"
+          description="点击上方新建创建第一个 TVS 变量文件。"
+        >
+          <template #icon>
+            <span class="material-symbols-outlined">edit_note</span>
+          </template>
+        </UiEmptyState>
 
-        <div v-else-if="filteredFiles.length === 0" class="tvs-file-empty subtle">
-          <p>未找到匹配「{{ searchQuery }}」的文件。</p>
-        </div>
+        <UiEmptyState
+          v-else-if="filteredFiles.length === 0"
+          title="未找到匹配文件"
+          :description="`未找到匹配「${searchQuery}」的文件。`"
+        />
 
         <ul v-else class="tvs-file-list">
-          <li
-            v-for="file in filteredFiles"
-            :key="file"
-            class="tvs-file-list-item"
-          >
+          <li v-for="file in filteredFiles" :key="file" class="tvs-file-list-item">
             <button
               type="button"
               :class="['tvs-file-row', { 'is-active': file === selectedFile }]"
@@ -171,103 +103,73 @@
             >
               <span class="material-symbols-outlined tvs-file-icon">description</span>
               <span class="tvs-file-name">{{ file }}</span>
-              <span
-                v-if="file === selectedFile && isDirty"
-                class="tvs-file-dirty"
-                title="有未保存更改"
-                aria-label="有未保存更改"
-              >●</span>
+              <span v-if="file === selectedFile && isDirty" class="tvs-file-dirty">未保存</span>
             </button>
           </li>
         </ul>
-        </template>
       </aside>
 
-      <!-- 右侧：编辑器 -->
-      <main class="tvs-editor-panel">
-        <div class="tvs-editor card">
-          <div class="tvs-editor__toolbar">
-            <div class="tvs-editor__title">
-              <span class="material-symbols-outlined tvs-editor__title-icon">edit_note</span>
-              <div class="tvs-editor__title-main">
-                <h3>编辑内容</h3>
-                <div class="tvs-editor__meta">
-                  <span class="tvs-editor__filename">
-                    {{ selectedFile || "未选择文件" }}
-                  </span>
-                  <span v-if="isDirty" class="tvs-editor__dirty">未保存</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="tvs-editor__actions">
-              <button
-                type="button"
-                class="btn-secondary btn-sm"
-                :disabled="!isDirty"
-                @click="resetContent"
-              >
-                撤销更改
-              </button>
-              <button
-                type="button"
-                class="btn-secondary btn-sm"
-                :disabled="!selectedFile"
-                @click="copyContent"
-              >
-                复制
-              </button>
-              <button
-                type="button"
-                class="btn-danger btn-sm"
-                :disabled="!selectedFile"
-                @click="deleteFile"
-              >
-                删除
-              </button>
-              <button
-                type="button"
-                class="btn-success"
-                :disabled="!selectedFile || !isDirty"
-                :title="selectedFile ? '保存 (Ctrl+S)' : ''"
-                @click="saveFile"
-              >
-                保存
-              </button>
-            </div>
+      <main class="tvs-editor-panel" aria-label="变量文件内容">
+        <header class="tvs-editor__toolbar">
+          <div class="tvs-editor__title">
+            <span class="tvs-pane-label">变量文件内容</span>
+            <span class="tvs-editor__filename">
+              <span class="material-symbols-outlined">description</span>
+              {{ selectedFile || "未选择文件" }}
+            </span>
+            <span v-if="selectedFile" class="tvs-editor__stats">
+              {{ lineCount }} 行 · {{ fileContent.length }} 字符
+            </span>
+            <span v-if="selectedFile && validationWarnings.length > 0" class="tvs-editor__warning">
+              {{ validationWarnings.length }} 处格式提示
+            </span>
           </div>
 
-          <p
-            v-if="statusMessage"
-            :class="['status-message', statusType]"
-            role="status"
-            aria-live="polite"
-          >
-            {{ statusMessage }}
-          </p>
+          <div class="tvs-editor__actions">
+            <UiBadge
+              v-if="statusMessage"
+              :variant="getStatusVariant(statusType)"
+              class="tvs-status-badge"
+              role="status"
+              aria-live="polite"
+            >
+              {{ statusMessage }}
+            </UiBadge>
+            <UiButton variant="outline" size="sm" :disabled="!isDirty" @click="resetContent">
+              撤销
+            </UiButton>
+            <UiButton variant="outline" size="sm" :disabled="!selectedFile" @click="copyContent">
+              复制
+            </UiButton>
+            <UiButton variant="danger" size="sm" :disabled="!selectedFile" @click="deleteFile">
+              删除文件
+            </UiButton>
+          </div>
+        </header>
 
-          <div v-if="!selectedFile" class="tvs-editor__hint">
+        <UiEmptyState
+          v-if="!selectedFile"
+          title="未选择文件"
+          description="从左侧列表选择一个变量文件开始编辑，或新建一个文件。"
+          class="tvs-editor__hint"
+        >
+          <template #icon>
             <span class="material-symbols-outlined">arrow_back</span>
-            <h4>未选择文件</h4>
-            <p>从左侧列表选择一个变量文件开始编辑，或新建一个文件。</p>
-          </div>
+          </template>
+        </UiEmptyState>
 
-          <div v-else class="tvs-editor__workspace">
-            <textarea
-              id="tvs-file-content-editor"
-              v-model="fileContent"
-              class="tvs-editor__textarea"
-              spellcheck="false"
-              placeholder="# 注释以 # 开头&#10;KEY=VALUE"
-              @keydown="handleEditorKeydown"
-            ></textarea>
+        <div v-else class="tvs-editor__workspace">
+          <UiTextarea
+            id="tvs-file-content-editor"
+            v-model="fileContent"
+            class="tvs-editor__textarea"
+            resize="none"
+            spellcheck="false"
+            placeholder="# 注释以 # 开头&#10;KEY=VALUE"
+            @keydown="handleEditorKeydown"
+          />
 
-            <div class="tvs-editor__footer">
-              <span class="tvs-editor__stats">
-                {{ lineCount }} 行 · {{ fileContent.length }} 字符
-              </span>
-            </div>
-          </div>
+          <div class="tvs-editor__footer"></div>
         </div>
       </main>
     </div>
@@ -278,7 +180,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
 import { tvsApi } from "@/api";
-import { useConsoleCollapse } from "@/composables/useConsoleCollapse";
+import UiBadge from "@/components/ui/UiBadge.vue";
+import UiButton from "@/components/ui/UiButton.vue";
+import UiEmptyState from "@/components/ui/UiEmptyState.vue";
+import UiIconButton from "@/components/ui/UiIconButton.vue";
+import UiInput from "@/components/ui/UiInput.vue";
+import UiPageActions from "@/components/ui/UiPageActions.vue";
+import UiTextarea from "@/components/ui/UiTextarea.vue";
 import { askConfirm } from "@/platform/feedback/feedbackBus";
 import { showMessage } from "@/utils";
 import { createLogger } from "@/utils/logger";
@@ -298,15 +206,11 @@ const searchQuery = ref("");
 const isCreating = ref(false);
 const newFileName = ref("");
 const createError = ref("");
-const newFileInputRef = ref<HTMLInputElement | null>(null);
+const newFileInputRef = ref<InstanceType<typeof UiInput> | null>(null);
 
 const statusMessage = ref("");
 const statusType = ref<"info" | "success" | "error">("info");
 let statusTimer: ReturnType<typeof setTimeout> | null = null;
-
-const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useConsoleCollapse(
-  "tvs-files"
-);
 
 const isDirty = computed(() => fileContent.value !== originalContent.value);
 
@@ -348,6 +252,10 @@ function setStatus(message: string, type: "info" | "success" | "error"): void {
       statusMessage.value = "";
     }, STATUS_AUTO_CLEAR_MS);
   }
+}
+
+function getStatusVariant(status: "info" | "success" | "error"): "info" | "success" | "danger" {
+  return status === "error" ? "danger" : status;
 }
 
 function clearStatus(): void {
@@ -582,132 +490,96 @@ onBeforeRouteLeave(async () => {
 
 <style scoped>
 .tvs-files-editor-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+  min-height: 0;
 }
 
-.tvs-files-editor-page > .description {
+.tvs-page-summary {
   margin: 0;
+  color: var(--secondary-text);
+  font-size: var(--font-size-helper);
 }
 
-.tvs-files-editor-page > .description code {
-  padding: 1px 6px;
-  background: var(--tertiary-bg);
+.tvs-page-summary code {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 var(--space-1);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
   border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--primary-text) 4%, transparent);
+  color: var(--primary-text);
   font-family: var(--font-mono);
   font-size: var(--font-size-helper);
 }
 
-/* ── 双列布局（参考 .daily-notes-manager / VcptavernEditor 的本地 grid 定义；
-      .dual-pane 是 VcptavernEditor 的 scoped 类，无法跨组件复用） ── */
 .tvs-files-editor {
-  --tvs-panel-viewport-gap: var(--space-4);
   --tvs-panel-height: calc(
     var(--app-viewport-height, 100vh) -
     var(--app-top-bar-height, 60px) -
-    var(--tvs-panel-viewport-gap) * 2
+    var(--space-6)
   );
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: var(--space-5);
-  align-items: start;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: stretch;
+  min-height: min(680px, var(--tvs-panel-height));
 }
 
-.tvs-files-editor.is-sidebar-collapsed {
-  grid-template-columns: 56px minmax(0, 1fr);
+.tvs-console,
+.tvs-editor-panel {
+  min-height: 0;
+  height: var(--tvs-panel-height);
 }
 
-.sidebar-header-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-/* ── 左侧：操作台（参考 FolderList / VcptavernEditor 的控制台模式） ── */
 .tvs-console {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  position: sticky;
-  top: var(--tvs-panel-viewport-gap);
-  align-self: start;
-  height: var(--tvs-panel-height);
+  gap: var(--space-3);
   overflow: hidden;
-  padding: var(--space-5);
-  border-radius: var(--radius-xl);
-  transition: padding 0.2s ease;
 }
 
-.tvs-console.is-collapsed {
-  padding: var(--space-3) 0;
-  gap: 0;
-  align-items: center;
-}
-
-.tvs-console__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.tvs-console__label {
-  color: var(--highlight-text);
-  font-size: var(--font-size-caption);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.tvs-console__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.tvs-console__header h3 {
-  margin: 0;
-  font-size: var(--font-size-emphasis);
-  color: var(--primary-text);
-}
-
-.tvs-file-count {
-  font-size: var(--font-size-helper);
-  color: var(--secondary-text);
-  font-weight: 500;
-}
-
-.tvs-search-label {
-  color: var(--secondary-text);
-  font-size: var(--font-size-helper);
-  font-weight: 600;
-}
-
-.tvs-search-box {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.tvs-search-input {
-  flex: 1;
-  min-width: 0;
-}
-
-.tvs-console__actions {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-2);
+.tvs-search {
+  position: relative;
   flex-shrink: 0;
 }
 
-.tvs-new-file__actions {
-  display: flex;
-  gap: var(--space-2);
+.search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  color: var(--secondary-text);
+  font-size: 18px !important;
+  pointer-events: none;
 }
 
-.tvs-new-file__actions > button {
-  flex: 1;
+.tvs-search-input {
+  width: 100%;
+  padding-left: 34px;
+  padding-right: 34px;
+}
+
+.search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tvs-new-file {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-text) 2%, transparent);
+}
+
+.tvs-new-file__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
 }
 
 .tvs-new-file__error {
@@ -716,55 +588,16 @@ onBeforeRouteLeave(async () => {
   font-size: var(--font-size-helper);
 }
 
-.tvs-file-loading {
-  text-align: center;
-  padding: var(--space-7) var(--space-4);
-  color: var(--secondary-text);
-}
-
-.tvs-file-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-7) var(--space-4);
-  color: var(--secondary-text);
-  text-align: center;
-}
-
-.tvs-file-empty.subtle {
-  padding: var(--space-5) var(--space-4);
-}
-
-.tvs-file-empty .material-symbols-outlined {
-  font-size: var(--font-size-icon-empty);
-  opacity: 0.4;
-  color: var(--highlight-text);
-}
-
-.tvs-file-empty h4 {
-  margin: 0;
-  color: var(--primary-text);
-  font-size: var(--font-size-emphasis);
-}
-
-.tvs-file-empty p {
-  max-width: 45ch;
-  font-size: var(--font-size-body);
-  line-height: 1.6;
-  margin: 0;
-}
-
 .tvs-file-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: var(--space-2);
-  overflow-y: auto;
-  flex: 1;
   min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
 }
 
 .tvs-file-list-item {
@@ -773,291 +606,220 @@ onBeforeRouteLeave(async () => {
 }
 
 .tvs-file-row {
-  flex: 1;
-  width: 100%;
+  box-sizing: border-box;
   display: flex;
+  width: 100%;
+  min-height: 36px;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  background: var(--surface-overlay-soft);
+  padding: 0 var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-text) 1.6%, transparent);
   color: var(--primary-text);
   text-align: left;
   cursor: pointer;
-  box-sizing: border-box;
-  min-height: 52px;
   transition:
     border-color var(--transition-fast),
-    background var(--transition-fast),
-    transform var(--transition-fast);
+    background-color var(--transition-fast);
 }
 
 .tvs-file-row:hover {
-  border-color: var(--highlight-text);
-  background: var(--info-bg);
-  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--accent-bg) 52%, transparent);
 }
 
 .tvs-file-row.is-active {
-  border-color: var(--highlight-text);
-  background: color-mix(in srgb, var(--highlight-text) 14%, transparent);
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--highlight-text) 20%, transparent);
+  border-color: color-mix(in srgb, var(--highlight-text) 46%, var(--border-color));
+  background: color-mix(in srgb, var(--highlight-text) 8%, transparent);
 }
 
 .tvs-file-icon {
-  font-size: var(--font-size-emphasis) !important;
-  color: var(--secondary-text);
   flex-shrink: 0;
+  color: var(--secondary-text);
+  font-size: 18px !important;
 }
 
 .tvs-file-row.is-active .tvs-file-icon {
-  color: var(--highlight-text);
+  color: color-mix(in srgb, var(--highlight-text) 78%, var(--secondary-text));
 }
 
 .tvs-file-name {
   flex: 1;
-  font-family: var(--font-mono);
-  font-weight: 500;
-  color: var(--primary-text);
-  line-height: 1.3;
+  min-width: 0;
   overflow: hidden;
+  color: var(--primary-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-helper);
+  font-weight: 500;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tvs-file-row.is-active .tvs-file-name {
-  color: var(--highlight-text);
-  font-weight: 600;
-}
-
 .tvs-file-dirty {
-  color: var(--warning-color);
-  font-size: var(--font-size-helper);
-  line-height: 1;
   flex-shrink: 0;
+  color: var(--warning-color);
+  font-size: var(--font-size-caption);
+  font-weight: 650;
 }
 
-/* ── 右侧：编辑器 ── */
 .tvs-editor-panel {
-  min-width: 0;
-  display: flex;
-}
-
-.tvs-editor {
-  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  height: var(--tvs-panel-height);
+  min-width: 0;
   overflow: hidden;
-  padding: var(--space-5);
-  border-radius: var(--radius-xl);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--primary-text) 1.4%, transparent);
 }
 
 .tvs-editor__toolbar {
   display: flex;
+  flex-shrink: 0;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border-color);
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 0 var(--space-4);
 }
 
 .tvs-editor__title {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  flex: 1;
   min-width: 0;
-}
-
-.tvs-editor__title-icon {
-  color: var(--highlight-text);
-  font-size: var(--font-size-display) !important;
-  flex-shrink: 0;
-}
-
-.tvs-editor__title-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-  flex: 1;
-}
-
-.tvs-editor__title-main h3 {
-  margin: 0;
-  font-size: var(--font-size-title);
-  color: var(--primary-text);
-  line-height: 1.2;
-}
-
-.tvs-editor__meta {
-  display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
 }
 
-.tvs-editor__filename {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-helper);
-  color: var(--secondary-text);
-  padding: 2px 10px;
-  background: var(--surface-overlay-soft);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  word-break: break-all;
+.tvs-pane-label {
+  color: var(--primary-text);
+  font-size: var(--font-size-emphasis);
+  font-weight: 650;
 }
 
-.tvs-editor__dirty {
-  font-size: var(--font-size-caption);
-  padding: 2px 8px;
-  background: var(--warning-bg);
-  color: var(--warning-text);
-  border: 1px solid var(--warning-border);
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  letter-spacing: 0.04em;
+.tvs-editor__filename {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--secondary-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-helper);
+}
+
+.tvs-editor__filename .material-symbols-outlined {
+  color: var(--secondary-text);
+  font-size: 16px !important;
 }
 
 .tvs-editor__actions {
   display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 .tvs-editor__hint {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-9) var(--space-4);
-  color: var(--secondary-text);
-  text-align: center;
   min-height: 0;
-}
-
-.tvs-editor__hint .material-symbols-outlined {
-  font-size: var(--font-size-icon-hero);
-  opacity: 0.35;
-  color: var(--highlight-text);
-}
-
-.tvs-editor__hint h4 {
-  margin: 0;
-  font-size: var(--font-size-emphasis);
-  color: var(--primary-text);
-}
-
-.tvs-editor__hint p {
-  max-width: 45ch;
-  margin: 0;
-  line-height: 1.6;
 }
 
 .tvs-editor__workspace {
-  flex: 1;
-  min-height: 0;
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
 .tvs-editor__textarea {
   flex: 1;
   width: 100%;
-  height: auto;
+  height: 100%;
   min-height: 0;
-  padding: var(--space-4) var(--space-5);
-  background: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  color: var(--primary-text);
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   font-family: var(--font-mono);
   font-size: var(--font-size-body);
-  line-height: 1.75;
-  resize: none;
-  box-sizing: border-box;
+  line-height: 1.72;
   tab-size: 4;
 }
 
-.tvs-editor__textarea:focus-visible {
-  outline: 2px solid var(--highlight-text);
-  outline-offset: 2px;
-  border-color: var(--highlight-text);
-  box-shadow: 0 0 0 3px var(--focus-ring);
-}
-
 .tvs-editor__footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  font-size: var(--font-size-helper);
-  color: var(--secondary-text);
-  flex-wrap: wrap;
-  border-top: 1px solid var(--border-color);
-  background: var(--surface-overlay-soft);
-  border-radius: var(--radius-md);
+  display: none;
 }
 
 .tvs-editor__stats {
+  color: var(--secondary-text);
   font-family: var(--font-mono);
+  font-size: var(--font-size-helper);
+}
+
+.tvs-editor__warning {
+  color: var(--warning-color);
+  font-weight: 600;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 1024px) {
-  .tvs-files-editor,
-  .tvs-files-editor.is-sidebar-collapsed {
+  .tvs-files-editor {
     grid-template-columns: 1fr;
   }
 
-  .tvs-console {
-    position: static;
+  .tvs-console,
+  .tvs-editor-panel {
     height: auto;
-    max-height: none;
   }
 
   .tvs-file-list {
     max-height: 320px;
   }
 
-  .tvs-console,
-  .tvs-editor {
-    padding: var(--space-4);
-  }
-
-  .tvs-editor {
-    height: auto;
-    overflow: visible;
+  .tvs-editor__textarea {
+    min-height: 420px;
   }
 
   .tvs-editor__textarea {
-    height: auto;
-    min-height: 360px;
     resize: vertical;
   }
 }
 
 @media (max-width: 768px) {
   .tvs-editor__toolbar {
-    flex-direction: column;
     align-items: stretch;
+    flex-direction: column;
+    padding: var(--space-3);
   }
 
   .tvs-editor__actions {
     justify-content: stretch;
   }
 
-  .tvs-editor__actions > button {
+  .tvs-editor__actions :deep(.ui-button) {
     flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning,
+  .tvs-file-row {
+    transition: none;
+    animation: none;
   }
 }
 </style>

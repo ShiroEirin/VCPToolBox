@@ -11,6 +11,8 @@ const chokidar = require('chokidar');
 const { getAuthCode } = require('./modules/captchaDecoder'); // 导入统一的解码函数
 const ToolApprovalManager = require('./modules/toolApprovalManager');
 const { hasFoldMarkers, buildDynamicFoldObject } = require('./modules/foldProtocol');
+const { sanitizeToolResult } = require('./modules/toolResultPrivacyGuard');
+const toolCallRecordStore = require('./modules/toolCallRecordStore');
 
 const PLUGIN_DIR = path.join(__dirname, 'Plugin');
 const manifestFileName = 'plugin-manifest.json';
@@ -42,6 +44,18 @@ class PluginManager extends EventEmitter {
         this.tdbKnowledgeManager = null; // 冷知识库管理器，等待 server.js 注入
         this.toolApprovalManager = new ToolApprovalManager(path.join(__dirname, 'toolApprovalConfig.json'));
         this.pendingApprovals = new Map(); // requestId -> { resolve, reject, timeoutId }
+    }
+
+    _sanitizeToolResultForAi(result) {
+        try {
+            const privacyConfig = this.toolApprovalManager?.getPrivacyProtectionConfig
+                ? this.toolApprovalManager.getPrivacyProtectionConfig()
+                : { enabled: false };
+            return sanitizeToolResult(result, privacyConfig);
+        } catch (error) {
+            console.error(`[PluginManager] Tool result privacy protection failed, returning original result to avoid breaking tool flow: ${error.message}`);
+            return result;
+        }
     }
 
     setWebSocketServer(wss) {
@@ -488,16 +502,9 @@ class PluginManager extends EventEmitter {
     async shutdownAllPlugins() {
         console.log('[PluginManager] Shutting down all plugins...'); // Keep
 
-        // --- Shutdown VectorDBManager first to stop background processing ---
-        if (this.vectorDBManager && typeof this.vectorDBManager.shutdown === 'function') {
-            try {
-                if (this.debugMode) console.log('[PluginManager] Calling shutdown for VectorDBManager...');
-                await this.vectorDBManager.shutdown();
-            } catch (error) {
-                console.error('[PluginManager] Error during shutdown of VectorDBManager:', error);
-            }
-        }
-
+        // VectorDBManager 是 server.js 注入并持有生命周期的外部依赖。
+        // 必须先让 DailyNote 等常驻服务排空自身队列，再由 server.js 统一关闭 KBD；
+        // 禁止在此提前/重复 shutdown 数据库。
         for (const [name, pluginModuleData] of this.messagePreprocessors) {
             const pluginModule = pluginModuleData.module || pluginModuleData;
             if (pluginModule && typeof pluginModule.shutdown === 'function') {
@@ -676,8 +683,16 @@ class PluginManager extends EventEmitter {
                     };
 
                     // --- 注入 VectorDBManager ---
-                    if (manifest.name === 'RAGDiaryPlugin') {
+                    if (
+                        manifest.requiresKnowledgeBaseManager === true ||
+                        manifest.name === 'RAGDiaryPlugin' ||
+                        manifest.name === 'DailyNote' ||
+                        manifest.name === 'DailyNoteManager'
+                    ) {
                         dependencies.vectorDBManager = this.vectorDBManager;
+                        dependencies.knowledgeBaseManager = this.vectorDBManager;
+                    }
+                    if (manifest.name === 'RAGDiaryPlugin') {
                         // 🧊 注入冷知识库管理器，供 [[xx知识库]] / 《《xx知识库》》 占位符使用
                         if (this.tdbKnowledgeManager) {
                             dependencies.tdbKnowledgeManager = this.tdbKnowledgeManager;
@@ -703,11 +718,21 @@ class PluginManager extends EventEmitter {
                         if (ragPluginModule && ragPluginModule.vectorDBManager && typeof ragPluginModule.getSingleEmbedding === 'function') {
                             dependencies.vectorDBManager = ragPluginModule.vectorDBManager;
                             dependencies.getSingleEmbedding = ragPluginModule.getSingleEmbedding.bind(ragPluginModule);
+                            if (typeof ragPluginModule.getBatchEmbeddingsCached === 'function') {
+                                dependencies.getBatchEmbeddings = ragPluginModule.getBatchEmbeddingsCached.bind(ragPluginModule);
+                            } else if (typeof ragPluginModule.getBatchEmbeddings === 'function') {
+                                dependencies.getBatchEmbeddings = ragPluginModule.getBatchEmbeddings.bind(ragPluginModule);
+                            }
                             // 同时注入 ContextBridge（如果 LightMemo 未在 manifest 中声明，也主动注入）
                             if (!dependencies.contextBridge && typeof ragPluginModule.getContextBridge === 'function') {
                                 dependencies.contextBridge = ragPluginModule.getContextBridge();
                             }
-                            if (this.debugMode) console.log(`[PluginManager] Injected VectorDBManager, getSingleEmbedding and ContextBridge into LightMemo.`);
+                            // AIMemoBridge 由 RAGDiaryPlugin 唯一持有配置、预设和缓存。
+                            // LightMemo 只提交自身召回候选，避免重复实例化 AIMemoHandler。
+                            if (typeof ragPluginModule.getAIMemoBridge === 'function') {
+                                dependencies.aiMemoBridge = ragPluginModule.getAIMemoBridge();
+                            }
+                            if (this.debugMode) console.log(`[PluginManager] Injected VectorDBManager, embeddings, ContextBridge and AIMemoBridge into LightMemo.`);
                         } else {
                             console.error(`[PluginManager] Critical dependency failure: RAGDiaryPlugin or its components not available for LightMemo injection.`);
                         }
@@ -862,9 +887,20 @@ class PluginManager extends EventEmitter {
     }
 
     async processToolCall(toolName, toolArgs, requestIp = null, sourceNode = null, executionOptions = {}) {
+        const shouldManageToolCallRecord = !executionOptions?.toolCallRecordHandle;
+        const managedToolCallRecord = shouldManageToolCallRecord
+            ? toolCallRecordStore.beginRecord({ toolName, args: toolArgs || {}, requestIp, sourceNode })
+            : null;
+
         const plugin = this.plugins.get(toolName);
         if (!plugin) {
-            throw new Error(`[PluginManager] Plugin "${toolName}" not found for tool call.`);
+            const notFoundError = new Error(`[PluginManager] Plugin "${toolName}" not found for tool call.`);
+            toolCallRecordStore.finishRecord(managedToolCallRecord, {
+                success: false,
+                result: { plugin_execution_error: notFoundError.message },
+                error: notFoundError
+            });
+            throw notFoundError;
         }
 
         // Helper function to generate a timestamp string
@@ -974,6 +1010,7 @@ class PluginManager extends EventEmitter {
 
             // 发送审核请求到管理面板
             if (this.webSocketServer) {
+                const approvalTtlMs = this.toolApprovalManager.getTimeoutMs();
                 const approvalRequest = {
                     type: 'tool_approval_request',
                     data: {
@@ -981,7 +1018,8 @@ class PluginManager extends EventEmitter {
                         toolName,
                         maid: maidNameFromArgs,
                         args: pluginSpecificArgs,
-                        timestamp: _getFormattedLocalTimestamp()
+                        timestamp: _getFormattedLocalTimestamp(),
+                        approvalTtlMs // 同步给 VCPLog 补发缓存使用,确保超时后能自动清除
                     }
                 };
                 this.webSocketServer.broadcast(approvalRequest, 'VCPLog');
@@ -997,6 +1035,19 @@ class PluginManager extends EventEmitter {
                     if (this.debugMode) {
                         console.log(`[PluginManager] Tool call for "${toolName}" (ID: ${requestId}) was rejected silently. Returning empty result to AI.`);
                     }
+                    const silentRejectionRecord = {
+                        status: 'rejected',
+                        success: false,
+                        silentRejected: true,
+                        error_type: 'approval_rejected',
+                        rejected_by_user: true,
+                        message: `Tool call "${toolName}" was rejected silently by manual approval.`
+                    };
+                    toolCallRecordStore.finishRecord(managedToolCallRecord, {
+                        success: false,
+                        result: silentRejectionRecord,
+                        error: silentRejectionRecord.message
+                    });
                     return undefined;
                 }
                 if (this.debugMode) console.log(`[PluginManager] Tool call for "${toolName}" (ID: ${requestId}) approved.`);
@@ -1076,6 +1127,13 @@ class PluginManager extends EventEmitter {
                 const pluginOutput = await this.executePlugin(toolName, executionParam, requestIp, executionOptions); // Returns {status, result/error}
 
                 if (pluginOutput.__vcpArcheryNoReplySilent) {
+                    toolCallRecordStore.finishRecord(managedToolCallRecord, {
+                        success: true,
+                        result: pluginOutput.result
+                    });
+                    if (managedToolCallRecord?.id && pluginOutput.result && typeof pluginOutput.result === 'object' && !pluginOutput.result.tool_call_record_id) {
+                        pluginOutput.result.tool_call_record_id = managedToolCallRecord.id;
+                    }
                     return pluginOutput.result;
                 }
 
@@ -1105,6 +1163,43 @@ class PluginManager extends EventEmitter {
             }
 
             // --- 通用结果处理 ---
+            // direct/distributed 插件不会经过上方 stdio 的 pluginOutput 状态分支，
+            // 因此必须在这里解释统一的 { status, result/error } 业务返回契约。
+            // 顶层 status:error 代表工具业务失败，即使 Promise 正常 fulfilled，
+            // 也必须进入异常链，不能被 ToolExecutor 误报为“发包 success”。
+            if (
+                resultFromPlugin &&
+                typeof resultFromPlugin === 'object' &&
+                resultFromPlugin.status === 'error'
+            ) {
+                const normalizedPluginOutput = {};
+                if (resultFromPlugin.result !== undefined) {
+                    normalizedPluginOutput.result = resultFromPlugin.result;
+                }
+                normalizedPluginOutput.plugin_error =
+                    resultFromPlugin.error ||
+                    resultFromPlugin.message ||
+                    `Plugin "${toolName}" reported an unspecified error.`;
+                if (resultFromPlugin.code !== undefined) {
+                    normalizedPluginOutput.code = resultFromPlugin.code;
+                }
+                throw new Error(JSON.stringify(normalizedPluginOutput));
+            }
+
+            // 兼容 direct/hybrid 插件主动返回 stdio 风格的 { status, result } 包装。
+            // stdio 插件会在上方被解包到 pluginOutput.result；direct 插件没有这一步，
+            // 因此这里补齐一次，使 direct 插件也能返回与 VSearch 相同的
+            // { status: "success", result: { content: [...] } } 形态。
+            if (
+                resultFromPlugin &&
+                typeof resultFromPlugin === 'object' &&
+                resultFromPlugin.status === 'success' &&
+                resultFromPlugin.result &&
+                typeof resultFromPlugin.result === 'object'
+            ) {
+                resultFromPlugin = resultFromPlugin.result;
+            }
+
             let finalResultObject = (typeof resultFromPlugin === 'object' && resultFromPlugin !== null) ? resultFromPlugin : { original_plugin_output: resultFromPlugin };
 
             if (maidNameFromArgs) {
@@ -1113,7 +1208,15 @@ class PluginManager extends EventEmitter {
             finalResultObject.timestamp = _getFormattedLocalTimestamp();
             _filterFuzzyDiff(finalResultObject, _getFormattedLocalTimestamp());
 
-            return finalResultObject;
+            const sanitizedResult = this._sanitizeToolResultForAi(finalResultObject);
+            toolCallRecordStore.finishRecord(managedToolCallRecord, {
+                success: true,
+                result: sanitizedResult
+            });
+            if (managedToolCallRecord?.id && sanitizedResult && typeof sanitizedResult === 'object' && !sanitizedResult.tool_call_record_id) {
+                sanitizedResult.tool_call_record_id = managedToolCallRecord.id;
+            }
+            return sanitizedResult;
 
         } catch (e) {
             console.error(`[PluginManager processToolCall] Error during execution for plugin ${toolName}:`, e.message);
@@ -1131,7 +1234,16 @@ class PluginManager extends EventEmitter {
                 errorObject.timestamp = _getFormattedLocalTimestamp();
             }
             _filterFuzzyDiff(errorObject, _getFormattedLocalTimestamp());
-            throw new Error(JSON.stringify(errorObject));
+            const sanitizedErrorObject = this._sanitizeToolResultForAi(errorObject);
+            toolCallRecordStore.finishRecord(managedToolCallRecord, {
+                success: false,
+                result: sanitizedErrorObject,
+                error: e
+            });
+            if (managedToolCallRecord?.id && sanitizedErrorObject && typeof sanitizedErrorObject === 'object' && !sanitizedErrorObject.tool_call_record_id) {
+                sanitizedErrorObject.tool_call_record_id = managedToolCallRecord.id;
+            }
+            throw new Error(JSON.stringify(sanitizedErrorObject));
         }
     }
 
@@ -1448,6 +1560,15 @@ class PluginManager extends EventEmitter {
         if (approval) {
             this.pendingApprovals.delete(requestId);
             clearTimeout(approval.timeoutId);
+
+            // 用户已经响应,把对应的 VCPLog 缓存条目清除,避免后续重连时把已处理的审核请求补发
+            try {
+                if (this.webSocketServer && typeof this.webSocketServer.cancelVcpLogApprovalCache === 'function') {
+                    this.webSocketServer.cancelVcpLogApprovalCache(requestId);
+                }
+            } catch (e) {
+                if (this.debugMode) console.warn(`[PluginManager] cancelVcpLogApprovalCache failed for ${requestId}: ${e.message}`);
+            }
 
             const normalizedReason = typeof reason === 'string' ? reason.trim() : '';
 

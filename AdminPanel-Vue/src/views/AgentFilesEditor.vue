@@ -1,9 +1,60 @@
 <template>
   <section class="config-section active-section agent-files-page">
-    <p class="description">
-      管理 Agent 的定义名称与对应的 `.txt` / `.md` 文件。你可以在这里添加、删除和修改
-      Agent 映射，并直接编辑关联的文本文件。
-    </p>
+    <Teleport to="#page-header-actions">
+      <UiPageActions>
+        <p class="agent-page-summary">
+          管理 Agent 名称、关联文件与文本内容。
+        </p>
+        <UiBadge
+          :variant="mapDirty ? 'warning' : 'success'"
+          :title="mapDirty ? '映射未保存' : '映射已同步'"
+          :aria-label="mapDirty ? '映射未保存' : '映射已同步'"
+        >
+          {{ mapDirty ? '映射未保存' : '映射已同步' }}
+        </UiBadge>
+        <UiButton
+          @click="refreshAll"
+          variant="outline"
+          size="lg"
+          aria-label="刷新 Agent 数据"
+          title="刷新 Agent 数据"
+        >
+          <template #leading>
+            <span class="material-symbols-outlined">refresh</span>
+          </template>
+          刷新
+        </UiButton>
+        <UiButton
+          @click="addAgentEntry"
+          variant="outline"
+          size="lg"
+          aria-label="添加新 Agent"
+          title="添加新 Agent"
+        >
+          <template #leading>
+            <span class="material-symbols-outlined" aria-hidden="true">add</span>
+          </template>
+          添加
+        </UiButton>
+        <UiButton
+          @click="saveAgentMap"
+          variant="primary"
+          size="lg"
+          :disabled="isSavingMap || !mapDirty"
+          aria-label="保存映射表"
+          title="保存映射表"
+        >
+          <template #leading>
+            <span
+              class="material-symbols-outlined"
+              :class="{ spinning: isSavingMap }"
+              aria-hidden="true"
+            >{{ isSavingMap ? "sync" : "save" }}</span>
+          </template>
+          {{ isSavingMap ? "保存中…" : mapDirty ? "保存映射" : "已保存" }}
+        </UiButton>
+      </UiPageActions>
+    </Teleport>
 
     <!-- 移动端视口切换胶囊 -->
     <div class="mobile-tab-nav">
@@ -24,110 +75,61 @@
       >
         <span class="material-symbols-outlined">edit_note</span>
         编辑器
-        <span v-if="fileDirty" class="dirty-badge"></span>
+        <UiBadge v-if="fileDirty" variant="warning" class="mobile-dirty-badge">
+          未保存
+        </UiBadge>
       </button>
     </div>
 
-    <DualPaneEditor
-      left-title="Agent 映射表"
-      right-title="Agent 文件内容"
-      :initial-left-width="450"
-      :min-left-width="350"
-      :max-left-width="600"
-      collapsible
-      persist-key="agentFilesEditor"
-      class="agent-dual-pane"
-      :class="'mobile-view-' + activeTab"
-    >
-      <template #left-actions>
-        <div class="pane-toolbar pane-toolbar--left">
-          <div class="pane-toolbar-main">
-            <button
-              @click="addAgentEntry"
-              class="btn-primary btn-sm btn-sm-touch"
-              aria-label="添加新 Agent"
-              title="添加新 Agent"
-            >
-              <span class="material-symbols-outlined" aria-hidden="true">add</span>
-              添加
-            </button>
-            <button
-              type="button"
-              @click="saveAgentMap"
-              class="btn-success btn-sm btn-sm-touch"
-              :disabled="isSavingMap || !mapDirty"
-              aria-label="保存映射表"
-              title="保存映射表"
-            >
-              <span
-                class="material-symbols-outlined"
-                :class="{ spinning: isSavingMap }"
-                aria-hidden="true"
-              >{{ isSavingMap ? "sync" : "save" }}</span>
-              {{ isSavingMap ? "保存中…" : mapDirty ? "保存" : "已保存" }}
-            </button>
-            <details class="pane-toolbar-menu">
-              <summary class="pane-toolbar-menu-trigger" aria-label="更多操作" title="更多操作">
-                <span class="material-symbols-outlined">more_vert</span>
-              </summary>
-              <div class="pane-toolbar-menu-content" role="menu" aria-label="Agent 映射更多操作">
-                <button type="button" @click="refreshAll" class="pane-toolbar-menu-item">
-                  <span class="material-symbols-outlined">refresh</span>
-                  刷新数据
-                </button>
-              </div>
-            </details>
-          </div>
-          <span
-            class="pane-toolbar-chip"
-            :class="{ 'pane-toolbar-chip--active': mapDirty }"
-            :title="mapDirty ? '映射未保存' : '映射已同步'"
-            :aria-label="mapDirty ? '映射未保存' : '映射已同步'"
-          >
-            {{ mapDirty ? '映射未保存' : '映射已同步' }}
-          </span>
-        </div>
-      </template>
-
-      <template #left-collapsed>
-        <div class="collapsed-list">
-          <button
-            v-for="entry in agentMap"
-            :key="entry.localId"
-            type="button"
-            class="collapsed-item"
-            :title="entry.name || entry.file"
-            @click="selectAgentFile(resolveAgentFileName(entry.file))"
-          >
-            <span class="collapsed-avatar">{{ (entry.name || entry.file || 'A').slice(0, 1).toUpperCase() }}</span>
-          </button>
-          <div v-if="agentMap.length === 0" class="collapsed-empty">
-            <span class="material-symbols-outlined">smart_toy</span>
-          </div>
-        </div>
-      </template>
-
-      <template #left-content>
+    <div class="agent-editor-shell" :class="'mobile-view-' + activeTab">
+      <aside class="agent-map-pane" aria-label="Agent 映射表">
         <div class="agent-map-list">
-          <div
+          <article
             v-for="(entry, index) in agentMap"
             :key="entry.localId"
-            class="agent-map-entry card"
+            class="agent-map-entry"
+            :class="{ 'is-active': !!entry.file && editingFile === resolveAgentFileName(entry.file) }"
           >
             <!-- 第一层：头部标题栏 -->
             <div class="agent-entry-header">
               <span class="material-symbols-outlined header-icon">smart_toy</span>
               <span class="header-title">{{ entry.name || "未命名 Agent" }}</span>
-              <span class="header-status-badge" :class="doesFileExist(entry.file) ? 'active' : 'pending'">
+              <UiBadge :variant="doesFileExist(entry.file) ? 'success' : 'warning'" class="agent-binding-badge">
                 {{ doesFileExist(entry.file) ? '已绑定' : '待绑定' }}
-              </span>
+              </UiBadge>
+              <div class="agent-entry-actions">
+                <UiIconButton
+                  @click="createAndBindAgentFile(entry)"
+                  :disabled="!canCreateAgentFile(entry.file)"
+                  label="创建并绑定"
+                  title="创建并绑定"
+                >
+                  <span class="material-symbols-outlined">note_add</span>
+                </UiIconButton>
+                <UiIconButton
+                  @click="selectAgentFile(resolveAgentFileName(entry.file))"
+                  :disabled="!doesFileExist(entry.file)"
+                  label="编辑文件"
+                  title="编辑文件"
+                >
+                  <span class="material-symbols-outlined">edit</span>
+                </UiIconButton>
+                <UiIconButton
+                  @click="removeAgentEntry(index)"
+                  variant="danger"
+                  label="删除"
+                  title="删除"
+                >
+                  <span class="material-symbols-outlined">delete</span>
+                </UiIconButton>
+              </div>
             </div>
 
             <!-- 第二层：中间输入配置 (PC垂直，移动端并排对齐) -->
             <div class="agent-entry-fields">
               <div class="agent-entry-row">
                 <label>Agent 名称:</label>
-                <input
+                <UiInput
                   v-model="entry.name"
                   type="text"
                   placeholder="输入 Agent 名称"
@@ -136,15 +138,39 @@
 
               <div class="agent-entry-row">
                 <label>关联文件:</label>
-                <input
-                  v-model="entry.file"
-                  :list="agentFilesDatalistId"
-                  type="text"
-                  class="file-input"
-                  :disabled="isLoadingFiles"
-                  placeholder="选择或输入文件名"
-                  @blur="normalizeEntryFile(entry)"
-                />
+                <UiSelect
+                  :model-value="resolveAgentFileName(entry.file)"
+                  class="agent-file-picker"
+                  :disabled="isLoadingFiles || availableFiles.length === 0"
+                  aria-label="选择已有 Agent 文件"
+                  @change="handleAgentFilePickerChange(entry, $event)"
+                >
+                  <option value="">选择已有文件…</option>
+                  <optgroup
+                    v-if="getAgentFilePickerGroups(entry).matched.length > 0"
+                    label="名称匹配（置顶）"
+                  >
+                    <option
+                      v-for="file in getAgentFilePickerGroups(entry).matched"
+                      :key="`matched-${entry.localId}-${file}`"
+                      :value="file"
+                    >
+                      {{ file }}
+                    </option>
+                  </optgroup>
+                  <optgroup
+                    v-if="getAgentFilePickerGroups(entry).others.length > 0"
+                    label="──────── 其他文件 ────────"
+                  >
+                    <option
+                      v-for="file in getAgentFilePickerGroups(entry).others"
+                      :key="`other-${entry.localId}-${file}`"
+                      :value="file"
+                    >
+                      {{ file }}
+                    </option>
+                  </optgroup>
+                </UiSelect>
               </div>
             </div>
 
@@ -156,7 +182,7 @@
               </span>
 
               <span
-                v-else-if="entry.file"
+                v-else-if="entry.file && (!doesFileExist(entry.file) || hasInvalidAgentFilePath(entry.file))"
                 :class="[
                   'file-hint',
                   hasInvalidAgentFilePath(entry.file)
@@ -176,219 +202,222 @@
               </span>
             </div>
 
-            <!-- 第三层：操作动作按钮组 -->
-            <div class="agent-entry-actions">
-              <button
-                @click="createAndBindAgentFile(entry)"
-                :disabled="!canCreateAgentFile(entry.file)"
-                class="btn-primary btn-sm btn-sm-touch"
-              >
-                <span class="material-symbols-outlined">note_add</span>
-                创建并绑定
-              </button>
-              <button
-                @click="selectAgentFile(resolveAgentFileName(entry.file))"
-                :disabled="!doesFileExist(entry.file)"
-                class="btn-secondary btn-sm btn-sm-touch"
-              >
-                <span class="material-symbols-outlined">edit</span>
-                编辑文件
-              </button>
-              <button
-                @click="removeAgentEntry(index)"
-                class="btn-danger btn-sm btn-sm-touch"
-              >
-                <span class="material-symbols-outlined">delete</span>
-                删除
-              </button>
-            </div>
-          </div>
+          </article>
 
           <div v-if="agentMap.length === 0" class="empty-state">
             <span class="material-symbols-outlined">smart_toy</span>
             <p>暂无 Agent 映射</p>
-            <button @click="addAgentEntry" class="btn-primary">
+            <UiButton @click="addAgentEntry" variant="primary">
               添加第一个 Agent
-            </button>
+            </UiButton>
           </div>
         </div>
-      </template>
+      </aside>
 
-      <template #right-actions>
-        <div v-if="editingFile" class="pane-toolbar pane-toolbar--right">
-          <div class="pane-toolbar-main">
-            <button
-              type="button"
+      <main class="agent-file-pane" aria-label="Agent 文件内容">
+        <header class="agent-file-pane-header">
+          <div class="agent-file-title">
+            <span class="agent-pane-label">Agent 文件内容</span>
+            <span class="agent-file-name">
+              <span class="material-symbols-outlined">description</span>
+              {{ editingFile || "未选择文件" }}
+            </span>
+            <UiBadge v-if="fileDirty" variant="warning">未保存</UiBadge>
+          </div>
+          <div v-if="editingFile" class="agent-file-actions">
+            <UiButton
               @click="openDiarySyntaxEditor"
-              class="btn-secondary btn-sm btn-sm-touch"
+              variant="outline"
+              size="sm"
               aria-label="打开日记本语法编辑器"
               title="日记本语法编辑器"
             >
-              <span class="material-symbols-outlined">auto_fix_high</span>
+              <template #leading>
+                <span class="material-symbols-outlined">auto_fix_high</span>
+              </template>
               日记本语法编辑器
-            </button>
-            <button
-              type="button"
-              @click="togglePlaceholderSidebar"
-              class="btn-secondary btn-sm btn-sm-touch"
-              :class="{ active: isPlaceholderSidebarOpen }"
-              aria-label="切换常用占位符侧栏"
-              :title="isPlaceholderSidebarOpen ? '收起常用占位符' : '展开常用占位符'"
-            >
-              <span class="material-symbols-outlined">data_object</span>
-              占位符
-            </button>
-            <button
-              type="button"
+            </UiButton>
+            <UiButton
               @click="saveAgentFile"
               :disabled="!fileDirty || isSavingFile"
-              class="btn-success btn-sm btn-sm-touch"
+              variant="primary"
+              size="sm"
             >
-              <span class="material-symbols-outlined" :class="{ spinning: isSavingFile }">{{ isSavingFile ? "sync" : "save" }}</span>
+              <template #leading>
+                <span class="material-symbols-outlined" :class="{ spinning: isSavingFile }">{{ isSavingFile ? "sync" : "save" }}</span>
+              </template>
               {{ isSavingFile ? "保存中…" : fileDirty ? "保存文件" : "已保存" }}
-            </button>
+            </UiButton>
           </div>
-        </div>
-      </template>
+        </header>
 
-      <template #right-content>
-        <div class="agent-file-workspace" :class="{ 'placeholder-sidebar-collapsed': !isPlaceholderSidebarOpen }">
+        <div class="agent-file-workspace">
           <div class="agent-file-editor">
-            <div class="agent-editor-controls">
-              <span class="editing-file-display">
-                <span class="material-symbols-outlined">description</span>
-                {{ editingFile || "未选择文件" }}
-                <span v-if="fileDirty" class="dirty-indicator">（未保存）</span>
-              </span>
+            <div
+              v-if="editingFile"
+              class="diary-syntax-scan-panel"
+              :class="{ collapsed: isDiarySyntaxScanCollapsed }"
+              aria-label="检测到的日记本语法"
+            >
+              <div class="diary-syntax-scan-header">
+                <div>
+                  <strong>日记本语法扫描</strong>
+                  <span>检测到 {{ diarySyntaxMatches.length }} 个占位符</span>
+                </div>
+                <div class="diary-syntax-scan-actions">
+                  <UiBadge :variant="diarySyntaxMatches.length > 0 ? 'info' : 'secondary'">
+                    {{ diarySyntaxMatches.length > 0 ? "可编辑" : "未检测到" }}
+                  </UiBadge>
+                  <UiIconButton
+                    class="diary-syntax-collapse-button"
+                    :label="isDiarySyntaxScanCollapsed ? '展开日记本语法扫描区' : '折叠日记本语法扫描区'"
+                    :title="isDiarySyntaxScanCollapsed ? '展开' : '折叠'"
+                    @click="isDiarySyntaxScanCollapsed = !isDiarySyntaxScanCollapsed"
+                  >
+                    <span class="material-symbols-outlined">
+                      {{ isDiarySyntaxScanCollapsed ? "keyboard_arrow_down" : "keyboard_arrow_up" }}
+                    </span>
+                  </UiIconButton>
+                </div>
+              </div>
+              <div
+                v-if="!isDiarySyntaxScanCollapsed && diarySyntaxMatches.length > 0"
+                class="diary-syntax-chip-list"
+              >
+                <article
+                  v-for="match in diarySyntaxMatches"
+                  :key="match.id"
+                  class="diary-syntax-chip"
+                  :class="{ active: editingDiarySyntaxRange?.start === match.start }"
+                >
+                  <div class="diary-syntax-chip-main">
+                    <div class="diary-syntax-chip-meta">
+                      <UiBadge :variant="match.shell.includes('advanced') ? 'info' : 'success'">
+                        {{ getDiarySyntaxShellLabel(match.shell) }}
+                      </UiBadge>
+                      <span>第 {{ match.line }} 行，第 {{ match.column }} 列</span>
+                    </div>
+                    <code>{{ match.raw }}</code>
+                  </div>
+                  <div class="diary-syntax-chip-actions">
+                    <UiButton variant="outline" size="sm" @click="focusDiarySyntax(match)">
+                      定位
+                    </UiButton>
+                    <UiButton variant="primary" size="sm" @click="editDiarySyntax(match)">
+                      编辑
+                    </UiButton>
+                  </div>
+                </article>
+              </div>
+              <p v-else-if="!isDiarySyntaxScanCollapsed" class="diary-syntax-empty">
+                当前文件内没有检测到 <code v-text="'{{...}}'"></code>、<code>[[...]]</code>、
+                <code><<...>></code> 或 <code>《《...》》</code> 日记本语法。
+              </p>
             </div>
-            <textarea
+            <UiTextarea
               ref="fileContentEditorRef"
               v-model="fileContent"
               spellcheck="false"
               rows="20"
               placeholder="从左侧选择一个 Agent 以编辑其关联的 .txt / .md 文件…"
               class="file-content-editor"
-            ></textarea>
-            <span
+            />
+            <UiBadge
               v-if="fileStatusMessage"
-              :class="['status-message', fileStatusType]"
+              :variant="fileStatusBadgeVariant"
             >
               {{ fileStatusMessage }}
-            </span>
+            </UiBadge>
+          </div>
+        </div>
+      </main>
+
+      <aside class="placeholder-sidebar" aria-label="常用占位符">
+        <header class="placeholder-sidebar-header">
+          <div class="placeholder-source-tabs" role="tablist" aria-label="占位符类型">
+            <button
+              v-for="group in placeholderGroups"
+              :key="group.key"
+              type="button"
+              class="placeholder-source-tab"
+              :class="{ 'is-active': activePlaceholderSource === group.key }"
+              role="tab"
+              :aria-selected="activePlaceholderSource === group.key"
+              @click="activePlaceholderSource = group.key"
+            >
+              <span class="material-symbols-outlined">{{ group.icon }}</span>
+              <span>{{ group.shortTitle }}</span>
+              <span class="placeholder-count">{{ group.items.length }}</span>
+            </button>
           </div>
 
-          <button
-            v-if="!isPlaceholderSidebarOpen"
-            type="button"
-            class="placeholder-sidebar-rail"
-            aria-label="展开常用占位符侧栏"
-            title="展开常用占位符"
-            @click="isPlaceholderSidebarOpen = true"
-          >
-            <span class="material-symbols-outlined">data_object</span>
-            <span>占位符</span>
-            <span class="material-symbols-outlined">chevron_left</span>
-          </button>
-
-          <aside class="placeholder-sidebar" :aria-hidden="!isPlaceholderSidebarOpen">
-            <header class="placeholder-sidebar-header">
-              <div>
-                <span class="eyebrow">Quick Insert</span>
-                <h4>常用占位符</h4>
-              </div>
-              <button
-                type="button"
-                class="placeholder-sidebar-close"
-                aria-label="收起常用占位符侧栏"
-                @click="isPlaceholderSidebarOpen = false"
-              >
-                <span class="material-symbols-outlined">chevron_right</span>
-              </button>
-            </header>
-
-            <div class="placeholder-search">
-              <span class="material-symbols-outlined search-icon">search</span>
-              <input
-                v-model="placeholderQuery"
-                type="text"
-                placeholder="搜索占位符…"
-              />
-              <button
-                v-if="placeholderQuery"
-                type="button"
-                class="search-clear"
-                aria-label="清除搜索"
-                @click="placeholderQuery = ''"
-              >
-                <span class="material-symbols-outlined">close</span>
-              </button>
-            </div>
-
-            <div
-              v-if="isLoadingCommonPlaceholders"
-              class="placeholder-sidebar-status"
-              role="status"
-              aria-live="polite"
+          <div class="placeholder-search">
+            <span class="material-symbols-outlined search-icon">search</span>
+            <UiInput
+              v-model="placeholderQuery"
+              type="text"
+              placeholder="搜索占位符…"
+            />
+            <UiIconButton
+              v-if="placeholderQuery"
+              class="search-clear"
+              label="清除搜索"
+              title="清除搜索"
+              @click="placeholderQuery = ''"
             >
-              正在加载占位符…
-            </div>
+              <span class="material-symbols-outlined">close</span>
+            </UiIconButton>
+          </div>
+        </header>
 
-            <div
-              v-else-if="placeholderLoadError"
-              class="placeholder-sidebar-status error"
-              role="status"
-              aria-live="polite"
-            >
-              {{ placeholderLoadError }}
-            </div>
-
-            <template v-else>
-              <section
-                v-for="group in filteredPlaceholderGroups"
-                :key="group.key"
-                class="placeholder-group"
-              >
-                <button
-                  type="button"
-                  class="placeholder-group-title"
-                  :aria-expanded="!collapsedPlaceholderGroups[group.key]"
-                  @click="togglePlaceholderGroup(group.key)"
-                >
-                  <span class="material-symbols-outlined">{{ group.icon }}</span>
-                  <span>{{ group.title }}</span>
-                  <span class="placeholder-count">{{ group.items.length }}</span>
-                  <span class="material-symbols-outlined group-chevron">expand_more</span>
-                </button>
-
-                <div
-                  v-show="!collapsedPlaceholderGroups[group.key]"
-                  class="placeholder-chip-list"
-                >
-                  <button
-                    v-for="item in group.items"
-                    :key="`${group.key}-${item.token}`"
-                    type="button"
-                    class="placeholder-chip"
-                    :title="item.description || item.token"
-                    @click="insertPlaceholderAtCursor(item.token)"
-                  >
-                    <code>{{ item.token }}</code>
-                    <span v-if="item.description">{{ item.description }}</span>
-                  </button>
-                </div>
-              </section>
-
-              <div
-                v-if="filteredPlaceholderGroups.length === 0"
-                class="placeholder-sidebar-status"
-              >
-                没有匹配的占位符。
-              </div>
-            </template>
-          </aside>
+        <div
+          v-if="isLoadingCommonPlaceholders"
+          class="placeholder-sidebar-status"
+          role="status"
+          aria-live="polite"
+        >
+          正在加载占位符…
         </div>
-      </template>
-    </DualPaneEditor>
+
+        <div
+          v-else-if="placeholderLoadError"
+          class="placeholder-sidebar-status error"
+          role="status"
+          aria-live="polite"
+        >
+          {{ placeholderLoadError }}
+        </div>
+
+        <div v-else class="placeholder-scroll">
+          <section
+            v-for="group in filteredPlaceholderGroups"
+            :key="group.key"
+            class="placeholder-group"
+          >
+            <div class="placeholder-command-list">
+              <button
+                v-for="item in group.items"
+                :key="`${group.key}-${item.token}`"
+                type="button"
+                class="placeholder-command-item"
+                :title="item.description || item.token"
+                @click="insertPlaceholderAtCursor(item.token)"
+              >
+                <code>{{ item.token }}</code>
+                <span v-if="item.description">{{ item.description }}</span>
+              </button>
+            </div>
+          </section>
+
+          <div
+            v-if="filteredPlaceholderGroups.length === 0"
+            class="placeholder-sidebar-status"
+          >
+            没有匹配的占位符。
+          </div>
+        </div>
+      </aside>
+    </div>
 
     <datalist :id="agentFilesDatalistId">
       <option v-for="file in availableFiles" :key="file" :value="file">
@@ -398,15 +427,21 @@
 
     <DiarySyntaxEditorModal
       v-model="isDiarySyntaxEditorOpen"
+      :initial-state="editingDiarySyntaxState"
+      :mode="diarySyntaxEditorMode"
       @insert="insertDiarySyntax"
+      @replace="replaceDiarySyntax"
     />
 
-    <span
+    <UiBadge
       v-if="statusMessage"
-      :class="['status-message', 'floating-status', statusType]"
+      :variant="statusBadgeVariant"
+      class="floating-status"
+      role="status"
+      aria-live="polite"
     >
       {{ statusMessage }}
-    </span>
+    </UiBadge>
   </section>
 </template>
 
@@ -414,8 +449,22 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
 import { agentApi, placeholderApi, toolboxApi } from "@/api";
-import DualPaneEditor from "@/components/DualPaneEditor.vue";
+import UiBadge from "@/components/ui/UiBadge.vue";
+import UiButton from "@/components/ui/UiButton.vue";
+import UiIconButton from "@/components/ui/UiIconButton.vue";
+import UiInput from "@/components/ui/UiInput.vue";
+import UiPageActions from "@/components/ui/UiPageActions.vue";
+import UiSelect from "@/components/ui/UiSelect.vue";
+import UiTextarea from "@/components/ui/UiTextarea.vue";
 import DiarySyntaxEditorModal from "./AgentFilesEditor/DiarySyntaxEditorModal.vue";
+import {
+  createDefaultDiarySyntaxState,
+  scanDiarySyntaxes,
+  type DiarySyntaxEditorState,
+  type DiarySyntaxMatch,
+  type DiarySyntaxRange,
+  type DiarySyntaxShell,
+} from "./AgentFilesEditor/diarySyntaxParser";
 import { askConfirm } from "@/platform/feedback/feedbackBus";
 import type {
   AgentFilesStatusType,
@@ -439,6 +488,7 @@ interface QuickPlaceholderItem {
 interface QuickPlaceholderGroup {
   key: "toolbox" | "env";
   title: string;
+  shortTitle: string;
   icon: string;
   items: QuickPlaceholderItem[];
 }
@@ -468,21 +518,27 @@ const fileContent = ref("");
 const originalFileContent = ref("");
 const fileStatusMessage = ref("");
 const fileStatusType = ref<AgentFilesStatusType>("info");
+const statusBadgeVariant = computed(() =>
+  statusType.value === "error" ? "danger" : statusType.value
+);
+const fileStatusBadgeVariant = computed(() =>
+  fileStatusType.value === "error" ? "danger" : fileStatusType.value
+);
 const isSavingMap = ref(false);
 const isSavingFile = ref(false);
 const initialAgentMapSnapshot = ref("[]");
 const isDiarySyntaxEditorOpen = ref(false);
-const isPlaceholderSidebarOpen = ref(true);
 const isLoadingCommonPlaceholders = ref(false);
 const placeholderLoadError = ref("");
 const placeholderQuery = ref("");
+const activePlaceholderSource = ref<QuickPlaceholderGroup["key"]>("toolbox");
 const toolboxPlaceholders = ref<QuickPlaceholderItem[]>([]);
 const envPlaceholders = ref<QuickPlaceholderItem[]>([]);
-const fileContentEditorRef = ref<HTMLTextAreaElement | null>(null);
-const collapsedPlaceholderGroups = ref<Record<string, boolean>>({
-  toolbox: false,
-  env: false,
-});
+const fileContentEditorRef = ref<InstanceType<typeof UiTextarea> | null>(null);
+const diarySyntaxEditorMode = ref<"insert" | "replace">("insert");
+const editingDiarySyntaxState = ref<DiarySyntaxEditorState | null>(null);
+const editingDiarySyntaxRange = ref<DiarySyntaxRange | null>(null);
+const isDiarySyntaxScanCollapsed = ref(false);
 
 const agentFilesDatalistId = "agent-file-options";
 const AGENT_FILE_EXTENSION_PATTERN = /\.(txt|md)$/i;
@@ -519,6 +575,8 @@ const fileDirty = computed(() => {
 });
 
 const hasPendingChanges = computed(() => mapDirty.value || fileDirty.value);
+
+const diarySyntaxMatches = computed<DiarySyntaxMatch[]>(() => scanDiarySyntaxes(fileContent.value));
 
 function sanitizeAgentFileInput(fileName: string): string {
   return fileName.trim().replace(/\\/g, "/");
@@ -654,6 +712,36 @@ function deduplicateAgentFiles(files: readonly string[]): string[] {
   );
 }
 
+function getAgentFilePickerGroups(entry: AgentMapDraft): {
+  matched: string[];
+  others: string[];
+} {
+  const normalizedName = entry.name.trim().toLowerCase();
+  const matched: string[] = [];
+  const others: string[] = [];
+
+  availableFiles.value.forEach((file) => {
+    const comparableFile = file.toLowerCase();
+    if (normalizedName && comparableFile.includes(normalizedName)) {
+      matched.push(file);
+      return;
+    }
+
+    others.push(file);
+  });
+
+  return { matched, others };
+}
+
+function handleAgentFilePickerChange(entry: AgentMapDraft, event: Event): void {
+  const selectedFile = (event.target as HTMLSelectElement).value;
+  if (!selectedFile) {
+    return;
+  }
+
+  entry.file = selectedFile;
+}
+
 function normalizePlaceholderToken(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
@@ -680,12 +768,14 @@ const placeholderGroups = computed<QuickPlaceholderGroup[]>(() => [
   {
     key: "toolbox",
     title: "Toolbox 占位符",
+    shortTitle: "Toolbox",
     icon: "inventory_2",
     items: toolboxPlaceholders.value,
   },
   {
     key: "env",
     title: "Tar / Var / Sar 变量",
+    shortTitle: "TVS 变量",
     icon: "tune",
     items: envPlaceholders.value,
   },
@@ -695,23 +785,13 @@ const filteredPlaceholderGroups = computed<QuickPlaceholderGroup[]>(() => {
   const query = placeholderQuery.value.trim().toLowerCase();
 
   return placeholderGroups.value
+    .filter((group) => group.key === activePlaceholderSource.value)
     .map((group) => ({
       ...group,
       items: group.items.filter((item) => matchesPlaceholderQuery(item, query)),
     }))
     .filter((group) => group.items.length > 0);
 });
-
-function togglePlaceholderSidebar(): void {
-  isPlaceholderSidebarOpen.value = !isPlaceholderSidebarOpen.value;
-}
-
-function togglePlaceholderGroup(groupKey: string): void {
-  collapsedPlaceholderGroups.value = {
-    ...collapsedPlaceholderGroups.value,
-    [groupKey]: !collapsedPlaceholderGroups.value[groupKey],
-  };
-}
 
 async function loadCommonPlaceholders(): Promise<void> {
   isLoadingCommonPlaceholders.value = true;
@@ -765,20 +845,17 @@ async function insertPlaceholderAtCursor(token: string): Promise<void> {
     return;
   }
 
-  const selectionStart = editor.selectionStart ?? fileContent.value.length;
-  const selectionEnd = editor.selectionEnd ?? selectionStart;
+  const { start: selectionStart, end: selectionEnd } = editor.getSelectionRange();
   const before = fileContent.value.slice(0, selectionStart);
   const after = fileContent.value.slice(selectionEnd);
-  const previousScrollTop = editor.scrollTop;
-  const previousScrollLeft = editor.scrollLeft;
+  const previousScrollPosition = editor.getScrollPosition();
   fileContent.value = `${before}${token}${after}`;
 
   await nextTick();
   editor.focus({ preventScroll: true });
   const nextCursor = selectionStart + token.length;
   editor.setSelectionRange(nextCursor, nextCursor);
-  editor.scrollTop = previousScrollTop;
-  editor.scrollLeft = previousScrollLeft;
+  editor.setScrollPosition(previousScrollPosition);
   showMessage(`已插入 ${token}`, "success");
 }
 
@@ -998,7 +1075,45 @@ async function selectAgentFile(fileName: string): Promise<void> {
 }
 
 function openDiarySyntaxEditor(): void {
+  diarySyntaxEditorMode.value = "insert";
+  editingDiarySyntaxState.value = createDefaultDiarySyntaxState();
+  editingDiarySyntaxRange.value = null;
   isDiarySyntaxEditorOpen.value = true;
+}
+
+async function focusDiarySyntax(match: DiarySyntaxMatch): Promise<void> {
+  const editor = fileContentEditorRef.value;
+  if (!editor) {
+    return;
+  }
+
+  await nextTick();
+  editor.focus({ preventScroll: true });
+  editor.setSelectionRange(match.start, match.end);
+  showMessage(`已定位到第 ${match.line} 行的日记本语法。`, "info");
+}
+
+function editDiarySyntax(match: DiarySyntaxMatch): void {
+  diarySyntaxEditorMode.value = "replace";
+  editingDiarySyntaxState.value = match.state;
+  editingDiarySyntaxRange.value = {
+    start: match.start,
+    end: match.end,
+  };
+  isDiarySyntaxEditorOpen.value = true;
+}
+
+function replaceDiarySyntax(syntax: string): void {
+  if (!syntax || !editingDiarySyntaxRange.value) {
+    return;
+  }
+
+  const { start, end } = editingDiarySyntaxRange.value;
+  fileContent.value = `${fileContent.value.slice(0, start)}${syntax}${fileContent.value.slice(end)}`;
+  editingDiarySyntaxRange.value = null;
+  editingDiarySyntaxState.value = null;
+  diarySyntaxEditorMode.value = "insert";
+  isDiarySyntaxEditorOpen.value = false;
 }
 
 function insertDiarySyntax(syntax: string): void {
@@ -1011,6 +1126,17 @@ function insertDiarySyntax(syntax: string): void {
   isDiarySyntaxEditorOpen.value = false;
 }
 
+function getDiarySyntaxShellLabel(shell: DiarySyntaxShell): string {
+  const labels: Record<DiarySyntaxShell, string> = {
+    advancedDynamic: "RAG 动态",
+    advancedFixed: "RAG 固定",
+    directDynamic: "直读动态",
+    directStatic: "直读固定",
+  };
+
+  return labels[shell];
+}
+ 
 async function saveAgentFile(): Promise<void> {
   if (!editingFile.value || isSavingFile.value) {
     return;
@@ -1113,109 +1239,188 @@ onBeforeRouteLeave(async () => {
 </script>
 
 <style scoped>
-.collapsed-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: center;
+.agent-files-page {
+  --agent-workspace-height: calc(var(--app-viewport-height, 100vh) - 150px);
+  --agent-workspace-min-height: 520px;
 }
 
-.collapsed-item {
+.agent-page-summary {
+  max-width: 340px;
+  margin: 0 var(--space-2) 0 0;
+  color: var(--secondary-text);
+  font-size: var(--font-size-helper);
+  line-height: 1.35;
+}
+
+.agent-editor-shell {
+  display: grid;
+  grid-template-columns: minmax(292px, 340px) minmax(360px, 1fr) minmax(320px, 360px);
+  gap: var(--space-4);
+  min-height: var(--agent-workspace-min-height);
+  height: max(var(--agent-workspace-height), var(--agent-workspace-min-height));
+}
+
+.agent-map-pane,
+.agent-file-pane,
+.placeholder-sidebar {
+  min-width: 0;
+  min-height: 0;
+}
+
+.agent-map-pane {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.agent-file-pane {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--primary-text) 0.8%, transparent);
+  overflow: hidden;
+}
+
+.agent-pane-label {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  color: color-mix(in srgb, var(--secondary-text) 72%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.agent-file-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 58px;
+  padding: var(--space-3) var(--space-4);
+}
+
+.agent-file-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.agent-file-pane-header .agent-pane-label {
+  min-height: 0;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.agent-file-name {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--tertiary-bg);
+  gap: 6px;
+  min-width: 0;
   color: var(--secondary-text);
-  cursor: pointer;
-  padding: 0;
-}
-
-.collapsed-avatar {
   font-size: var(--font-size-helper);
-  font-weight: 700;
-  color: inherit;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.collapsed-empty {
-  color: var(--secondary-text);
+.agent-file-name .material-symbols-outlined {
+  flex: 0 0 auto;
+  font-size: 16px !important;
 }
 
-.agent-files-page {
-  --dual-pane-height: calc(var(--app-viewport-height, 100vh) - 260px);
-  --dual-pane-min-height: 420px;
-}
-
-.agent-files-page :deep(.pane-right .pane-content) {
+.agent-file-actions {
   display: flex;
-  flex-direction: column;
-  min-height: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 .agent-map-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-1) var(--space-3) 0;
+  scrollbar-gutter: stable;
 }
 
 .agent-map-entry {
-  padding: var(--space-4);
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--button-bg) 5%, transparent),
+      color-mix(in srgb, var(--primary-text) 0.8%, transparent)
+    );
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+  overflow: hidden;
+}
+
+.agent-map-entry:hover {
+  border-color: color-mix(in srgb, var(--button-bg) 24%, var(--border-color));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--button-bg) 8%, transparent),
+      color-mix(in srgb, var(--primary-text) 1.8%, transparent)
+    );
+}
+
+.agent-map-entry.is-active {
+  border-color: color-mix(in srgb, var(--button-bg) 42%, var(--border-color));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--button-bg) 12%, transparent),
+      color-mix(in srgb, var(--primary-text) 2.2%, transparent)
+    );
+}
+
+.agent-map-entry.is-active::before {
+  content: "";
+  position: absolute;
+  inset: 8px auto 8px 0;
+  width: 2px;
+  border-radius: var(--radius-full);
+  background: var(--button-bg);
 }
 
 .agent-entry-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.agent-file-picker {
+  width: 100%;
 }
 
 .agent-entry-row label {
   color: var(--secondary-text);
-  font-size: var(--font-size-helper);
+  font-size: 0.75rem;
   font-weight: 500;
-}
-
-.agent-entry-row input,
-.agent-entry-row select {
-  width: 100%;
-  padding: 10px 12px;
-  background: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--primary-text);
-  font-size: var(--font-size-body);
-  font-family: inherit;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.agent-entry-row input {
-  padding-right: 12px;
-  cursor: text;
-}
-
-.agent-entry-row input:hover,
-.agent-entry-row select:hover {
-  border-color: var(--highlight-text);
-}
-
-.agent-entry-row input:focus-visible,
-.agent-entry-row select:focus-visible {
-  outline: 2px solid var(--highlight-text);
-  outline-offset: 2px;
-  border-color: var(--highlight-text);
-  box-shadow: 0 0 0 2px var(--primary-color-translucent);
-}
-
-.agent-entry-row input:focus:not(:focus-visible),
-.agent-entry-row select:focus:not(:focus-visible) {
-  border-color: var(--highlight-text);
-}
-
-.agent-entry-row input::placeholder {
-  color: var(--secondary-text);
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .loading-hint {
@@ -1234,7 +1439,6 @@ onBeforeRouteLeave(async () => {
 
 .file-hint {
   display: block;
-  margin-top: 2px;
   font-size: var(--font-size-helper);
   line-height: 1.45;
 }
@@ -1260,207 +1464,275 @@ onBeforeRouteLeave(async () => {
 
 .agent-entry-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.agent-entry-actions :deep(.ui-icon-button) {
+  width: 28px;
+  height: 28px;
+}
+
+.agent-entry-actions :deep(.ui-icon-button .material-symbols-outlined) {
+  font-size: 16px !important;
 }
 
 .agent-file-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
-  gap: var(--space-3);
+  display: flex;
   min-height: 0;
   flex: 1;
-}
-
-.agent-file-workspace.placeholder-sidebar-collapsed {
-  grid-template-columns: minmax(0, 1fr) 42px;
-  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
 }
 
 .agent-file-editor {
   display: flex;
   flex-direction: column;
   flex: 1;
+  gap: var(--space-2);
   min-width: 0;
   min-height: 0;
 }
 
-.agent-editor-controls {
+.diary-syntax-scan-panel {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-  padding: 12px;
-  background: var(--tertiary-bg);
-  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 320px;
+  padding: 10px var(--space-3);
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-text) 1.6%, transparent);
+  transition:
+    max-height 0.2s ease,
+    padding 0.2s ease;
 }
 
-.editing-file-display {
+.diary-syntax-scan-panel.collapsed {
+  max-height: 64px;
+  padding-top: 8.5px;
+  padding-bottom: 8px;
+  overflow: hidden;
+}
+
+.diary-syntax-scan-header {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 40px;
+}
+
+.diary-syntax-scan-actions {
+  display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--secondary-text);
-  font-size: var(--font-size-body);
-  font-weight: 500;
 }
 
-.editing-file-display .material-symbols-outlined {
-  font-size: var(--font-size-emphasis) !important;
+.diary-syntax-collapse-button .material-symbols-outlined {
+  font-size: 20px !important;
 }
 
-.dirty-indicator {
-  color: var(--highlight-text);
+.diary-syntax-scan-header strong {
+  display: block;
+  color: var(--primary-text);
   font-size: var(--font-size-helper);
+  line-height: 1.25;
+}
+
+.diary-syntax-scan-header span,
+.diary-syntax-empty {
+  color: var(--secondary-text);
+  font-size: var(--font-size-caption);
+  line-height: 1.3;
+}
+
+.diary-syntax-chip-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.diary-syntax-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-bg) 34%, transparent);
+}
+
+.diary-syntax-chip.active {
+  border-color: color-mix(in srgb, var(--highlight-text) 42%, var(--border-color));
+  background: color-mix(in srgb, var(--highlight-text) 8%, transparent);
+}
+
+.diary-syntax-chip-main {
+  min-width: 0;
+}
+
+.diary-syntax-chip-meta,
+.diary-syntax-chip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.diary-syntax-chip-meta {
+  margin-bottom: 4px;
+  color: var(--secondary-text);
+  font-size: var(--font-size-caption);
+}
+
+.diary-syntax-chip code,
+.diary-syntax-empty code {
+  color: var(--highlight-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+  overflow-wrap: anywhere;
+}
+
+.diary-syntax-chip code {
+  display: block;
 }
 
 .file-content-editor {
   flex: 1;
   width: 100%;
   min-height: 240px;
-  resize: none;
-  padding: 12px;
-  background: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--primary-text);
   font-size: var(--font-size-body);
   line-height: 1.6;
   font-family: "Consolas", "Monaco", monospace;
 }
 
-.file-content-editor:focus-visible {
-  outline: 2px solid var(--highlight-text);
-  outline-offset: 2px;
-  border-color: var(--highlight-text);
+.file-content-editor :deep(.ui-textarea),
+.file-content-editor.ui-textarea {
+  height: 100%;
+  max-height: none;
+  min-height: 240px;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 0;
+  resize: none;
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+.file-content-editor :deep(.ui-textarea:hover:not(:disabled)),
+.file-content-editor.ui-textarea:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+}
+
+.file-content-editor :deep(.ui-textarea:focus-visible),
+.file-content-editor.ui-textarea:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  outline-offset: -2px;
 }
 
 .editor-actions {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  margin-top: 12px;
-  padding: 12px;
-  background: var(--tertiary-bg);
-  border-radius: var(--radius-sm);
-}
-
-.placeholder-sidebar-rail {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 0;
-  min-height: 180px;
-  padding: 10px 6px;
-  border: 1px solid var(--border-color);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
   border-radius: var(--radius-md);
-  background: var(--tertiary-bg);
-  color: var(--secondary-text);
-  cursor: pointer;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  transition:
-    color 0.2s ease,
-    border-color 0.2s ease,
-    background-color 0.2s ease;
-}
-
-.placeholder-sidebar-rail:hover {
-  color: var(--primary-text);
-  border-color: var(--highlight-text);
-  background: color-mix(in srgb, var(--button-bg) 10%, var(--tertiary-bg));
-}
-
-.placeholder-sidebar-rail .material-symbols-outlined {
-  color: var(--highlight-text);
-  font-size: 18px !important;
-  writing-mode: horizontal-tb;
+  background: color-mix(in srgb, var(--primary-text) 2%, transparent);
 }
 
 .placeholder-sidebar {
   display: flex;
   flex-direction: column;
-  min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--secondary-bg);
-  transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
-}
-
-.placeholder-sidebar-collapsed .placeholder-sidebar {
-  display: none;
+  border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--primary-text) 0.8%, transparent);
 }
 
 .placeholder-sidebar-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: center;
+  justify-content: stretch;
   gap: var(--space-2);
   padding: var(--space-3);
-  border-bottom: 1px solid var(--border-color);
-  background: var(--tertiary-bg);
 }
 
-.placeholder-sidebar-header h4 {
-  margin: 2px 0 0;
-  color: var(--primary-text);
-  font-size: var(--font-size-body);
+.placeholder-source-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-text) 1.6%, transparent);
 }
 
-.placeholder-sidebar-header .eyebrow {
+.placeholder-source-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--secondary-text);
-  font-size: var(--font-size-caption);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.placeholder-sidebar-close {
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-full);
-  background: var(--secondary-bg);
-  color: var(--secondary-text);
+  font-size: var(--font-size-helper);
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
-.placeholder-sidebar-close:hover {
+.placeholder-source-tab:hover {
+  background: var(--accent-bg);
   color: var(--primary-text);
-  border-color: var(--highlight-text);
+}
+
+.placeholder-source-tab.is-active {
+  background: color-mix(in srgb, var(--button-bg) 12%, transparent);
+  color: var(--primary-text);
+}
+
+.placeholder-source-tab .material-symbols-outlined {
+  flex: 0 0 auto;
+  font-size: 16px !important;
+}
+
+.placeholder-source-tab .placeholder-count {
+  margin-left: 0;
+  background: color-mix(in srgb, var(--primary-text) 5%, transparent);
 }
 
 .placeholder-search {
   position: relative;
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.placeholder-search input {
   width: 100%;
-  padding: 8px 32px 8px 34px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--input-bg);
-  color: var(--primary-text);
 }
 
-.placeholder-search input:focus-visible {
-  outline: 2px solid var(--highlight-text);
-  outline-offset: 2px;
-  border-color: var(--highlight-text);
+.placeholder-search :deep(.ui-input) {
+  padding-left: 34px;
+  padding-right: 32px;
 }
 
 .placeholder-search .search-icon {
   position: absolute;
   top: 50%;
-  left: 22px;
+  left: 10px;
   transform: translateY(-50%);
   color: var(--secondary-text);
   font-size: 18px !important;
@@ -1470,20 +1742,8 @@ onBeforeRouteLeave(async () => {
 .placeholder-search .search-clear {
   position: absolute;
   top: 50%;
-  right: 18px;
+  right: 6px;
   transform: translateY(-50%);
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  background: transparent;
-  color: var(--secondary-text);
-  cursor: pointer;
-}
-
-.placeholder-search .search-clear:hover {
-  color: var(--primary-text);
 }
 
 .placeholder-search .search-clear .material-symbols-outlined {
@@ -1493,8 +1753,8 @@ onBeforeRouteLeave(async () => {
 .placeholder-sidebar-status {
   margin: var(--space-3);
   padding: var(--space-3);
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius-sm);
+  border: 1px dashed color-mix(in srgb, var(--border-color) 84%, transparent);
+  border-radius: var(--radius-md);
   color: var(--secondary-text);
   font-size: var(--font-size-helper);
   line-height: 1.5;
@@ -1507,8 +1767,35 @@ onBeforeRouteLeave(async () => {
   color: var(--primary-text);
 }
 
+.placeholder-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 2px var(--space-2);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--secondary-text) 26%, transparent) transparent;
+}
+
+.placeholder-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.placeholder-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.placeholder-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-full);
+  background-color: color-mix(in srgb, var(--secondary-text) 28%, transparent);
+  background-clip: padding-box;
+}
+
 .placeholder-group {
-  border-bottom: 1px solid var(--border-color);
+  flex: 0 0 auto;
+  padding: var(--space-2);
 }
 
 .placeholder-group:last-child {
@@ -1518,82 +1805,75 @@ onBeforeRouteLeave(async () => {
 .placeholder-group-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 10px var(--space-3);
-  border: none;
-  background: transparent;
-  color: var(--primary-text);
-  cursor: pointer;
-  text-align: left;
-}
-
-.placeholder-group-title:hover {
-  background: var(--tertiary-bg);
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  color: color-mix(in srgb, var(--secondary-text) 78%, transparent);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .placeholder-group-title .material-symbols-outlined {
-  color: var(--highlight-text);
-  font-size: 18px !important;
+  color: var(--secondary-text);
+  font-size: 15px !important;
 }
 
 .placeholder-count {
   margin-left: auto;
-  padding: 1px 8px;
+  padding: 0 6px;
   border-radius: var(--radius-full);
-  background: var(--button-bg);
-  color: var(--on-accent-text);
+  background: color-mix(in srgb, var(--primary-text) 4%, transparent);
+  color: var(--secondary-text);
   font-size: var(--font-size-caption);
-  font-weight: 700;
+  font-weight: 600;
 }
 
-.group-chevron {
-  transition: transform 0.2s ease;
-}
-
-.placeholder-group-title[aria-expanded="false"] .group-chevron {
-  transform: rotate(-90deg);
-}
-
-.placeholder-chip-list {
+.placeholder-command-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  max-height: 280px;
-  overflow-y: auto;
-  padding: 0 var(--space-3) var(--space-3);
+  gap: 6px;
 }
 
-.placeholder-chip {
+.placeholder-command-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--input-bg);
+  min-height: 0;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--primary-text);
   cursor: pointer;
   text-align: left;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
-.placeholder-chip:hover {
-  border-color: var(--highlight-text);
-  background: color-mix(in srgb, var(--button-bg) 8%, var(--input-bg));
+.placeholder-command-item:hover {
+  background: var(--accent-bg);
 }
 
-.placeholder-chip code {
+.placeholder-command-item code {
+  min-width: 0;
   color: var(--highlight-text);
   font-family: "Consolas", "Monaco", monospace;
   font-size: var(--font-size-helper);
-  word-break: break-all;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-.placeholder-chip span {
+.placeholder-command-item span {
+  min-width: 0;
   color: var(--secondary-text);
   font-size: var(--font-size-caption);
   line-height: 1.4;
+  white-space: normal;
 }
 
 /* .empty-state 已在全局 layout.css 中统一定义 */
@@ -1603,9 +1883,6 @@ onBeforeRouteLeave(async () => {
   right: 30px;
   bottom: 30px;
   z-index: 1000;
-  padding: 12px 20px;
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-lg);
   animation: slideInRight 0.3s ease;
 }
 
@@ -1621,55 +1898,48 @@ onBeforeRouteLeave(async () => {
   }
 }
 
-/* 卡片三层架构默认基础类名 (PC端布局) */
+/* 左侧映射列表：保持类似基础配置操作台的轻量层级 */
 .agent-entry-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: var(--space-3);
-  padding-bottom: var(--space-2);
-  border-bottom: 1px dashed var(--border-color, rgba(0, 0, 0, 0.08));
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0;
 }
 
 .header-icon {
-  color: var(--highlight-text, #00f0ff);
-  font-size: 18px !important;
+  color: var(--secondary-text);
+  font-size: 16px !important;
+  flex: 0 0 auto;
 }
 
 .header-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 0.875rem;
+  line-height: 1.25;
   color: var(--primary-text);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.header-status-badge {
-  margin-left: auto;
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: 500;
-}
-
-.header-status-badge.active {
-  background: rgba(46, 204, 113, 0.1);
-  color: var(--success-text, #2ecc71);
-}
-
-.header-status-badge.pending {
-  background: rgba(241, 196, 15, 0.15);
-  color: var(--warning-text, #f1c40f);
+.agent-binding-badge {
+  margin-left: var(--space-1);
+  flex: 0 0 auto;
 }
 
 .agent-entry-fields {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 
 .agent-entry-hints {
-  margin-top: 4px;
-  margin-bottom: 12px;
-  min-height: 16px;
+  min-height: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
 }
 
 /* 移动端精致化响应式滑盖与底置 Segmented 胶囊导航 */
@@ -1678,66 +1948,59 @@ onBeforeRouteLeave(async () => {
 }
 
 @media (max-width: 768px) {
-  .description {
-    margin-bottom: var(--space-3) !important;
+  .agent-page-summary {
+    display: none;
   }
 
   /* 根据 activeTab 完全隐藏另一侧，保障单屏100%全景视图 */
-  .agent-dual-pane.mobile-view-list :deep(.pane-right) {
+  .agent-editor-shell.mobile-view-list .agent-file-pane {
     display: none !important;
   }
 
-  .agent-dual-pane.mobile-view-editor :deep(.pane-left) {
+  .agent-editor-shell .placeholder-sidebar {
     display: none !important;
   }
 
-  /* 消除分割线 */
-  .agent-dual-pane :deep(.split-handle) {
+  .agent-editor-shell.mobile-view-editor .agent-map-pane {
     display: none !important;
   }
 
-  .agent-dual-pane.mobile-view-list :deep(.pane-left),
-  .agent-dual-pane.mobile-view-editor :deep(.pane-right) {
-    width: 100% !important;
-    flex: 1 !important;
+  .agent-editor-shell {
+    display: flex;
+    min-height: calc(var(--app-viewport-height, 100vh) - 150px);
+    height: calc(var(--app-viewport-height, 100vh) - 150px);
   }
 
-  /* 智能体卡片移动端极简化去投影阴影，完全不强写 background，使其自适应、天然继承 PC 端全局 .card 已有暗色模式/浅色模式底色 */
-  .agent-map-entry.card {
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08)) !important;
-    box-shadow: none !important;
-    border-radius: 8px;
-    padding: var(--space-3) !important;
+  .agent-map-pane,
+  .agent-file-pane {
+    width: 100%;
+    flex: 1;
   }
 
-  /* 第二层：中间输入配置在移动端开启双列 Grid 水平对齐排布 */
+  .agent-map-entry {
+    border-color: color-mix(in srgb, var(--border-color) 84%, transparent);
+  }
+
   .agent-entry-fields {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-3) !important;
-    align-items: start;
+    display: flex !important;
+    gap: var(--space-2) !important;
   }
 
   .agent-entry-fields .agent-entry-row {
     margin-bottom: 0 !important;
   }
 
+  .agent-entry-row {
+    grid-template-columns: 68px minmax(0, 1fr);
+  }
+
   .agent-entry-hints {
-    margin-top: 8px;
-    margin-bottom: 8px;
+    margin: 0;
   }
 
-  /* 操作按钮精致栅格排布，杜绝由于挤压造成的堆叠错位，降低误触 */
   .agent-entry-actions {
-    display: grid !important;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--space-2) !important;
-    margin-top: 12px;
-  }
-
-  /* 让删除按钮独占一整行，红底警示且醒目 */
-  .agent-entry-actions button:last-child {
-    grid-column: span 2;
+    gap: var(--space-1) !important;
+    margin-left: auto;
   }
 
   .agent-file-workspace {
@@ -1746,17 +2009,16 @@ onBeforeRouteLeave(async () => {
     height: 100%;
   }
 
-  .agent-file-workspace.placeholder-sidebar-collapsed {
-    gap: var(--space-2);
-  }
-
   .agent-file-editor {
     height: 100%;
   }
 
-  .placeholder-sidebar-rail {
-    min-height: 40px;
-    writing-mode: horizontal-tb;
+  .diary-syntax-chip {
+    grid-template-columns: 1fr;
+  }
+
+  .diary-syntax-chip-actions {
+    justify-content: flex-end;
   }
 
   .placeholder-sidebar {
@@ -1766,13 +2028,8 @@ onBeforeRouteLeave(async () => {
   .file-content-editor {
     height: 100%;
     min-height: 280px;
-    background: var(--input-bg, #ffffff) !important; /* 完美兼容深色模式输入框背景 */
-    color: var(--primary-text) !important;
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08)) !important;
-    border-radius: 8px;
   }
 
-  /* 移动端底部极简悬浮胶囊 (iOS Segmented Control 质感) - 彻底消灭顶部滞空压迫感 */
   .mobile-tab-nav {
     display: flex !important;
     position: fixed !important;
@@ -1780,15 +2037,12 @@ onBeforeRouteLeave(async () => {
     left: 50%;
     transform: translateX(-50%);
     z-index: 999;
-    background: rgba(245, 245, 247, 0.88) !important; /* 精致浅灰白半透明磨砂 */
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(0, 0, 0, 0.06) !important;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); /* 优雅环境环境投影 */
+    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+    background: var(--secondary-bg);
     padding: 4px;
     gap: 4px;
-    width: 220px; /* 固定精致小巧宽度 */
-    border-radius: 30px;
+    width: 220px;
+    border-radius: var(--radius-full);
     margin: 0 !important;
   }
 
@@ -1798,47 +2052,58 @@ onBeforeRouteLeave(async () => {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 8px 12px;
+    min-height: 32px;
+    padding: 0 12px;
     border: none;
     background: transparent;
-    color: var(--secondary-text, #555555);
-    font-size: 13px;
+    color: var(--secondary-text);
+    font-size: var(--font-size-helper);
     font-weight: 500;
-    border-radius: 20px;
+    border-radius: var(--radius-full);
     cursor: pointer;
     position: relative;
-    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
+  }
+
+  .mobile-tab-btn:hover {
+    background: color-mix(in srgb, var(--primary-text) 3%, transparent);
+    color: var(--primary-text);
   }
 
   .mobile-tab-btn.active {
-    background: #ffffff !important; /* 激活项采用纯白实体卡片滑块 */
-    color: #4a4a4a !important; /* 彻底重构为高级莫灰色，不刺眼不辣眼 */
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: var(--accent-bg);
+    color: var(--primary-text);
     font-weight: 600;
   }
 
-  /* 确保激活状态下的 SVG 图标也同步转为莫灰色，彻底消融刺眼高亮蓝 */
   .mobile-tab-btn.active .material-symbols-outlined {
-    color: #4a4a4a !important;
+    color: var(--primary-text);
   }
 
-  .dirty-badge {
-    width: 6px;
-    height: 6px;
-    background: var(--danger-text, #ff4a4a);
-    border-radius: 50%;
+  .mobile-dirty-badge {
     position: absolute;
-    top: 8px;
-    right: 12%;
+    top: -8px;
+    right: 2px;
+    transform: scale(0.86);
+    transform-origin: top right;
   }
 
-  /* 强力释放编辑大视口：顶部不再有 tab 占高，给编辑区域与输入法最广阔的空间 */
   .agent-files-page {
-    --dual-pane-height: calc(var(--app-viewport-height, 100vh) - 150px);
+    --agent-workspace-height: calc(var(--app-viewport-height, 100vh) - 150px);
   }
 }
 
 @media (max-width: 1024px) and (min-width: 769px) {
+  .agent-editor-shell {
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  }
+
+  .agent-editor-shell .placeholder-sidebar {
+    display: none;
+  }
+
   .agent-map-list {
     max-height: none;
   }

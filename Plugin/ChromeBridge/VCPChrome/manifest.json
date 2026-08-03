@@ -1,0 +1,52 @@
+{
+    "manifest_version": 3,
+    "name": "VCP Chrome Control",
+    "version": "1.0.2",
+    "description": "连接到VCP服务器，允许AI代理与您的浏览器交互。1.0.2 加固 execute_script 异步结果透传并支持 MAIN/ISOLATED 执行世界。",
+    "permissions": [
+        "storage",
+        "activeTab",
+        "scripting",
+        "debugger",
+        "alarms"
+    ],
+    "host_permissions": [
+        "<all_urls>",
+        "https://*.bilibili.com/*"
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "managed-runtime-config.json"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icons/icon16.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png"
+        }
+    },
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>",
+                "https://*.bilibili.com/*"
+            ],
+            "js": ["content_script.js"]
+        }
+    ]
+}

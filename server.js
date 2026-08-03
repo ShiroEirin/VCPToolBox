@@ -118,6 +118,7 @@ const taskScheduler = require('./routes/taskScheduler.js');
 const webSocketServer = require('./WebSocketServer.js'); // 新增 WebSocketServer 引入
 const FileFetcherServer = require('./FileFetcherServer.js'); // 引入新的 FileFetcherServer 模块
 const vcpInfoHandler = require('./vcpInfoHandler.js'); // 引入新的 VCP 信息处理器
+const toolCallRecordStore = require('./modules/toolCallRecordStore.js'); // 工具调用记录独立 SQLite 存储
 const basicAuth = require('basic-auth');
 const cors = require('cors'); // 引入 cors 模块
 
@@ -1191,6 +1192,7 @@ const chatCompletionHandler = new ChatCompletionHandler({
     maxVCPLoopNonStream: parseInt(process.env.MaxVCPLoopNonStream),
     apiRetries: parseInt(process.env.ApiRetries) || 3, // 新增：API重试次数
     apiRetryDelay: parseInt(process.env.ApiRetryDelay) || 1000, // 新增：API重试延迟
+    apiConnectionTimeoutMs: parseInt(process.env.ApiConnectionTimeoutMs) || 900000, // 单次上游连接/首包超时，默认15分钟
     cachedEmojiLists,
     detectors,
     superDetectors,
@@ -1435,7 +1437,8 @@ const adminPanelRoutes = require('./routes/adminPanelRoutes')(
     semanticModelRouter,
     modelRedirectHandler,
     apiUrl,
-    apiKey
+    apiKey,
+    tdbKnowledgeManager
 );
 
 // 新增：引入 VCP 论坛 API 路由
@@ -1502,6 +1505,10 @@ app.post('/plugin-callback/:pluginName/:taskId', async (req, res) => {
 
 
 async function initialize() {
+    console.log('开始初始化工具调用记录存储...');
+    toolCallRecordStore.initialize();
+    console.log('工具调用记录存储初始化完成。');
+
     console.log('开始初始化向量数据库...');
     await knowledgeBaseManager.initialize(); // 在加载插件之前启动，确保服务就绪
     console.log('向量数据库初始化完成。');
@@ -1689,10 +1696,12 @@ async function startServer() {
         if (DEBUG_MODE) console.log('[Server] Initializing WebSocketServer...');
         const vcpKeyValue = pluginManager.getResolvedPluginConfigValue('VCPLog', 'VCP_Key') || process.env.VCP_Key;
         const distributedMusicPlaylistSyncEnabled = (process.env.DISTRIBUTED_MUSIC_PLAYLIST_SYNC_ENABLED || 'false').toLowerCase() === 'true';
+        const webSocketHeartbeatEnabled = (process.env.WEBSOCKET_HEARTBEAT_ENABLED || 'false').toLowerCase() === 'true';
         webSocketServer.initialize(server, {
             debugMode: DEBUG_MODE,
             vcpKey: vcpKeyValue,
-            distributedMusicPlaylistSyncEnabled
+            distributedMusicPlaylistSyncEnabled,
+            heartbeatEnabled: webSocketHeartbeatEnabled
         });
 
         // --- 注入依赖 ---
@@ -1787,6 +1796,12 @@ async function gracefulShutdown(exitCode = 0, reason = 'signal') {
                 console.log(`[Server][ShutdownTrace] Phase 8/10 - pluginManager.shutdownAllPlugins done`);
             } else {
                 console.log(`[Server][ShutdownTrace] Phase 8/10 - pluginManager shutdown skipped`);
+            }
+
+            if (toolCallRecordStore) {
+                console.log(`[Server][ShutdownTrace] Phase 8/10 - toolCallRecordStore.shutdown start`);
+                toolCallRecordStore.shutdown();
+                console.log(`[Server][ShutdownTrace] Phase 8/10 - toolCallRecordStore.shutdown done`);
             }
 
             if (tdbKnowledgeManager) {

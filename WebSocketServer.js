@@ -4,18 +4,23 @@ const url = require('url');
 const fs = require('fs').promises;
 const path = require('path');
 const { syncDistributedMusicDiary } = require('./modules/distributedMusicDiarySync');
+const vcpLogReplayManager = require('./modules/vcpLogReplayManager');
 
 let wssInstance;
 let pluginManager = null; // 为 PluginManager 实例占位
 let attachedHttpServer = null;
 let upgradeHandler = null;
+let heartbeatInterval = null;
 let isDraining = false;
 let shutdownPromise = null;
+
+const WEBSOCKET_HEARTBEAT_INTERVAL_MS = 60 * 1000;
 
 let serverConfig = {
     debugMode: false,
     vcpKey: null,
-    distributedMusicPlaylistSyncEnabled: false
+    distributedMusicPlaylistSyncEnabled: false,
+    heartbeatEnabled: false
 };
 
 // 用于存储不同类型的客户端
@@ -56,6 +61,19 @@ function formatDateTimeForConfiguredTimezone(date = new Date()) {
 function generateClientId() {
     // 用于生成客户端ID和请求ID
     return `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+function normalizeDeviceName(value) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    // deviceName 会进入 VCPLog 离线补发 deviceKey,限制字符集避免日志污染和异常 key。
+    const normalized = trimmed
+        .replace(/[^\w.\-:@()[\]\u4e00-\u9fa5]/g, '_')
+        .substring(0, 80);
+
+    return normalized || null;
 }
 
 async function writeLog(message) {
@@ -130,6 +148,12 @@ function initialize(httpServer, config) {
         console.error('[WebSocketServer] Cannot initialize without an HTTP server instance.');
         return;
     }
+
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+
     serverConfig = { ...serverConfig, ...config };
     attachedHttpServer = httpServer;
     isDraining = false;
@@ -211,11 +235,30 @@ function initialize(httpServer, config) {
             return;
         }
 
+        // 提前提取一次 clientIp,供 VCPLog 类型在 handleUpgrade 内部使用(此处仍能拿到 socket)
+        const rawRemoteAddress =
+            (request.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+            socket.remoteAddress ||
+            '';
+        const clientIp = rawRemoteAddress.startsWith('::ffff:')
+            ? rawRemoteAddress.substring(7)
+            : rawRemoteAddress;
+
+        // 通用设备名识别:前端可通过 ?deviceName=xxx 上报稳定设备名,用于 VCPLog 离线补发区分设备。
+        // 兼容 device_name / devicename,便于不同前端渐进接入。
+        const deviceName = normalizeDeviceName(
+            parsedUrl.query.deviceName ||
+            parsedUrl.query.device_name ||
+            parsedUrl.query.devicename
+        );
+
         if (isAuthenticated) {
             wssInstance.handleUpgrade(request, socket, head, (ws) => {
                 const clientId = generateClientId();
                 ws.clientId = clientId;
                 ws.clientType = clientType;
+                ws.clientIp = clientIp || null;
+                ws.deviceName = deviceName;
 
                 if (clientType === 'DistributedServer') {
                     const serverId = `dist-${clientId}`;
@@ -223,6 +266,7 @@ function initialize(httpServer, config) {
                     distributedServers.set(serverId, {
                         ws,
                         tools: [],
+                        capabilities: {},
                         ips: {},
                         connectedAt: formatDateTimeForConfiguredTimezone(),
                         lastSeenAt: formatDateTimeForConfiguredTimezone()
@@ -256,6 +300,32 @@ function initialize(httpServer, config) {
                 } else {
                     clients.set(clientId, ws);
                     writeLog(`Client ${clientId} (Type: ${clientType}) authenticated and connected.`);
+
+                    // VCPLog 类型客户端接入设备识别 + 离线补发管理器
+                    if (clientType === 'VCPLog') {
+                        const deviceKey = ws.deviceName
+                            ? `deviceName:${ws.deviceName}`
+                            : (ws.clientIp || `noip-${clientId}`);
+                        ws.vcpLogDeviceKey = deviceKey;
+                        ws.vcpLogDeviceName = ws.deviceName || null;
+                        console.log(`[WebSocketServer] VCPLog replay device resolved: deviceKey=${deviceKey}, deviceName=${ws.vcpLogDeviceName || 'N/A'}, ip=${ws.clientIp || 'N/A'}, clientId=${clientId}`);
+                        try {
+                            vcpLogReplayManager.registerOnline({
+                                deviceKey,
+                                clientIp: ws.clientIp,
+                                clientId,
+                                sendFn: (payload) => {
+                                    if (ws.readyState === WebSocket.OPEN) {
+                                        ws.send(JSON.stringify(payload));
+                                    } else {
+                                        throw new Error('VCPLog ws not open during replay.');
+                                    }
+                                }
+                            });
+                        } catch (e) {
+                            console.error(`[WebSocketServer] VcpLogReplayManager.registerOnline failed for ${clientId}:`, e.message);
+                        }
+                    }
                 }
                 
                 wssInstance.emit('connection', ws, request);
@@ -438,6 +508,7 @@ function initialize(httpServer, config) {
                 if (pluginManager) {
                     pluginManager.unregisterAllDistributedTools(ws.serverId);
                 }
+                rejectPendingToolRequestsForServer(ws.serverId);
                 distributedServers.delete(ws.serverId);
                 distributedServerIPs.delete(ws.serverId); // 新增：移除IP信息
                 writeLog(`Distributed Server ${ws.serverId} disconnected. Its tools and IP info have been unregistered.`);
@@ -453,6 +524,17 @@ function initialize(httpServer, config) {
               writeLog(`Admin Panel client ${ws.clientId} disconnected and removed.`);
            } else {
                clients.delete(ws.clientId);
+               // VCPLog 设备离线通知给 replay 管理器
+               if (ws.clientType === 'VCPLog' && ws.vcpLogDeviceKey) {
+                   try {
+                       vcpLogReplayManager.handleOffline({
+                           deviceKey: ws.vcpLogDeviceKey,
+                           clientId: ws.clientId
+                       });
+                   } catch (e) {
+                       console.error(`[WebSocketServer] VcpLogReplayManager.handleOffline failed for ${ws.clientId}:`, e.message);
+                   }
+               }
            }
             if (serverConfig.debugMode) {
                 console.log(`[WebSocketServer] Client ${ws.clientId} (${ws.clientType}) disconnected.`);
@@ -466,6 +548,31 @@ function initialize(httpServer, config) {
             if(ws.clientId) clients.delete(ws.clientId);
         });
     });
+
+    if (serverConfig.heartbeatEnabled) {
+        heartbeatInterval = setInterval(() => {
+            if (!wssInstance || isDraining) return;
+
+            let pingedClientCount = 0;
+            wssInstance.clients.forEach(client => {
+                if (client.readyState !== WebSocket.OPEN) return;
+
+                try {
+                    client.ping();
+                    pingedClientCount++;
+                } catch (error) {
+                    console.warn(`[WebSocketServer] Heartbeat ping failed for client ${client.clientId || 'unknown'}: ${error.message}`);
+                }
+            });
+
+            if (serverConfig.debugMode && pingedClientCount > 0) {
+                console.log(`[WebSocketServer] Sent heartbeat ping to ${pingedClientCount} connected client(s).`);
+            }
+        }, WEBSOCKET_HEARTBEAT_INTERVAL_MS);
+        heartbeatInterval.unref();
+
+        console.log(`[WebSocketServer] Protocol heartbeat enabled (interval: ${WEBSOCKET_HEARTBEAT_INTERVAL_MS / 1000}s).`);
+    }
 
     if (serverConfig.debugMode) {
         console.log(`[WebSocketServer] Initialized. Waiting for HTTP server upgrades.`);
@@ -483,6 +590,19 @@ function broadcast(data, targetClientType = null, abortController = null) {
     }
     
     if (!wssInstance) return;
+
+    // VCPLog 通道:进入离线补发缓存(只对 targetClientType === 'VCPLog' 的广播缓存,
+    //              其它通道维持原行为不变,避免影响 VCPInfo / 通用广播)
+    let cacheEntryId = null;
+    if (targetClientType === 'VCPLog' && data && typeof data === 'object') {
+        try {
+            const entry = vcpLogReplayManager.enqueue(data);
+            cacheEntryId = entry ? entry.id : null;
+        } catch (e) {
+            console.error('[WebSocketServer] vcpLogReplayManager.enqueue failed:', e.message);
+        }
+    }
+
     const messageString = JSON.stringify(data);
     
     const clientsToBroadcast = new Map([
@@ -493,7 +613,17 @@ function broadcast(data, targetClientType = null, abortController = null) {
     clientsToBroadcast.forEach(clientWs => {
         if (clientWs.readyState === WebSocket.OPEN) {
             if (targetClientType === null || clientWs.clientType === targetClientType) {
-                clientWs.send(messageString);
+                try {
+                    clientWs.send(messageString);
+                    // 投递成功 → 记入对应设备的 deliveredIds
+                    if (cacheEntryId && clientWs.clientType === 'VCPLog' && clientWs.vcpLogDeviceKey) {
+                        vcpLogReplayManager.recordDelivered(clientWs.vcpLogDeviceKey, cacheEntryId);
+                    }
+                } catch (sendErr) {
+                    if (serverConfig.debugMode) {
+                        console.warn(`[WebSocketServer] broadcast send failed to ${clientWs.clientId}: ${sendErr.message}`);
+                    }
+                }
             }
         }
     });
@@ -528,6 +658,12 @@ async function beginDrain() {
     }
 
     isDraining = true;
+
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+
     writeLog('WebSocketServer entered draining mode.');
 
     if (attachedHttpServer && upgradeHandler) {
@@ -602,6 +738,9 @@ async function handleDistributedServerMessage(serverId, message) {
                 if (message.data.serverName) {
                     serverEntry.serverName = message.data.serverName;
                 }
+                serverEntry.capabilities = message.data.capabilities && typeof message.data.capabilities === 'object'
+                    ? { ...message.data.capabilities }
+                    : {};
                 serverEntry.lastSeenAt = formatDateTimeForConfiguredTimezone();
                 distributedServers.set(serverId, serverEntry);
                 writeLog(`Registered ${externalTools.length} external tools from server ${serverId}${serverEntry.serverName ? ` (${serverEntry.serverName})` : ''}.`);
@@ -709,23 +848,62 @@ async function handleDistributedServerMessage(serverId, message) {
                 console.error(`[WebSocketServer] Failed to sync distributed music playlist from ${serverId}:`, error);
             }
             break;
-        case 'tool_result':
+        case 'tool_result': {
             const pending = pendingToolRequests.get(message.data.requestId);
-            if (pending) {
-                clearTimeout(pending.timeout);
-                if (message.data.status === 'success') {
-                    pending.resolve(message.data.result);
-                } else {
-                    pending.reject(new Error(message.data.error || 'Distributed tool execution failed.'));
-                }
-                pendingToolRequests.delete(message.data.requestId);
+            if (!pending) break;
+
+            // requestId 虽然随机生成，仍不能作为跨节点信任边界；只接受目标
+            // serverId 返回的结果，其他节点的同 ID 消息不得完成该 Promise。
+            if (pending.serverId !== serverId) {
+                console.warn(`[WebSocketServer] Ignoring tool_result for ${message.data.requestId} from non-target server ${serverId}; expected ${pending.serverId}.`);
+                break;
             }
+
+            clearTimeout(pending.timeout);
+            if (message.data.status === 'success') {
+                pending.resolve(message.data.result);
+            } else {
+                pending.reject(new Error(message.data.error || 'Distributed tool execution failed.'));
+            }
+            pendingToolRequests.delete(message.data.requestId);
             break;
+        }
         case 'plugin_callback_forward':
             await handleDistributedPluginCallback(serverId, message);
             break;
         default:
             writeLog(`Unknown message type '${message.type}' from server ${serverId}.`);
+    }
+}
+
+function sendCancelToolIfSupported(pending) {
+    const ws = pending.server?.ws;
+    const supportsCancelTool = pending.server?.capabilities?.cancelTool === true;
+    if (!supportsCancelTool || !ws || ws.readyState !== WebSocket.OPEN || pending.cancelSent) {
+        return false;
+    }
+
+    try {
+        ws.send(JSON.stringify({
+            type: 'cancel_tool',
+            data: { requestId: pending.requestId }
+        }));
+        pending.cancelSent = true;
+        writeLog(`Sent cancel_tool for timed-out request ${pending.requestId} to server ${pending.serverId}.`);
+        return true;
+    } catch (error) {
+        console.warn(`[WebSocketServer] Failed to send cancel_tool for ${pending.requestId}:`, error.message);
+        return false;
+    }
+}
+
+function rejectPendingToolRequestsForServer(serverId) {
+    for (const [requestId, pending] of pendingToolRequests.entries()) {
+        if (pending.serverId !== serverId) continue;
+
+        clearTimeout(pending.timeout);
+        pendingToolRequests.delete(requestId);
+        pending.reject(new Error(`Distributed server ${serverId} disconnected while executing request ${requestId}.`));
     }
 }
 
@@ -735,12 +913,14 @@ async function executeDistributedTool(serverIdOrName, toolName, toolArgs, timeou
     const defaultTimeout = plugin?.communication?.timeout || 60000;
     const effectiveTimeout = timeout ?? defaultTimeout;
 
+    let targetServerId = serverIdOrName;
     let server = distributedServers.get(serverIdOrName); // 优先尝试通过 ID 查找
 
     // 如果通过 ID 找不到，则遍历并尝试通过 name 查找
     if (!server) {
-        for (const srv of distributedServers.values()) {
+        for (const [candidateServerId, srv] of distributedServers.entries()) {
             if (srv.serverName === serverIdOrName) {
+                targetServerId = candidateServerId;
                 server = srv;
                 break;
             }
@@ -762,15 +942,31 @@ async function executeDistributedTool(serverIdOrName, toolName, toolArgs, timeou
     };
 
     return new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
+        const pending = {
+            requestId,
+            serverId: targetServerId,
+            server,
+            resolve,
+            reject,
+            timeout: null,
+            cancelSent: false
+        };
+        pending.timeout = setTimeout(() => {
             pendingToolRequests.delete(requestId);
+            sendCancelToolIfSupported(pending);
             reject(new Error(`Request to distributed tool ${toolName} on server ${serverIdOrName} timed out after ${effectiveTimeout / 1000}s.`));
         }, effectiveTimeout);
 
-        pendingToolRequests.set(requestId, { resolve, reject, timeout: timeoutId });
+        pendingToolRequests.set(requestId, pending);
 
-        server.ws.send(JSON.stringify(payload));
-        writeLog(`Sent tool execution request ${requestId} for ${toolName} to server ${serverIdOrName}.`);
+        try {
+            server.ws.send(JSON.stringify(payload));
+            writeLog(`Sent tool execution request ${requestId} for ${toolName} to server ${serverIdOrName}.`);
+        } catch (error) {
+            clearTimeout(pending.timeout);
+            pendingToolRequests.delete(requestId);
+            reject(error);
+        }
     });
 }
 
@@ -797,6 +993,7 @@ function getDistributedServerSnapshot() {
             localIPs,
             publicIP: ipInfo.publicIP ?? serverInfo.ips?.publicIP ?? null,
             tools: Array.isArray(serverInfo.tools) ? [...serverInfo.tools] : [],
+            capabilities: { ...(serverInfo.capabilities || {}) },
             connected: serverInfo.ws?.readyState === WebSocket.OPEN,
             connectedAt: serverInfo.connectedAt || null,
             lastSeenAt: serverInfo.lastSeenAt || null
@@ -868,5 +1065,15 @@ module.exports = {
     findServerByIp,
     getDistributedServerSnapshot,
     formatDistributedServerListForPrompt,
-    shutdown
+    shutdown,
+    // 暴露给 PluginManager,在审核响应到达时清除对应缓存
+    cancelVcpLogApprovalCache: (requestId) => vcpLogReplayManager.cancelApprovalCache(requestId),
+    getVcpLogReplayStats: () => vcpLogReplayManager.getStats(),
+    // Narrow test hooks for deterministic lifecycle tests; not used by production callers.
+    __testing: {
+        distributedServers,
+        pendingToolRequests,
+        sendCancelToolIfSupported,
+        rejectPendingToolRequestsForServer
+    }
 };

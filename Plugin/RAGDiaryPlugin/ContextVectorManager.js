@@ -283,58 +283,78 @@ class ContextVectorManager {
      * @returns {number} L ∈ [0, 1]，越高表示逻辑越集中
      */
     computeLogicDepth(vector, topK = 64) {
-        if (!vector) return 0;
+        if (!vector || vector.length === 0) return 0;
         const dim = vector.length;
         const energies = new Float32Array(dim);
         let totalEnergy = 0;
 
         for (let i = 0; i < dim; i++) {
-            energies[i] = vector[i] * vector[i];
+            const value = Number(vector[i]);
+            if (!Number.isFinite(value)) return 0;
+            energies[i] = value * value;
             totalEnergy += energies[i];
         }
 
-        if (totalEnergy < 1e-9) return 0;
+        if (!Number.isFinite(totalEnergy) || totalEnergy < 1e-9) return 0;
+
+        // topK 必须严格小于 dim，否则 expectedUniform=1 会使归一化分母为零。
+        // 对低维向量保留至少一个非 Top-K 维度，维持“相对均匀分布”的定义。
+        const requestedTopK = Number.isFinite(Number(topK)) ? Math.floor(Number(topK)) : 64;
+        const actualTopK = Math.max(1, Math.min(requestedTopK, dim - 1));
 
         const sorted = Array.from(energies).sort((a, b) => b - a);
         let topKEnergy = 0;
-        const actualTopK = Math.min(topK, dim);
         for (let i = 0; i < actualTopK; i++) {
             topKEnergy += sorted[i];
         }
 
         const concentration = topKEnergy / totalEnergy;
         const expectedUniform = actualTopK / dim;
-        const L = (concentration - expectedUniform) / (1 - expectedUniform);
+        const denominator = 1 - expectedUniform;
+        if (denominator <= 0) return 0;
+
+        const L = (concentration - expectedUniform) / denominator;
+        if (!Number.isFinite(L)) return 0;
 
         return Math.max(0, Math.min(1, L));
     }
 
     /**
      * 计算语义宽度指数 S
-     * 核心思想：L2归一化后 Σv_i² = 1，v_i² 构成概率分布，
+     * 核心思想：将各维平方能量按总能量归一化为概率分布，
      * 用归一化熵衡量能量的分散程度。
      * S ≈ 1 → 能量均匀分布，语义宽泛
      * S ≈ 0 → 能量集中少数维度，语义精准
      *
-     * @param {Array|Float32Array} vector - L2归一化向量
+     * @param {Array|Float32Array} vector - 任意非零向量（无需预先 L2 归一化）
      * @returns {number} S ∈ [0, 1]
      */
     computeSemanticWidth(vector) {
-        if (!vector) return 0;
+        if (!vector || vector.length <= 1) return 0;
         const dim = vector.length;
+        let totalEnergy = 0;
 
-        // v_i^2 构成概率分布 (L2归一化 => Σv_i² = 1)
+        for (let i = 0; i < dim; i++) {
+            const value = Number(vector[i]);
+            if (!Number.isFinite(value)) return 0;
+            totalEnergy += value * value;
+        }
+
+        if (!Number.isFinite(totalEnergy) || totalEnergy < 1e-12) return 0;
+
+        // p_i = v_i² / Σv_j²，避免依赖模型输出或聚合向量已经 L2 归一化。
         let entropy = 0;
         for (let i = 0; i < dim; i++) {
-            const p = vector[i] * vector[i];
+            const value = Number(vector[i]);
+            const p = (value * value) / totalEnergy;
             if (p > 1e-12) {
                 entropy -= p * Math.log(p);
             }
         }
 
-        // 归一化到 [0, 1]：均匀分布时熵最大 = log(dim)
-        const maxEntropy = Math.log(dim);
-        return maxEntropy > 0 ? entropy / maxEntropy : 0;
+        // 均匀分布时熵最大为 log(dim)，并钳制浮点误差导致的轻微越界。
+        const semanticWidth = entropy / Math.log(dim);
+        return Math.max(0, Math.min(1, semanticWidth));
     }
 
     /**

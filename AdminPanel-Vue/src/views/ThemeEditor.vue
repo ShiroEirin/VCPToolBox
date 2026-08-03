@@ -1,37 +1,47 @@
 <template>
   <section class="config-section active-section theme-lab">
+    <Teleport to="#page-header-actions">
+      <UiPageActions>
+        <UiDirtyIndicator :dirty="isDirty" />
+        <UiButton variant="outline" size="lg" @click="handleImport">
+          <template #leading>
+            <span class="material-symbols-outlined">upload</span>
+          </template>
+          导入
+        </UiButton>
+        <UiButton variant="outline" size="lg" @click="handleExport">
+          <template #leading>
+            <span class="material-symbols-outlined">download</span>
+          </template>
+          导出
+        </UiButton>
+        <UiButton variant="outline" size="lg" @click="handleReset">
+          <template #leading>
+            <span class="material-symbols-outlined">restart_alt</span>
+          </template>
+          恢复默认
+        </UiButton>
+        <UiButton variant="secondary" size="lg" @click="handleSave">
+          <template #leading>
+            <span class="material-symbols-outlined">save</span>
+          </template>
+          保存主题
+        </UiButton>
+      </UiPageActions>
+    </Teleport>
+
     <!-- Hero -->
-    <header class="page-hero card">
+    <header class="theme-lab__intro">
       <div>
-        <span class="eyebrow theme-lab__eyebrow">Theme Editor</span>
         <h2>主题编辑器</h2>
         <p class="description">
           自定义面板外观：选择预设主题配色、逐项调整颜色变量、设置自定义背景图片，或编写自定义 CSS 样式覆盖。
         </p>
       </div>
-
-      <div class="theme-lab__hero-actions">
-        <button class="btn-secondary" type="button" @click="handleImport">
-          <span class="material-symbols-outlined">upload</span>
-          导入
-        </button>
-        <button class="btn-secondary" type="button" @click="handleExport">
-          <span class="material-symbols-outlined">download</span>
-          导出
-        </button>
-        <button class="btn-secondary" type="button" @click="handleReset">
-          <span class="material-symbols-outlined">restart_alt</span>
-          恢复默认
-        </button>
-        <button class="btn-primary" type="button" @click="handleSave">
-          <span class="material-symbols-outlined">save</span>
-          保存主题
-        </button>
-      </div>
     </header>
 
     <!-- Tab Pills -->
-    <section class="card theme-lab__controls">
+    <section class="theme-lab__controls">
       <div class="theme-lab__filter-row" role="group" aria-label="主题编辑分区切换">
         <button
           v-for="section in sections"
@@ -45,6 +55,123 @@
           <span class="material-symbols-outlined">{{ section.icon }}</span>
           <span>{{ section.label }}</span>
         </button>
+      </div>
+    </section>
+
+    <section v-if="activeSection === 'theme'" class="theme-lab__quick-panel">
+      <div class="theme-lab__section-header">
+        <h3>快速外观</h3>
+        <p>外观、圆角、密度、字体、宽度和外壳布局独立切换。</p>
+      </div>
+
+      <div class="theme-lab__option-grid">
+        <div class="theme-lab__option-group">
+          <span class="theme-lab__option-title">外观模式</span>
+          <div class="theme-lab__choice-row">
+            <button
+              v-for="item in themeModeOptions"
+              :key="item.id"
+              type="button"
+              class="theme-choice"
+              :class="{ 'theme-choice--active': draft.themeMode === item.id }"
+              @click="setThemeMode(item.id)"
+            >
+              <span class="material-symbols-outlined">{{ item.icon }}</span>
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.description }}</small>
+            </button>
+          </div>
+        </div>
+
+        <div class="theme-lab__option-group theme-lab__option-group--wide">
+          <span class="theme-lab__option-title">圆角</span>
+          <div class="theme-lab__choice-row theme-lab__choice-row--compact">
+            <button
+              v-for="item in radiusOptions"
+              :key="item.id"
+              type="button"
+              class="theme-choice theme-choice--compact theme-choice--radius"
+              :class="{ 'theme-choice--active': draft.radius === item.id }"
+              @click="setRadius(item.id)"
+            >
+              <span class="radius-preview" aria-hidden="true">
+                <span class="radius-preview__corner" :style="{ borderTopLeftRadius: item.preview }" />
+              </span>
+              <span class="radius-preview__meta">
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.description }}</small>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="theme-lab__option-group">
+          <span class="theme-lab__option-title">密度</span>
+          <div class="theme-lab__choice-row theme-lab__choice-row--compact">
+            <button
+              v-for="item in scaleOptions"
+              :key="item.id"
+              type="button"
+              class="theme-choice theme-choice--compact"
+              :class="{ 'theme-choice--active': draft.scale === item.id }"
+              @click="setScale(item.id)"
+            >
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.description }}</small>
+            </button>
+          </div>
+        </div>
+
+        <div class="theme-lab__option-group">
+          <span class="theme-lab__option-title">字体</span>
+          <div class="theme-lab__choice-row theme-lab__choice-row--compact">
+            <button
+              v-for="item in fontOptions"
+              :key="item.id"
+              type="button"
+              class="theme-choice theme-choice--compact"
+              :class="{ 'theme-choice--active': draft.font === item.id }"
+              @click="setFont(item.id)"
+            >
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.description }}</small>
+            </button>
+          </div>
+        </div>
+
+        <div class="theme-lab__option-group">
+          <span class="theme-lab__option-title">内容宽度</span>
+          <div class="theme-lab__choice-row theme-lab__choice-row--compact">
+            <button
+              v-for="item in contentLayoutOptions"
+              :key="item.id"
+              type="button"
+              class="theme-choice theme-choice--compact"
+              :class="{ 'theme-choice--active': draft.contentLayout === item.id }"
+              @click="setContentLayout(item.id)"
+            >
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.description }}</small>
+            </button>
+          </div>
+        </div>
+
+        <div class="theme-lab__option-group">
+          <span class="theme-lab__option-title">外壳布局</span>
+          <div class="theme-lab__choice-row theme-lab__choice-row--compact">
+            <button
+              v-for="item in shellLayoutOptions"
+              :key="item.id"
+              type="button"
+              class="theme-choice theme-choice--compact"
+              :class="{ 'theme-choice--active': draft.shellLayout === item.id }"
+              @click="setShellLayout(item.id)"
+            >
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.description }}</small>
+            </button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -121,13 +248,14 @@
                   v-if="currentPresetId === ut.id"
                   class="material-symbols-outlined preset-card__check"
                 >check_circle</span>
-                <button
+                <UiIconButton
                   class="preset-card__delete"
+                  label="删除此主题"
                   title="删除此主题"
                   @click.stop="deleteUserTheme(ut.id)"
                 >
                   <span class="material-symbols-outlined">delete</span>
-                </button>
+                </UiIconButton>
               </div>
             </div>
           </article>
@@ -135,10 +263,12 @@
       </template>
 
       <div class="theme-lab__save-theme-row">
-        <button class="btn-secondary" type="button" @click="openSaveAsDialog">
-          <span class="material-symbols-outlined">add</span>
+        <UiButton variant="outline" @click="openSaveAsDialog">
+          <template #leading>
+            <span class="material-symbols-outlined">add</span>
+          </template>
           将当前配置保存为主题
-        </button>
+        </UiButton>
       </div>
 
       <div class="theme-lab__section-split" aria-hidden="true"></div>
@@ -149,22 +279,22 @@
       </div>
 
       <div class="theme-lab__coverage" role="status" aria-live="polite">
-        <span class="theme-lab__coverage-tag">
+        <UiBadge class="theme-lab__coverage-tag" variant="outline">
           全局变量
           <strong>{{ globalVarStats.total }}</strong>
-        </span>
-        <span class="theme-lab__coverage-tag">
+        </UiBadge>
+        <UiBadge class="theme-lab__coverage-tag" variant="outline">
           分组卡片
           <strong>{{ globalVarStats.cards }}</strong>
-        </span>
-        <span class="theme-lab__coverage-tag">
+        </UiBadge>
+        <UiBadge class="theme-lab__coverage-tag" variant="outline">
           可调变量
           <strong>{{ globalVarStats.editable }}</strong>
-        </span>
-        <span class="theme-lab__coverage-tag">
+        </UiBadge>
+        <UiBadge class="theme-lab__coverage-tag" variant="outline">
           受保护变量
           <strong>{{ globalVarStats.locked }}</strong>
-        </span>
+        </UiBadge>
       </div>
 
       <article
@@ -229,33 +359,34 @@
                           @input="onPickerInput(v.cssVar, ($event.target as HTMLInputElement).value)"
                         >
                       </div>
-                      <input
+                      <UiInput
                         :id="`color-${v.name}`"
                         type="text"
                         class="color-row__input"
-                        :value="draft.colorOverrides[v.cssVar] || ''"
+                        :model-value="draft.colorOverrides[v.cssVar] || ''"
                         :placeholder="getCurrentDefault(v)"
                         @input="onColorInput(v.cssVar, ($event.target as HTMLInputElement).value)"
-                      >
+                      />
                     </template>
                     <template v-else>
-                      <input
+                      <UiInput
                         :id="`color-${v.name}`"
                         type="text"
                         class="color-row__input color-row__input--wide"
-                        :value="draft.colorOverrides[v.cssVar] || ''"
+                        :model-value="draft.colorOverrides[v.cssVar] || ''"
                         :placeholder="getCurrentDefault(v)"
                         @input="onColorInput(v.cssVar, ($event.target as HTMLInputElement).value)"
-                      >
+                      />
                     </template>
-                    <button
+                    <UiIconButton
                       v-if="draft.colorOverrides[v.cssVar]"
                       class="color-row__reset"
+                      label="恢复此项默认值"
                       title="恢复此项默认值"
                       @click="resetSingleColor(v.cssVar)"
                     >
                       <span class="material-symbols-outlined">close</span>
-                    </button>
+                    </UiIconButton>
                   </div>
                 </div>
               </div>
@@ -273,21 +404,22 @@
                   </div>
 
                   <div class="color-row__controls">
-                    <input
+                    <UiInput
                       type="text"
                       class="color-row__input color-row__input--wide"
-                      :value="draft.colorOverrides[cssVar] || ''"
+                      :model-value="draft.colorOverrides[cssVar] || ''"
                       :placeholder="getGlobalVarDefault(cssVar)"
                       @input="onColorInput(cssVar, ($event.target as HTMLInputElement).value)"
-                    >
-                    <button
+                    />
+                    <UiIconButton
                       v-if="draft.colorOverrides[cssVar]"
                       class="color-row__reset"
+                      label="恢复此项默认值"
                       title="恢复此项默认值"
                       @click="resetSingleColor(cssVar)"
                     >
                       <span class="material-symbols-outlined">close</span>
-                    </button>
+                    </UiIconButton>
                   </div>
                 </div>
               </div>
@@ -323,17 +455,19 @@
         <div class="theme-lab__bg-input-row">
           <label class="search-field">
             <span class="material-symbols-outlined">image</span>
-            <input
+            <UiInput
               type="text"
-              :value="draft.backgroundImage"
+              :model-value="draft.backgroundImage"
               placeholder="https://example.com/background.jpg"
               @input="onBgInput(($event.target as HTMLInputElement).value)"
-            >
+            />
           </label>
-          <button class="btn-secondary" type="button" @click="triggerFileUpload">
-            <span class="material-symbols-outlined">upload_file</span>
+          <UiButton variant="outline" @click="triggerFileUpload">
+            <template #leading>
+              <span class="material-symbols-outlined">upload_file</span>
+            </template>
             本地上传
-          </button>
+          </UiButton>
           <input
             ref="fileInputRef"
             type="file"
@@ -341,15 +475,16 @@
             class="theme-lab__file-input"
             @change="onFileSelected"
           >
-          <button
+          <UiButton
             v-if="draft.backgroundImage"
-            class="btn-secondary"
-            type="button"
+            variant="outline"
             @click="clearBg"
           >
-            <span class="material-symbols-outlined">close</span>
+            <template #leading>
+              <span class="material-symbols-outlined">close</span>
+            </template>
             清除
-          </button>
+          </UiButton>
         </div>
 
         <div class="theme-lab__bg-meta">
@@ -357,16 +492,17 @@
             支持 <code>http/https</code> 网络源（包含返回图片流的 API，如 <code>https://picsum.photos/1600/900</code>）和本地上传。
             若 API 返回 JSON，请将其中图片字段对应的 URL 填入此处。
           </p>
-          <button
+          <UiButton
             v-if="draft.backgroundImage"
-            class="btn-secondary"
-            type="button"
+            variant="outline"
             :disabled="bgSourceChecking"
             @click="checkBackgroundSource"
           >
-            <span class="material-symbols-outlined">network_check</span>
+            <template #leading>
+              <span class="material-symbols-outlined">network_check</span>
+            </template>
             {{ bgSourceChecking ? '检测中…' : '检测网络源可用性' }}
-          </button>
+          </UiButton>
         </div>
 
         <p
@@ -401,13 +537,13 @@
             <span class="theme-lab__css-lang">CSS</span>
             <span class="theme-lab__css-lines">{{ cssLineCount }} 行</span>
           </div>
-          <textarea
+          <UiTextarea
             class="theme-lab__css-editor"
-            :value="draft.customCss"
+            :model-value="draft.customCss"
             placeholder="/* 在此输入自定义 CSS */&#10;&#10;body {&#10;  /* 自定义样式 */&#10;}"
             spellcheck="false"
             @input="onCssInput(($event.target as HTMLTextAreaElement).value)"
-          ></textarea>
+          />
         </div>
 
         <details class="theme-lab__css-tips">
@@ -491,15 +627,15 @@
           <div :ref="panelRef" v-bind="panelAttrs" class="theme-lab__modal">
             <h3>导入主题配置</h3>
             <p class="description">粘贴之前导出的 JSON 主题配置。</p>
-            <textarea
+            <UiTextarea
               v-model="importJson"
               class="theme-lab__import-editor"
               placeholder="粘贴 JSON 配置…"
               spellcheck="false"
-            ></textarea>
+            />
             <div class="theme-lab__modal-actions">
-              <button class="btn-secondary" type="button" @click="showImportDialog = false">取消</button>
-              <button class="btn-primary" type="button" @click="confirmImport">确认导入</button>
+              <UiButton variant="outline" @click="showImportDialog = false">取消</UiButton>
+              <UiButton variant="primary" @click="confirmImport">确认导入</UiButton>
             </div>
           </div>
         </div>
@@ -513,17 +649,17 @@
           <div :ref="panelRef" v-bind="panelAttrs" class="theme-lab__modal">
             <h3>保存为我的主题</h3>
             <p class="description">为当前配置命名，方便日后复用。</p>
-            <input
+            <UiInput
               v-model="saveAsName"
               type="text"
               class="theme-lab__save-name-input"
               placeholder="输入主题名称…"
               maxlength="30"
               @keydown.enter="confirmSaveAs"
-            >
+            />
             <div class="theme-lab__modal-actions">
-              <button class="btn-secondary" type="button" @click="showSaveAsDialog = false">取消</button>
-              <button class="btn-primary" type="button" :disabled="!saveAsName.trim()" @click="confirmSaveAs">保存</button>
+              <UiButton variant="outline" @click="showSaveAsDialog = false">取消</UiButton>
+              <UiButton variant="primary" :disabled="!saveAsName.trim()" @click="confirmSaveAs">保存</UiButton>
             </div>
           </div>
         </div>
@@ -536,9 +672,23 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import UiBadge from '@/components/ui/UiBadge.vue'
+import UiButton from '@/components/ui/UiButton.vue'
+import UiDirtyIndicator from '@/components/ui/UiDirtyIndicator.vue'
+import UiIconButton from '@/components/ui/UiIconButton.vue'
+import UiInput from '@/components/ui/UiInput.vue'
+import UiPageActions from '@/components/ui/UiPageActions.vue'
+import UiTextarea from '@/components/ui/UiTextarea.vue'
 import {
   FULL_PRESET_THEMES,
   THEME_COLOR_GROUPS,
+  THEME_CONTENT_LAYOUT_OPTIONS,
+  THEME_FONT_OPTIONS,
+  THEME_MODE_OPTIONS,
+  THEME_RADIUS_OPTIONS,
+  THEME_SCALE_OPTIONS,
+  THEME_SHELL_LAYOUT_OPTIONS,
+  THEME_SETTINGS_CHANGED_EVENT,
   applyThemeVars,
   applyCustomCss,
   applyBackgroundImage,
@@ -552,6 +702,12 @@ import {
   saveUserThemes,
   type FullPresetTheme,
   type ThemeColorVariable,
+  type ThemeContentLayout,
+  type ThemeFont,
+  type ThemeMode,
+  type ThemeRadius,
+  type ThemeScale,
+  type ThemeShellLayout,
   type ThemeSnapshot,
   type UserTheme,
 } from '@/features/theme-editor/themeEngine'
@@ -579,6 +735,12 @@ const activeSection = ref('theme')
 
 const presets = FULL_PRESET_THEMES
 const colorGroups = THEME_COLOR_GROUPS
+const themeModeOptions = THEME_MODE_OPTIONS
+const radiusOptions = THEME_RADIUS_OPTIONS
+const scaleOptions = THEME_SCALE_OPTIONS
+const fontOptions = THEME_FONT_OPTIONS
+const contentLayoutOptions = THEME_CONTENT_LAYOUT_OPTIONS
+const shellLayoutOptions = THEME_SHELL_LAYOUT_OPTIONS
 const appStore = useAppStore()
 
 const savedSnapshot = loadThemeSnapshot()
@@ -596,6 +758,31 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 // -- User themes --
 
 const userThemes = ref<UserTheme[]>(loadUserThemes())
+
+function syncDraftFromSnapshot(snapshot: ThemeSnapshot, options: { syncOriginal?: boolean } = {}) {
+  const normalizedSnapshot = {
+    ...snapshot,
+    backgroundImage: normalizeBackgroundSource(snapshot.backgroundImage),
+  }
+
+  draft.colorOverrides = { ...normalizedSnapshot.colorOverrides }
+  draft.customCss = normalizedSnapshot.customCss
+  draft.backgroundImage = normalizedSnapshot.backgroundImage
+  draft.activePresetId = normalizedSnapshot.activePresetId
+  draft.themeMode = normalizedSnapshot.themeMode
+  draft.radius = normalizedSnapshot.radius
+  draft.scale = normalizedSnapshot.scale
+  draft.font = normalizedSnapshot.font
+  draft.contentLayout = normalizedSnapshot.contentLayout
+  draft.shellLayout = normalizedSnapshot.shellLayout
+  currentPresetId.value = normalizedSnapshot.activePresetId
+
+  if (options.syncOriginal) {
+    originalSnapshot.value = JSON.parse(JSON.stringify(normalizedSnapshot))
+  }
+
+  resetBgSourceCheck()
+}
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString('zh-CN', {
@@ -632,6 +819,13 @@ function applyUserTheme(ut: UserTheme) {
   draft.colorOverrides = { ...ut.snapshot.colorOverrides }
   draft.customCss = ut.snapshot.customCss
   draft.backgroundImage = normalizeBackgroundSource(ut.snapshot.backgroundImage)
+  draft.themeMode = ut.snapshot.themeMode || 'dark'
+  draft.radius = ut.snapshot.radius || 'default'
+  draft.scale = ut.snapshot.scale || 'default'
+  draft.font = ut.snapshot.font || 'default'
+  draft.contentLayout = ut.snapshot.contentLayout || 'full'
+  draft.shellLayout = ut.snapshot.shellLayout || 'inset'
+  appStore.setTheme(draft.themeMode)
   resetBgSourceCheck()
   applyFullTheme(draft)
 }
@@ -1109,11 +1303,11 @@ function getGlobalVarDefault(cssVar: string): string {
 // -- Preset themes --
 
 function getPresetAccentColor(preset: FullPresetTheme): string {
-  return preset.colors['--highlight-text-dark'] || 'oklch(0.75 0.14 230)'
+  return preset.swatches?.[0] || preset.colors['--highlight-text-dark'] || 'oklch(0.75 0.14 230)'
 }
 
 function getPresetButtonColor(preset: FullPresetTheme): string {
-  return preset.colors['--button-bg-dark'] || 'oklch(0.68 0.16 230)'
+  return preset.swatches?.[1] || preset.colors['--button-bg-dark'] || 'oklch(0.68 0.16 230)'
 }
 
 function getPresetPreviewStyle(preset: FullPresetTheme) {
@@ -1125,6 +1319,9 @@ function getPresetPreviewStyle(preset: FullPresetTheme) {
 }
 
 function getPresetSwatches(preset: FullPresetTheme): string[] {
+  if (preset.swatches?.length) {
+    return preset.swatches
+  }
   const accent = getPresetAccentColor(preset)
   const button = getPresetButtonColor(preset)
   const bg = preset.colors['--accent-bg-dark'] || 'oklch(0.30 0.08 230)'
@@ -1134,17 +1331,60 @@ function getPresetSwatches(preset: FullPresetTheme): string[] {
 function applyPreset(preset: FullPresetTheme) {
   currentPresetId.value = preset.id
   draft.activePresetId = preset.id
-  draft.colorOverrides = { ...preset.colors }
+  draft.colorOverrides = {}
   draft.customCss = preset.customCss || ''
   draft.backgroundImage = normalizeBackgroundSource(preset.backgroundImage || '')
+  if (preset.defaultRadius) {
+    draft.radius = preset.defaultRadius
+  }
+  if (preset.defaultFont) {
+    draft.font = preset.defaultFont
+  }
   resetBgSourceCheck()
+  applyFullTheme(draft)
+}
+
+function setThemeMode(mode: ThemeMode) {
+  draft.themeMode = mode
+  appStore.setTheme(mode)
+}
+
+function setRadius(radius: ThemeRadius) {
+  draft.radius = radius
+  applyFullTheme(draft)
+}
+
+function setScale(scale: ThemeScale) {
+  draft.scale = scale
+  applyFullTheme(draft)
+}
+
+function setFont(font: ThemeFont) {
+  draft.font = font
+  applyFullTheme(draft)
+}
+
+function setContentLayout(layout: ThemeContentLayout) {
+  draft.contentLayout = layout
+  applyFullTheme(draft)
+}
+
+function setShellLayout(layout: ThemeShellLayout) {
+  draft.shellLayout = layout
   applyFullTheme(draft)
 }
 
 // -- Color editing --
 
 function getCurrentDefault(v: ThemeColorVariable): string {
-  return appStore.theme === 'dark' ? v.defaultDark : v.defaultLight
+  if (typeof window !== 'undefined') {
+    const computedValue = getComputedStyle(document.documentElement).getPropertyValue(v.cssVar).trim()
+    if (computedValue) {
+      return computedValue
+    }
+  }
+
+  return appStore.resolvedTheme === 'dark' ? v.defaultDark : v.defaultLight
 }
 
 function getEffectiveColor(v: ThemeColorVariable): string {
@@ -1361,6 +1601,13 @@ async function handleReset() {
   draft.customCss = ''
   draft.backgroundImage = ''
   draft.activePresetId = null
+  draft.themeMode = 'dark'
+  draft.radius = 'default'
+  draft.scale = 'default'
+  draft.font = 'default'
+  draft.contentLayout = 'full'
+  draft.shellLayout = 'inset'
+  appStore.setTheme('dark')
   currentPresetId.value = null
   resetBgSourceCheck()
   originalSnapshot.value = JSON.parse(JSON.stringify(draft))
@@ -1394,7 +1641,14 @@ function confirmImport() {
   draft.customCss = snapshot.customCss
   draft.backgroundImage = normalizeBackgroundSource(snapshot.backgroundImage)
   draft.activePresetId = snapshot.activePresetId
+  draft.themeMode = snapshot.themeMode
+  draft.radius = snapshot.radius
+  draft.scale = snapshot.scale
+  draft.font = snapshot.font
+  draft.contentLayout = snapshot.contentLayout
+  draft.shellLayout = snapshot.shellLayout
   currentPresetId.value = snapshot.activePresetId
+  appStore.setTheme(snapshot.themeMode)
   resetBgSourceCheck()
   applyFullTheme(draft)
   showImportDialog.value = false
@@ -1404,6 +1658,7 @@ function confirmImport() {
 // -- Lifecycle & guards --
 
 watch(() => appStore.theme, () => {
+  draft.themeMode = appStore.theme
   applyFullTheme(draft)
   refreshGlobalCssVars()
 })
@@ -1439,8 +1694,15 @@ watch(
   { immediate: true }
 )
 
+function handleExternalThemeSettingsChanged() {
+  const snapshot = loadThemeSnapshot()
+  syncDraftFromSnapshot(snapshot, { syncOriginal: true })
+  refreshGlobalCssVars()
+}
+
 onMounted(() => {
   refreshGlobalCssVars()
+  window.addEventListener(THEME_SETTINGS_CHANGED_EVENT, handleExternalThemeSettingsChanged)
 })
 
 onBeforeRouteLeave(async () => {
@@ -1461,6 +1723,7 @@ onBeforeRouteLeave(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener(THEME_SETTINGS_CHANGED_EVENT, handleExternalThemeSettingsChanged)
   clearTimeout(cssDebounceTimer)
   clearTimeout(bgDebounceTimer)
   pickerRefs.clear()
@@ -1473,32 +1736,224 @@ onUnmounted(() => {
 .theme-lab {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-3);
 }
 
-/* Hero eyebrow override (margin only) */
-.theme-lab__eyebrow {
-  margin-bottom: var(--space-3);
+.theme-lab__intro {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
 }
 
-.theme-lab__hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-content: flex-end;
+.theme-lab__intro h2 {
+  margin: 0;
+  color: var(--primary-text);
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.theme-lab__intro .description {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--secondary-text);
+  font-size: var(--font-size-helper);
+  line-height: 1.5;
 }
 
 /* Tab controls */
 .theme-lab__controls {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 0;
+  padding-top: var(--space-1);
 }
 
 .theme-lab__filter-row {
   display: flex;
   flex-wrap: wrap;
+  gap: 8px;
+}
+
+.theme-lab__filter-row .filter-pill {
+  min-height: 32px;
+  padding: 0 12px;
+  border-color: color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-text) 1.2%, transparent);
+  color: var(--secondary-text);
+  font-size: var(--font-size-helper);
+  font-weight: 600;
+}
+
+.theme-lab__filter-row .filter-pill:hover {
+  border-color: color-mix(in srgb, var(--highlight-text) 38%, var(--border-color));
+  background: color-mix(in srgb, var(--highlight-text) 4%, transparent);
+  color: var(--primary-text);
+}
+
+.theme-lab__filter-row .filter-pill.active {
+  border-color: color-mix(in srgb, var(--highlight-text) 72%, var(--border-color));
+  background: color-mix(in srgb, var(--highlight-text) 8%, transparent);
+  color: var(--primary-text);
+}
+
+.theme-lab__filter-row .filter-pill .material-symbols-outlined {
+  font-size: 17px;
+}
+
+.theme-lab__quick-panel {
+  display: grid;
+  gap: var(--space-2);
+  padding-block: var(--space-2) var(--space-3);
+  border-block: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+}
+
+.theme-lab__quick-panel .theme-lab__section-header {
+  display: flex;
+  align-items: baseline;
   gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.theme-lab__quick-panel .theme-lab__section-header h3 {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.theme-lab__quick-panel .theme-lab__section-header p {
+  margin: 0;
+  max-width: none;
+  text-align: right;
+}
+
+.theme-lab__option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-5);
+}
+
+.theme-lab__option-group {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.theme-lab__option-group--wide {
+  grid-column: 1 / -1;
+}
+
+.theme-lab__option-title {
+  color: var(--primary-text);
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  line-height: 32px;
+}
+
+.theme-lab__choice-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: var(--space-2);
+}
+
+.theme-lab__choice-row--compact {
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+}
+
+.theme-lab__option-group--wide .theme-lab__choice-row--compact {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.theme-choice {
+  display: grid;
+  gap: 2px;
+  min-height: 44px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-text) 1.2%, transparent);
+  color: var(--secondary-text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.theme-choice:hover {
+  border-color: color-mix(in srgb, var(--highlight-text) 44%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-bg) 72%, transparent);
+  color: var(--primary-text);
+}
+
+.theme-choice--active {
+  border-color: var(--highlight-text);
+  background: color-mix(in srgb, var(--highlight-text) 8%, transparent);
+  color: var(--primary-text);
+}
+
+.theme-choice--compact {
+  min-height: 42px;
+}
+
+.theme-choice--radius {
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  min-height: 42px;
+  padding: 7px 9px;
+}
+
+.radius-preview {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-overlay-soft) 58%, transparent);
+}
+
+.radius-preview__corner {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 13px;
+  height: 13px;
+  border-top: 2px solid color-mix(in srgb, var(--primary-text) 72%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--primary-text) 72%, transparent);
+}
+
+.theme-choice--active .radius-preview {
+  border-color: color-mix(in srgb, var(--highlight-text) 60%, var(--border-color));
+  background: color-mix(in srgb, var(--highlight-text) 10%, var(--secondary-bg));
+}
+
+.theme-choice--active .radius-preview__corner {
+  border-color: var(--highlight-text);
+}
+
+.radius-preview__meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.theme-choice .material-symbols-outlined {
+  color: var(--highlight-text);
+  font-size: 1rem;
+}
+
+.theme-choice strong {
+  font-size: var(--font-size-helper);
+  font-weight: 700;
+}
+
+.theme-choice small {
+  color: var(--secondary-text);
+  font-size: var(--font-size-caption);
+  line-height: 1.25;
 }
 
 /* Section shared */
@@ -1532,15 +1987,7 @@ onUnmounted(() => {
 }
 
 .theme-lab__coverage-tag {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  font-size: var(--font-size-caption);
-  color: var(--secondary-text);
-  background: var(--surface-overlay-soft);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-full);
 }
 
 .theme-lab__coverage-tag strong {
@@ -1559,23 +2006,21 @@ onUnmounted(() => {
   cursor: pointer;
   padding: 0;
   overflow: hidden;
+  border-color: color-mix(in srgb, var(--border-color) 74%, transparent);
+  background: color-mix(in srgb, var(--primary-text) 1.1%, transparent);
   transition:
     border-color var(--transition-fast),
-    box-shadow var(--transition-fast),
-    transform var(--transition-fast);
+    background-color var(--transition-fast);
 }
 
 .preset-card:hover {
   border-color: color-mix(in srgb, var(--highlight-text) 50%, var(--border-color));
-  box-shadow: 0 4px 20px color-mix(in srgb, var(--highlight-text) 10%, transparent);
-  transform: translateY(-2px);
+  background: color-mix(in srgb, var(--primary-text) 3.2%, transparent);
 }
 
 .preset-card--active {
   border-color: var(--highlight-text);
-  box-shadow:
-    0 0 0 1px var(--highlight-text),
-    0 4px 20px color-mix(in srgb, var(--highlight-text) 16%, transparent);
+  background: color-mix(in srgb, var(--highlight-text) 7%, transparent);
 }
 
 .preset-card__preview {
@@ -1588,7 +2033,7 @@ onUnmounted(() => {
 }
 
 .preset-card__preview--user {
-  background: var(--tertiary-bg);
+  background: color-mix(in srgb, var(--primary-text) 2.4%, transparent);
 }
 
 .preset-card__user-icon {
@@ -1655,22 +2100,7 @@ onUnmounted(() => {
 }
 
 .preset-card__delete {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: none;
-  border: none;
   color: var(--secondary-text);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: color var(--transition-fast), background-color var(--transition-fast);
-}
-
-.preset-card__delete:hover {
-  color: var(--danger-color);
-  background: var(--danger-bg);
 }
 
 .preset-card__delete .material-symbols-outlined {
@@ -1691,7 +2121,7 @@ onUnmounted(() => {
   gap: var(--space-3);
   margin-bottom: 0;
   padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
 }
 
 .color-group__header-actions {
@@ -1719,7 +2149,7 @@ onUnmounted(() => {
 .color-group__count {
   font-size: var(--font-size-caption);
   color: var(--secondary-text);
-  background: var(--surface-overlay-soft);
+  background: color-mix(in srgb, var(--primary-text) 2%, transparent);
   padding: 4px 10px;
   border-radius: var(--radius-full);
 }
@@ -1731,8 +2161,8 @@ onUnmounted(() => {
   min-height: 34px;
   padding: 0 12px;
   border-radius: 999px;
-  border: 1px solid var(--border-color);
-  background: var(--secondary-bg);
+  border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
+  background: color-mix(in srgb, var(--primary-text) 1.2%, transparent);
   color: var(--secondary-text);
   cursor: pointer;
   transition:
@@ -1743,13 +2173,13 @@ onUnmounted(() => {
 
 .group-collapse-toggle:hover {
   color: var(--primary-text);
-  background: color-mix(in srgb, var(--button-bg) 10%, transparent);
-  border-color: color-mix(in srgb, var(--button-bg) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-bg) 72%, transparent);
+  border-color: color-mix(in srgb, var(--highlight-text) 34%, var(--border-color));
 }
 
 .group-collapse-toggle:focus-visible {
-  border-color: color-mix(in srgb, var(--button-bg) 44%, var(--border-color));
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  outline: 2px solid var(--highlight-text);
+  outline-offset: 2px;
 }
 
 .group-collapse-icon {
@@ -1802,17 +2232,17 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
   gap: var(--space-4);
   align-items: center;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   transition: background-color var(--transition-fast);
 }
 
 .color-row:hover {
-  background: var(--surface-overlay-soft);
+  background: color-mix(in srgb, var(--primary-text) 2.4%, transparent);
 }
 
 .color-row--changed {
-  background: var(--info-bg);
+  background: color-mix(in srgb, var(--highlight-text) 6%, transparent);
 }
 
 .color-row__copy {
@@ -1831,7 +2261,7 @@ onUnmounted(() => {
   font-size: var(--font-size-caption);
   color: var(--secondary-text);
   font-family: var(--font-mono);
-  background: var(--tertiary-bg);
+  background: color-mix(in srgb, var(--primary-text) 2.4%, transparent);
   padding: 1px 6px;
   border-radius: 3px;
   display: inline-block;
@@ -1850,10 +2280,10 @@ onUnmounted(() => {
   min-width: 44px;
   height: 40px;
   flex-shrink: 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
   border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--input-bg);
+  background: color-mix(in srgb, var(--primary-text) 1.4%, transparent);
   transition:
     border-color var(--transition-fast),
     box-shadow var(--transition-fast);
@@ -1873,8 +2303,8 @@ onUnmounted(() => {
 }
 
 .color-row__swatch-wrap:focus-within {
-  border-color: var(--highlight-text);
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  outline: 2px solid var(--highlight-text);
+  outline-offset: 2px;
 }
 
 .color-row__picker {
@@ -1891,24 +2321,12 @@ onUnmounted(() => {
 .color-row__input {
   flex: 1;
   min-width: 0;
-  min-height: 40px;
-  padding: 10px 12px;
-  background: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  color: var(--primary-text);
   font-size: var(--font-size-helper);
   font-family: var(--font-mono);
 }
 
 .color-row__input--wide {
   max-width: min(100%, 240px);
-}
-
-.color-row__input:focus-visible {
-  border-color: var(--highlight-text);
-  box-shadow: 0 0 0 2px var(--focus-ring);
-  outline: none;
 }
 
 .color-group__locked {
@@ -1966,25 +2384,12 @@ onUnmounted(() => {
 }
 
 .color-row__reset {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: none;
-  border: none;
   color: var(--secondary-text);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
   flex-shrink: 0;
-  transition:
-    color var(--transition-fast),
-    background-color var(--transition-fast);
 }
 
 .color-row__reset:hover {
   color: var(--danger-color);
-  background: var(--danger-bg);
 }
 
 .color-row__reset .material-symbols-outlined {
@@ -2047,7 +2452,7 @@ onUnmounted(() => {
 .theme-lab__bg-preview {
   border-radius: var(--radius-lg);
   overflow: hidden;
-  border: 1px solid var(--border-color);
+  border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
 }
 
 .theme-lab__bg-preview-img {
@@ -2071,10 +2476,11 @@ onUnmounted(() => {
 
 /* CSS editor */
 .theme-lab__css-editor-wrap {
-  border: 1px solid var(--border-color);
+  border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
   border-radius: var(--radius-lg);
   overflow: hidden;
   margin-bottom: var(--space-4);
+  background: color-mix(in srgb, var(--primary-text) 1.1%, transparent);
 }
 
 .theme-lab__css-bar {
@@ -2082,8 +2488,8 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: var(--space-2) var(--space-3);
-  background: var(--surface-overlay-soft);
-  border-bottom: 1px solid var(--border-color);
+  background: transparent;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
 }
 
 .theme-lab__css-lang {
@@ -2100,32 +2506,29 @@ onUnmounted(() => {
 }
 
 .theme-lab__css-editor {
-  width: 100%;
   min-height: 300px;
-  padding: var(--space-3);
-  background: var(--input-bg);
-  border: none;
-  color: var(--primary-text);
   font-family: var(--font-mono);
   font-size: var(--font-size-helper);
   line-height: 1.6;
-  resize: vertical;
   tab-size: 2;
 }
 
-.theme-lab__css-editor:focus-visible {
-  outline: 2px solid var(--highlight-text);
-  outline-offset: 2px;
-}
-
-.theme-lab__css-editor:focus:not(:focus-visible) {
-  outline: none;
+.theme-lab__css-editor.ui-textarea {
+  min-height: 300px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-helper);
+  line-height: 1.6;
+  tab-size: 2;
 }
 
 .theme-lab__css-tips {
-  border: 1px solid var(--border-color);
+  border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  background: color-mix(in srgb, var(--primary-text) 1.1%, transparent);
 }
 
 .theme-lab__css-tips summary {
@@ -2136,12 +2539,12 @@ onUnmounted(() => {
   cursor: pointer;
   font-size: var(--font-size-helper);
   color: var(--secondary-text);
-  background: var(--surface-overlay-soft);
+  background: transparent;
   transition: background-color var(--transition-fast);
 }
 
 .theme-lab__css-tips summary:hover {
-  background: var(--surface-overlay);
+  background: color-mix(in srgb, var(--primary-text) 2.4%, transparent);
 }
 
 .theme-lab__css-tips summary .material-symbols-outlined {
@@ -2193,14 +2596,14 @@ onUnmounted(() => {
 
 .theme-lab__css-tips-body code {
   font-family: var(--font-mono);
-  background: var(--tertiary-bg);
+  background: color-mix(in srgb, var(--primary-text) 2.6%, transparent);
   padding: 1px 6px;
   border-radius: 3px;
   font-size: var(--font-size-caption);
 }
 
 .theme-lab__css-tips-body pre {
-  background: var(--tertiary-bg);
+  background: color-mix(in srgb, var(--primary-text) 2.6%, transparent);
   padding: var(--space-3);
   border-radius: var(--radius-sm);
   overflow-x: auto;
@@ -2241,48 +2644,21 @@ onUnmounted(() => {
 }
 
 .theme-lab__import-editor {
-  width: 100%;
   min-height: 200px;
-  padding: var(--space-3);
-  background: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--primary-text);
   font-family: var(--font-mono);
   font-size: var(--font-size-helper);
-  resize: vertical;
   margin-bottom: var(--space-4);
 }
 
-.theme-lab__import-editor:focus-visible {
-  outline: 2px solid var(--highlight-text);
-  outline-offset: 2px;
-}
-
-.theme-lab__import-editor:focus:not(:focus-visible) {
-  border-color: var(--highlight-text);
-  outline: none;
+.theme-lab__import-editor.ui-textarea {
+  min-height: 200px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-helper);
 }
 
 .theme-lab__save-name-input {
-  width: 100%;
-  padding: var(--space-3);
-  background: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--primary-text);
   font-size: var(--font-size-body);
   margin-bottom: var(--space-4);
-}
-
-.theme-lab__save-name-input:focus-visible {
-  outline: 2px solid var(--highlight-text);
-  outline-offset: 2px;
-}
-
-.theme-lab__save-name-input:focus:not(:focus-visible) {
-  border-color: var(--highlight-text);
-  outline: none;
 }
 
 .theme-lab__modal-actions {
@@ -2293,14 +2669,17 @@ onUnmounted(() => {
 
 /* Responsive */
 @media (max-width: 768px) {
-  .theme-lab__hero-actions {
-    justify-content: stretch;
+  .theme-lab__option-grid {
+    grid-template-columns: 1fr;
   }
 
-  .theme-lab__hero-actions button {
-    flex: 1;
-    min-width: 0;
-    justify-content: center;
+  .theme-lab__option-group,
+  .theme-lab__option-group--wide {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-lab__option-group--wide .theme-lab__choice-row--compact {
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   }
 
   .theme-lab__preset-grid {
@@ -2351,15 +2730,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 480px) {
-  .theme-lab__hero-actions {
-    flex-direction: column;
-  }
-
-  .theme-lab__hero-actions button {
-    width: 100%;
-    justify-content: center;
-  }
-
   .preset-card__body {
     padding: var(--space-2) var(--space-3);
   }
