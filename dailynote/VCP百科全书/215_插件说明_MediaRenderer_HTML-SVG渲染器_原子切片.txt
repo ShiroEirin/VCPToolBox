@@ -1,0 +1,161 @@
+[2026-07-31] - 哈雷酱
+[VCP百科全书] MediaRenderer - HTML/SVG/程序音乐媒体生成器
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-31（第7次上游合并后重新核验，v1.1.0→v2.2.0重大升级）
+适用范围：`Plugin/MediaRenderer/` 当前源码
+事实来源：
+- `Plugin/MediaRenderer/plugin-manifest.json` (v2.2.0, manifestVersion 1.0.0)
+- `Plugin/MediaRenderer/MediaRenderer.js` (623行→大幅扩展)
+- `Plugin/MediaRenderer/AudioSynthesisWorker.js` (255行, 新增)
+- `Plugin/MediaRenderer/README.md` (467行, 从257行扩展)
+- `Plugin/MediaRenderer/config.env.example` (40行, 从21行扩展)
+- 上游commit: `59a92268 完成多媒体代码插件工程化全套落地` (2026-07-31)
+
+一、插件基本信息
+1. 插件名称：MediaRenderer / HTML/SVG/程序音乐媒体生成器
+2. 插件类型：hybridservice
+3. 版本号：2.2.0（从v1.1.0升级）
+4. 通信协议：direct, timeout=300000ms (5分钟)
+5. 入口文件：MediaRenderer.js
+6. requiresAdmin: true（v2.2.0新增，因GenerateAudio需管理员验证码）
+7. 功能一句话总结：使用 VCP 托管 Chrome 与系统 FFmpeg 渲染 HTML/SVG 图片和动画；也可在无需浏览器与 FFmpeg 的独立 Node.js 子进程中执行 AI 编写的合成代码，生成 PCM16 WAV 程序音乐
+
+二、v2.2.0 重大变更（相对v1.1.0）
+1. displayName 从"HTML/SVG 媒体渲染器"改为"HTML/SVG/程序音乐媒体生成器"
+2. 新增 requiresAdmin: true
+3. configSchema 从1项(DebugMode)扩展到7项
+4. 新增 RenderAnimation 命令 — HTML/SVG 逐帧渲染为 GIF/MP4/WebM
+5. 新增 GenerateAudio 命令 — AI 编写 JavaScript 合成代码生成 WAV 音乐
+6. 新增 AudioSynthesisWorker.js (255行) — 音乐合成子进程
+7. 新增资源直引模式 — 源码中直接写 file:///、HTTP/HTTPS URL
+8. 新增 Anime.js 3.2.2 / Three.js r160 本地内置库支持
+9. 新增 readyMode 信号模式 (load/auto/signal)
+10. 安全限制大幅调整：单资源50MB→原25MB，合计100MB，每步24资源
+
+三、配置参数 (configSchema)
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| DebugMode | boolean | false | 逐步渲染诊断日志 |
+| AllowPrivateNetworkAssets | boolean | true | 允许源码直引资源访问 localhost/局域网/私网 |
+| FfmpegPath | string | "ffmpeg" | FFmpeg 命令名或绝对路径（GIF/视频编码用） |
+| FfmpegTimeoutMs | integer | 180000 | FFmpeg 单次编码超时 10000-600000ms |
+| MaxAnimationFrames | integer | 600 | 每个动画任务最大帧数 1-3600 |
+| AudioSynthesisTimeoutMs | integer | 30000 | 音乐合成子进程超时 1000-300000ms |
+| MaxAudioDurationMs | integer | 300000 | 单次最大音频时长 1000-900000ms |
+
+四、三条生成路径
+
+路径A：RenderImage — 静态图片渲染（v1.1.0已有，v2.2.0增强）
+- HTML/SVG → PNG、JPG、WebP
+- 宽高 64-4096 像素，最大总像素 4096x4096
+- PNG/WebP 透明背景，JPG 自定义底色
+- 最多 16 步串行批量渲染
+- v2.2.0新增：源码中直接写 file:///、HTTP/HTTPS URL 引用图片/视频/字体
+- v2.2.0新增：Anime.js/Three.js CDN标签自动重定向到本地版本
+- v2.2.0新增：readyMode (load/auto/signal)
+- 安全限制：单资源50MB，合计100MB，每步24资源，源码2MB
+
+路径B：RenderAnimation — 确定性逐帧动画（v2.2.0全新）
+- HTML/SVG 逐帧截图 → FFmpeg 编码为 GIF/MP4/WebM
+- 确定性逻辑时间：durationMs=5000, fps=30 → 150张PNG帧，每帧调用页面帧函数
+- 页面协议：window.__MEDIA_RENDERER__.setFrameRenderer((timeMs, frameIndex, fps) => {...})
+- 资源初始化后调用 window.__MEDIA_RENDERER__.setReady()，设置 readyMode=signal
+- 视频参数：format(gif/mp4/webm), durationMs(100-60000), fps(1-60)
+- 透明：GIF/WebM 支持，MP4/H.264 不支持
+- audioUrl：MP4/WebM 可选音轨（data:/file:///HTTP/HTTPS）
+- 编码：MP4=H.264 yuv420p, WebM=VP9, 透明WebM=yuva420p
+- 运行前提：需 FFmpeg
+
+路径C：GenerateAudio — 程序音乐合成（v2.2.0全新）
+- 在独立 Node.js 子进程中执行 AI 编写的 JavaScript 合成代码
+- 不启动浏览器，不需要 FFmpeg 或额外 npm 依赖
+- 输出 WAV/PCM16
+- 强制管理员验证码：每次调用必须提供 requireAdmin（6位验证码）
+
+代码协议：
+- 必须声明 function synthesize(api) 或 const synthesize = api => ...
+- 可以是 async 函数
+- 直接写入 api.left、api.right 或 api.channelData[channel] 的 Float32Array
+- 采样值 -1 到 1，超出时插件归一化
+
+内置合成 API：
+| API | 说明 |
+|-----|------|
+| api.sampleRate | 采样率 |
+| api.duration / api.durationMs | 时长（秒/毫秒） |
+| api.channels | 声道数 (1或2) |
+| api.tempo | BPM |
+| api.seed | 随机种子 |
+| api.left / api.right / api.channelData | 预分配 Float32Array 声道数组 |
+| api.noteToFrequency('C#5') | 音符转 Hz |
+| api.oscillator(type, phase, duty) | 波形：sine/square/pulse/triangle/saw |
+| api.envelope(time, duration, options) | ADSR 包络 |
+| api.addNote({note,start,duration,wave,duty,volume,pan,attack,decay,sustain,release}) | 便捷叠加音符 |
+| api.random() / api.noise() | seed 控制的确定性随机/白噪声 |
+| api.secondsPerBeat / api.beatToSeconds(beats) | 节拍换算 |
+| api.Math | 标准数学对象 |
+
+GenerateAudio 参数：
+| 参数 | 说明 |
+|------|------|
+| code | 必需，合成代码，最大1MB |
+| durationMs | 默认10000 |
+| sampleRate | 默认44100，范围8000-48000 |
+| channels | 1或2 |
+| tempo | 20-400 |
+| seed | 非负整数 |
+| masterVolume | 0-1 |
+| fadeOutMs | 默认30 |
+| timeoutMs | 不得超过 AudioSynthesisTimeoutMs |
+| fileName | 输出名主体 |
+总声道采样数最多 3000 万。
+
+五、调用命令列表
+
+1. RenderImage — HTML/SVG 渲染为静态图片
+   参数：html/svg, width/height, format, transparent, background, quality, allowJavaScript, readyMode, waitMs, timeoutMs, fileName, sourceImage(旧兼容), assets(旧兼容)
+
+2. RenderAnimation — HTML/SVG 逐帧渲染为 GIF/MP4/WebM
+   参数：html/svg, width/height, format(gif/mp4/webm), durationMs, fps, transparent, quality, audioUrl, readyMode, timeoutMs, fileName
+
+3. GenerateAudio — AI 编写 JavaScript 合成代码生成 WAV
+   参数：requireAdmin(必需), code(必需), durationMs, sampleRate, channels, tempo, seed, masterVolume, fadeOutMs, timeoutMs, fileName
+
+六、安全限制
+- 除源码明确引用并通过校验的资源外，页面运行时网络请求全部阻断
+- HTTP 重定向逐跳校验，云元数据地址始终禁止
+- 单资源最大 50MB，所有资源合计最大 100MB
+- 每步最多 24 个资源，源码最大 2MB
+- 最多串行 16 步
+- Anime.js/Three.js 只识别 jsDelivr、unpkg、cdnjs 上符合路径规则的标签
+- 其他远程脚本禁止执行
+- GenerateAudio 需管理员验证码，子进程超时后终止进程树
+
+七、源码文件
+| 文件 | 说明 |
+|------|------|
+| MediaRenderer.js | 主入口，三条路径路由 |
+| AudioSynthesisWorker.js (255行) | 音乐合成子进程，包含 noteToFrequency/oscillator/envelope/createRandom 等 |
+| README.md (467行) | 完整文档 |
+| config.env.example (40行) | 配置示例 |
+
+AudioSynthesisWorker.js 核心函数：
+- noteToFrequency(note) — 音符(如'C#5')转Hz，基于A4=440Hz
+- oscillator(type, phase, duty) — sine/square/pulse/triangle/saw 波形生成
+- envelope(time, duration, options) — ADSR包络（attack/decay/sustain/release）
+- createRandom(seed) — 确定性PRNG
+
+八、运行前提
+- 图片渲染：VCP_BROWSER_RUNTIME_ENABLED=true + Chrome/Chromium/Edge
+- 动画渲染：上述 + FFmpeg（或 FfmpegPath 指定）
+- 音乐合成：仅需 Node.js（不要求浏览器或 FFmpeg）
+- 插件复用根项目的 Puppeteer、Sharp 和 mime-types
+
+九、关联插件
+- ChromeBridge (24)：MediaRenderer 不通过 ChromeBridge，直接使用根层 CDP
+- ImageFileServer：图片/文件服务 URL 输出
+- GPTImageGen / ZImageTurboGen / VideoGenerator：其他图像/视频生成插件
+- VCPTimeLine：上游同时更新了 VCPTimeLine.js
+
+Tag: MediaRenderer, HTML渲染, SVG渲染, 动画渲染, GIF, MP4, WebM, FFmpeg, 程序音乐, WAV合成, PCM16, AudioSynthesisWorker, Anime.js, Three.js, CDP, Puppeteer, requiresAdmin, 2026-07-31

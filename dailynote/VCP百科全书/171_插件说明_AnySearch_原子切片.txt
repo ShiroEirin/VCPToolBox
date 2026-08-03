@@ -1,0 +1,81 @@
+[2026-07-28] - 哈雷酱
+# AnySearch 实时搜索插件｜AnySearch｜v3.0.1 垂直领域搜索、通用搜索、批量并行搜索、自由路线编排和网页正文提取
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-28
+适用范围：`Plugin/AnySearch/` 当前源码
+事实来源：
+- 源码：`Plugin/AnySearch/AnySearch.js`（624行）
+- 新增：`Plugin/AnySearch/resultFormatter.js`（141行）
+- 配置/Manifest：`Plugin/AnySearch/plugin-manifest.json`（v3.0.1）
+- 文档：`Plugin/AnySearch/README.md`
+- 上游commit: `747f6291 feat(AnySearch): align v3 search and capability routing`
+
+## 核心结论
+- 版本：3.0.1（从2.1.0升级），类型：synchronous，协议：stdio，超时：45000ms
+- 入口：`node AnySearch.js`（Node.js）
+- 新增 resultFormatter.js 独立结果格式化模块（141行）
+- v3 对齐搜索和能力路由，MCP endpoint 与搜索 endpoint 分离
+- 新增自由路线编排模式（query1..query5 独立参数组）
+
+## 工作机制
+VCP AI 发起请求 → AnySearch.js 解析参数（query/queries/url/sub_domain/params）→ 构造 JSON-RPC 请求发往 AnySearch API → 返回搜索结果或网页正文
+
+搜索模式自动判断：
+- 有 query → 单条搜索
+- 有 queries → 批量并行搜索（| 分隔，1-5条）
+- 有 url → 网页正文提取
+- 有 sub_domain → 垂直领域搜索（domain 自动取前缀）
+
+## 使用/排障边界
+- 垂直搜索需带 sub_domain（如 finance.news），domain 自动取其前缀，无需另写
+- params 格式为 k=v,k2=v2，子域必填参数在目录括号内标注
+- 可用 command=get_sub_domains, domain=域 查询某领域的子域列表
+- 不配置 ANYSEARCH_API_KEY 时匿名访问，额度较低
+- 批量搜索的顶层 sub_domain/params/max_results 会注入每条查询
+
+## 命令与参数
+| command | 说明 |
+|---------|------|
+| AnySearch | 统一搜索入口，根据参数自动判断搜索/批量/正文提取模式 |
+
+参数：query（搜索词）、queries（批量，|分隔，1-5条）、url（网页地址，提取正文）、sub_domain（域.子域）、params（子域参数，k=v格式）、max_results（1-10）
+
+可用领域目录（域: 子域(必填参数)）：
+- general: general
+- finance: news(type) quote(type,symbol,cn_code) fundamental(type,symbol,cn_code) macro(type) calendar(type) screen(type)
+- academic: search dataset preprint citation(id) biomedical
+- legal: legislation case statute
+- health: drug(type) trial stats
+- business: trade company jobs people
+- security: intel(ioc) scan(ioc) vuln(type,value) noise(ip)
+- code: doc(library) snippet
+- energy: production electricity
+- travel: flight(departure,arrival,date) flight_status(departure,arrival,date)
+- gaming: store esports(type)
+- resource: image
+- social_media: social_media
+- ip: global
+- environment: aqi
+- agriculture: fao
+- film: torrent
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| ANYSEARCH_API_KEY | string | (空) | 可选。不配置时匿名访问。可填多个 Key 逗号分隔，随机选用 |
+| ANYSEARCH_SEARCH_ENDPOINT | string | https://api.anysearch.com/v1/search | 搜索 endpoint（v3新增，与MCP分离） |
+| ANYSEARCH_MCP_ENDPOINT | string | https://api.anysearch.com/mcp | MCP endpoint（get_sub_domains/extract） |
+| ANYSEARCH_ENDPOINT | string | https://api.anysearch.com/mcp | 兼容别名，等同于 ANYSEARCH_MCP_ENDPOINT |
+| ANYSEARCH_TIMEOUT_MS | integer | 30000 | HTTP 请求超时（毫秒），范围 1000-40000 |
+
+## 调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AnySearch「末」,
+query:「始」Apple 最新公司新闻「末」,
+sub_domain:「始」finance.news「末」,
+params:「始」type=stock,symbol=AAPL「末」
+<<<[END_TOOL_REQUEST]>>>
+
+关联节点：GoogleSearch, TavilySearch, SerpSearch, UrlFetch
+Tag: AnySearch, 实时搜索, 垂直搜索, 批量搜索, 自由路线编排, 网页正文提取, resultFormatter, synchronous, stdio, v3.0.1, 2026-07-28

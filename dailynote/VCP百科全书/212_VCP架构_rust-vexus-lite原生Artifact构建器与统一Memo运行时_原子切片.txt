@@ -1,0 +1,62 @@
+[2026-07-24] - 哈雷酱
+# rust-vexus-lite 原生 Artifact 构建器与统一 Memo 运行时
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-24
+适用范围：`rust-vexus-lite/src/memo_artifact_builder.rs`（834行）+ `rust-vexus-lite/index.d.ts` VexusIndex 类扩展
+事实来源：
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\memo_artifact_builder.rs`（32KB，834行）
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\index.d.ts`（268行）
+- 上游commit: `42da7f46 rust统一加固核心内存布局`、`7cad2aad 大幅统一和加固rust管线`
+
+## 核心结论
+本次更新新增了 `memo_artifact_builder.rs`，将 Memo Artifact 的构建（完整图、CSR、provenance、持久化 payload）从 JS 侧下沉到 Rust 原生。同时 VexusIndex 类大幅扩展，成为统一 Memo 运行时的宿主——所有记忆管线（Spike 感知、V9.2 融合、DSTC、RiverMemo V3、Artifact 构建）现在都挂载在同一个 VexusIndex 实例上，共享同一份活动 Arc 快照。新增 ARM64 Linux 编译产物。
+
+## memo_artifact_builder.rs
+| 标识 | 值 |
+|------|-----|
+| PAYLOAD_SCHEMA | `rivermemo-persisted-artifact-v2` |
+| PAYLOAD_CODEC | `gzip-json-v1` |
+| ALGORITHM_VERSION | `memo.native-artifact-v1` |
+| V9_ALGORITHM_VERSION | `v9.1-rust-native` |
+
+- 使用 sha2 做哈希签名、flate2 Gzip 压缩持久化 payload
+- 关键结构: `FileTag`（file_id, tag_id, position, diary_name, path）、`ProvenanceContribution`（file_id, diary_name, path, mass）
+- N-API 导出: `NativeMemoArtifactBuildResult`、`NativeMemoArtifactBuildTask`、`rebuild_with_runtime`
+- 完整图、CSR、provenance、持久化 payload 与活动 Arc 均不跨越 N-API 边界，JS 只接收签名、代际与规模摘要
+
+## VexusIndex 类统一 Memo 运行时（index.d.ts 扩展）
+
+VexusIndex 不再只是向量索引，现在承载完整的 Memo 运行时：
+
+| 方法 | 功能 | 说明 |
+|------|------|------|
+| `projectDualWeighted()` | RiverMemo 全局双场投影 | Tag 向量直接从 usearch F32 索引按 key 读取，只复用一个 dimension 临时缓冲区 |
+| `fuseMemoContext()` | TagMemo 上下文融合 | 短持 usearch 读锁，语义去重和加权在释放锁后执行 |
+| `runMemoPipeline()` | 统一查询数学管线 | EPA、Residual Pyramid、Core/语言/层级门控、Spike 与向量融合在同一 Rust 后台任务完成 |
+| `senseMemoQuery()` | 统一 Spike 感应 | 输出 QueryObservation 供 DTSC 和 Topology V3 两个读出头消费 |
+| `rerankMemoDtsc()` | DTSC 测地曲线读出 | 与 Topology V3 读取同一 MemoRuntime 快照，差异只在读出方程 |
+| `rerankRivermemoTopologyV3()` | RiverMemo Topology V3 | 首次从持久化资产恢复 CSR，后续克隆快照 |
+| `rebuildMemoArtifact()` | 原生 Artifact 编译 | 从 SQLite 事实层和 Rust 派生表编译完整图资产 |
+| `clearMemoRuntime()` | 释放快照 | 释放本索引持有的 Memo 图快照 |
+| `memoRuntimeStats()` | 运行时诊断 | 返回 activeArtifactSig、generation、nodeCount、edgeCount |
+| `computeEpaBasis()` | EPA 基底重算 | Rust 侧重算基底并暂存，计算阶段只读 SQLite |
+| `publishEpaBasisCache()` | 发布 EPA 缓存 | 执行短 SQLite 写入 |
+| `computeIntrinsicResiduals()` | 矩阵内生残差 | TagMemo V7 预计算任务 |
+| `computePairwiseSimilarities()` | Tag 对语义距离 | V8.2 预计算，仅对实际共现 pair 计算，增量模式 |
+
+## 关键设计：统一 MemoRuntime
+- 所有记忆管线（sensing → pipeline → dtsc → topology_v3）共享同一个 MemoRuntime 活动图快照
+- VexusIndex 实例持有活动 Arc 快照，查询只克隆快照，不访问进程全局生产缓存
+- DTSC 和 RiverMemo Topology V3 读取同一个 MemoRuntime，差异只存在于读出方程
+- Artifact 构建结果（完整图、CSR、provenance）不跨越 N-API 边界
+
+## 编译产物变化
+| 平台 | 旧大小 | 新大小 | 变化 |
+|------|--------|--------|------|
+| Windows x64 | 3,985,920 | 4,246,528 | +260KB |
+| Linux x64 | 4,191,776 | 4,191,776 | 不变 |
+| Linux ARM64 | 不存在 | 3,754,240 | **新增** |
+
+关联节点：rust-vexus-lite记忆管线(209), RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), TagMemoEngine统一构型(198)
+Tag: memo_artifact_builder, VexusIndex, MemoRuntime, 统一运行时, NativeArtifact, CSR, provenance, gzip-json, sha2, rayon, N-API, ARM64, TagMemo V9.1, 2026-07-24

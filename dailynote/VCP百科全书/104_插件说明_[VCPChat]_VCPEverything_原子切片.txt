@@ -1,0 +1,89 @@
+[2026-07-31] - 哈雷酱
+[VCP百科全书] 插件说明——VCPEverything（原子切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-31（第7次上游合并后重新核验，v1.2.0 HTTP→v1.1.0 es.exe CLI）
+版本：1.1.0 | pluginType: synchronous | protocol: stdio | timeout: 30000ms
+事实来源：
+- `Plugin/VCPEverything/plugin-manifest.json` (v1.1.0)
+- 上游commit: `324a659f 新增精简功能` / `de6c7cde fix` (2026-07-31)
+
+⚠️ manifest定义在VCPChat仓库（VCPDistributedServer/Plugin/VCPEverything/）
+
+一、插件身份
+- name: `ServerSearchController`
+- displayName: `本地文件秒搜 (Everything)`
+- version: `1.1.0`（从v1.2.0回退，架构变更）
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `30000`
+- author: `VCPToolBox Community`
+- license: `MIT`
+- 入口: `node local-search-controller.js`（Node.js）
+- command: `search`
+- 注意：插件目录名为 VCPEverything，manifest 注册名为 ServerSearchController
+
+二、v1.1.0 重大变更（相对v1.2.0）
+1. 搜索后端从 Everything HTTP 服务器改为 Everything 命令行工具 (es.exe)
+2. 配置参数 EVERYTHING_PORT (HTTP端口) → EVERYTHING_ES_PATH (es.exe路径)
+3. description 从"通过 Everything HTTP 服务器"改为"通过调用 Everything 命令行工具 (es.exe)"
+4. 不再需要在 Everything 中启用 HTTP 服务器功能
+5. 版本号从 1.2.0 降至 1.1.0（架构简化）
+
+三、命令与参数
+命令 `search`，参数如下：
+- `query`（必需，字符串）：搜索关键词。支持 Everything 的高级搜索语法（例如：path:D:\videos\ *.mp4 size:>1gb）
+- `maxResults`（可选，数字，默认100）：返回的最大结果数量
+
+四、核心能力
+- 通过调用 Everything 命令行工具 (es.exe) 在本地计算机上实现毫秒级文件搜索
+- 不再需要启用 Everything HTTP 服务器功能
+- 搜索结果（文件路径）可以作为 FileOperator 插件的输入参数，以读取或操作这些文件
+- 提供可调用命令：search
+
+五、配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| EVERYTHING_ES_PATH | string | C:\Program Files (x86)\Everything\es.exe | Everything 命令行工具 (es.exe) 的绝对路径 |
+| DEBUG_MODE | boolean | false | 是否开启此插件的调试日志 |
+
+六、占位符与注入点
+- systemPromptPlaceholders: 无
+
+七、使用/排障边界
+- 需要安装 Everything 命令行工具 (es.exe)，可通过 EVERYTHING_ES_PATH 配置路径
+- 不再需要启用 Everything HTTP 服务器功能（与v1.2.0的区别）
+- 搜索结果文件路径可作为 FileOperator 插件输入
+- 插件无响应：先检查 manifest 启用状态、入口脚本、es.exe 路径是否正确
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+
+八、调用示例
+1. 基础搜索
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerSearchController「末」,
+command:「始」search「末」,
+query:「始」*.txt「末」
+<<<[END_TOOL_REQUEST]>>>
+
+2. 高级搜索（带路径限制）
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerSearchController「末」,
+command:「始」search「末」,
+query:「始」*.pdf「末」,
+maxResults:「始」50「末」
+<<<[END_TOOL_REQUEST]>>>
+
+3. 搜索最近修改的文件
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ServerSearchController「末」,
+command:「始」search「末」,
+query:「始」dm:today「末」
+<<<[END_TOOL_REQUEST]>>>
+
+九、版本变更记录
+- v1.0 (2026-03-03): 初始版本
+- v1.1 (2026-03-06): 标题和文档统一使用 ServerSearchController
+- v1.2.0 (2026-07-22): 补充 configSchema EVERYTHING_PORT 和 DEBUG_MODE
+- v1.1.0 (2026-07-31): **架构变更** — 从 HTTP 服务器模式改为 es.exe CLI 模式，EVERYTHING_PORT→EVERYTHING_ES_PATH
+
+Tag: VCPEverything, ServerSearchController, synchronous, 同步调用, 检索, 信息获取, 系统工具, search, maxResults, EVERYTHING_ES_PATH, es.exe, 1.1.0, TagMemo V9.1

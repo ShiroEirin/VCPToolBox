@@ -1,0 +1,92 @@
+[2026-07-24] - 哈雷酱
+# LightMemo v1.4.0 — RiverMemo Topology V3 适配
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-24
+适用范围：`Plugin/LightMemo/plugin-manifest.json`（v1.4.0）+ `Plugin/LightMemo/LightMemo.js`（4406行）当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\Plugin\LightMemo\plugin-manifest.json`
+- `D:\github\VCP\VCPToolBox\Plugin\LightMemo\config.env.example`
+- 上游commit: `ab618719 VCPMemo-Rust一体化完整底座引擎已上线`
+
+## 核心结论
+LightMemo 从 v1.0.0 升级至 v1.4.0，默认引擎模式从 tagmemo 变更为 rivermemo（Topology V3生产管线）。SearchRAG 命令新增 rivermemo/knn 引擎模式选择，TagMemoAB 命令从两轨对比扩展为三轨（KNN/V9/Rust V3）候选并集对比。新增 TDB 冷知识库检索能力。
+
+## 版本信息
+| 字段 | 值 |
+|------|-----|
+| name | LightMemo |
+| version | 1.4.0 |
+| displayName | 轻量回忆插件 (LightMemo) |
+| description | 轻量RAG检索插件：支持标准TagMemo V9、Rust/Rayon Topology V3、KNN及其生产构型A/B对比 |
+| pluginType | hybridservice |
+| protocol | direct |
+
+## 命令清单
+### 1. SearchRAG
+轻量级RAG搜索，支持三种引擎模式：
+- `rivermemo`（默认）— 固定 Topology V3 生产管线
+- `tagmemo` — TagMemo V9.1 向量增强，可用 tag_boost 的 + 后缀开启势能场
+- `knn` — 纯向量/BM25 混合检索，不执行 TagMemo 或 RiverMemo
+- 旧 `memory_engine` 仅保留兼容，不建议新调用
+
+关键参数:
+- enginemode (可选, 默认rivermemo)
+- query (必需) — 支持时间范围约束语法 [2025-04-11~2025-05-12]
+- maid (可选) — AI署名，支持作用域语法 [文件夹]署名
+- folder (可选) — 指定日记文件夹
+- k (可选, 默认5) — 返回结果数
+- rerank (可选, 默认false) — 支持 true/rrf/rrf0.7/0-1数字
+- aimemo (可选, 默认false) — 启用后调用RAGDiaryPlugin的AIMemoHandler
+- tag_boost (可选, 默认0.5) — 引擎模式控制参数
+- search_all_knowledge_bases (可选, 默认false)
+- BM25/bm25/use_bm25 (可选, 默认true)
+- knowledge_base (可选) — 指定TDB冷知识库名称
+
+### 2. TagMemoAB
+生产构型A/B对比，三轨并集：
+- 原始 KNN
+- 标准 TagMemo V9
+- Rust/Rayon RiverMemo Topology V3
+- 默认在三轨候选并集上增加独立 Rerank
+
+关键参数:
+- command (必需) — 固定传入 tagmemo_ab
+- query (必需)
+- maid/folder/search_all_knowledge_bases — 与普通搜索一致
+- k (可选, 默认5) — 每条轨道Top-K
+- candidate_k (可选, 默认max(30,k×5)) — 候选窗口
+- tag_boost (可选, 默认0.6)
+- compare_rerank (可选, 默认true) — 是否增加独立Rerank轨道
+
+## configSchema 配置参数
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| EXCLUDED_FOLDERS | string | 已整理,夜伽,MusicDiary | 屏蔽不搜索的文件夹 |
+| RerankUrl | string | "" | Rerank服务URL |
+| RerankApi | string | "" | Rerank服务API密钥 |
+| RerankModel | string | "" | Rerank模型名称 |
+| RerankMaxDocumentsPerRequest | number | 25 | 单次Rerank最大候选数（硬上限25） |
+| RerankMaxConcurrentRequests | number | 3 | Rerank小批量并发（1-10） |
+| RerankMaxTokensPerBatch | number | 30000 | 单批Token上限 |
+
+## TDB 冷知识库检索
+两种触发方式:
+1. 在 query 中使用 `[知识库]` 或 `[知识库:库名1,库名2]` 语法
+2. 显式提供 knowledge_base 参数
+
+冷知识库使用 BM25稀疏召回 + 向量稠密召回 + 图扩散 的混合检索，不经过日记/TagMemo流程。
+
+## 与旧版本差异
+| 项目 | v1.0.0 | v1.4.0 |
+|------|--------|--------|
+| 默认引擎 | tagmemo | rivermemo |
+| TagMemoAB 轨道数 | 2轨(KNN/V9) | 3轨(KNN/V9/Rust V3) + Rerank |
+| TDB冷知识库 | 不支持 | 支持 |
+| AIMemo | 不支持 | 支持 |
+| Rerank | 不支持 | 支持(rrf/rrf0.7/纯精排) |
+| 时间范围语法 | 不支持 | 支持 [date~date] |
+| maid作用域 | 不支持 | 支持 [文件夹]署名 |
+
+关联节点：RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), rust-vexus-lite记忆管线(209), RAGDiaryPlugin(03), TagMemoEngine统一构型(198), DailyNote(30), TagMemo V10 Alpha(206)
+Tag: LightMemo, v1.4.0, rivermemo, tagmemo, knn, SearchRAG, TagMemoAB, TDB冷知识库, Rerank, AIMemo, hybridservice, direct, TagMemo V9.1, topology-v3, 2026-07-24

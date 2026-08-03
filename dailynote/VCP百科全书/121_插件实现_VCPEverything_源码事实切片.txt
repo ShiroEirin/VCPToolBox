@@ -1,0 +1,70 @@
+[2026-07-31] - 哈雷酱
+[VCP百科全书] 插件实现——ServerSearchController（源码事实切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-31（第7次上游合并后重新核验，v1.2.0 HTTP→v1.1.0 es.exe CLI）
+事实来源：
+- `Plugin/VCPEverything/plugin-manifest.json` (v1.1.0)
+
+⚠️ 命名统一说明：
+- manifest注册名: ServerSearchController（唯一正式名称）
+- 历史别名: VCPEverything, LocalSearchController（已废弃，不再使用）
+- entry文件: local-search-controller.js
+
+一、源码锚点
+- manifest: Plugin/VCPEverything/plugin-manifest.json
+- entry: Plugin/VCPEverything/local-search-controller.js
+- pluginType: synchronous
+- version: 1.1.0
+- 通信入口: process.stdin.on('end') -> JSON.parse -> processRequest
+
+二、v1.1.0 架构变更（相对v1.2.0）
+- 搜索后端从 Everything HTTP 服务器改为 Everything 命令行工具 (es.exe)
+- 配置参数 EVERYTHING_PORT (HTTP端口, 默认8025) → EVERYTHING_ES_PATH (es.exe路径, 默认 C:\Program Files (x86)\Everything\es.exe)
+- 不再需要在 Everything 中启用 HTTP 服务器功能
+- 插件通过 child_process 调用 es.exe，不走 HTTP 请求
+
+三、manifest 关键配置（v1.1.0 当前版本）
+```json
+{
+  "name": "ServerSearchController",
+  "displayName": "本地文件秒搜 (Everything)",
+  "pluginType": "synchronous",
+  "version": "1.1.0",
+  "description": "通过调用 Everything 命令行工具 (es.exe) 在本地计算机上实现毫秒级文件搜索。",
+  "entryPoint": {
+    "command": "node local-search-controller.js"
+  },
+  "configSchema": {
+    "EVERYTHING_ES_PATH": { "type": "string", "default": "C:\\Program Files (x86)\\Everything\\es.exe" },
+    "DEBUG_MODE": { "type": "boolean", "default": false }
+  }
+}
+```
+
+四、行为事实（v1.1.0 代码级）
+- 插件通过 child_process 调用 es.exe 命令行工具执行搜索，不再通过 HTTP 请求
+- es.exe 路径来自 EVERYTHING_ES_PATH 配置（默认 C:\Program Files (x86)\Everything\es.exe）
+- 输出文件路径列表，并返回 totalResults
+- 若 query 缺失，直接返回 { status: 'error', error: 'Missing required parameter: query' }
+- es.exe 不存在或路径错误时会给出明确提示
+
+五、调用示例（源码对齐）
+⚠️ 注意：tool_name 必须使用 manifest 中的注册名 "LocalSearchController"
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LocalSearchController「末」,
+command:「始」search「末」,
+query:「始」path:D:\github\VCP *.md「末」,
+maxResults:「始」80「末」
+<<<[END_TOOL_REQUEST]>>>
+
+六、版本变更记录
+- v1.0 (2026-03-03): 初始版本
+- v1.1 (2026-03-06): 标题和文档统一使用 ServerSearchController
+- v1.2.0 (2026-07-22): 补充 configSchema EVERYTHING_PORT 和 DEBUG_MODE，HTTP服务器模式
+- v1.1.0 (2026-07-31): **架构变更** — 从 HTTP 服务器模式改为 es.exe CLI 模式
+  - EVERYTHING_PORT → EVERYTHING_ES_PATH
+  - 不再需要启用 Everything HTTP 服务器功能
+  - 通过 child_process 调用 es.exe
+
+Tag: ServerSearchController, VCPEverything, LocalSearchController, local-search-controller.js, es.exe, EVERYTHING_ES_PATH, CLI模式, child_process, query必填, 本地检索, 命名统一, TagMemo V9.1, 源码事实切片

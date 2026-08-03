@@ -1,0 +1,99 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] TagMemoEngine 统一构型 - 原子切片
+
+一、模块基本信息
+1. 模块名称：TagMemoEngine
+2. 模块类型：核心引擎模块
+3. 版本号：V9.1 (生产) / V10 Alpha (实验)
+4. 所属项目：VCPToolBox
+5. 源码路径：D:\github\VCP\VCPToolBox\TagMemoEngine.js (3613行)
+6. 功能一句话总结：TagMemo 浪潮算法核心引擎，包含势能场、ArtifactBundle、Spike Propagation 等记忆寻址逻辑
+
+二、功能定位
+
+TagMemoEngine 是 VCPToolBox 的记忆检索核心引擎。它通过 Tag 共现矩阵、EPA 投影、残差金字塔等数学工具，对知识库中的向量检索结果进行二次排序与增强，实现超越纯 KNN 的语义记忆寻址能力。
+
+源码注释 (TagMemoEngine.js 行1-3)：
+```
+// TagMemoEngine.js
+// 🌟 浪潮算法独立模块 (TagMemo Engine)
+// 包含：浪潮增强、EPA 投影、残差金字塔分析、有序双向共现矩阵 (V8.2)、脉冲传播等核心逻辑
+```
+
+三、核心架构
+
+1. 构造函数 (行11-57)
+   参数：db, tagIndex, config, ragParams, knowledgeBaseManager
+
+   关键状态字段：
+   - this.epa — EPA 投影模块实例
+   - this.residualPyramid — 残差金字塔模块实例
+   - this.tagCooccurrenceMatrix — Tag 共现矩阵
+   - this.tagIntrinsicResiduals — V9.1 单轨锚增益与数据库无关的原始残差比例
+   - this.tagRawResidualRatios — 原始残差比例
+   - this.intrinsicResidualArtifact — 残差 Artifact
+
+2. TagMemo V9.1 ArtifactBundle (行26-30)
+   - RCU 风格单轨活动资产包
+   - 发布后对象及其 Map 只读
+   - 重建始终创建全新的 Map，再一次性替换此指针
+   - this._activeArtifactBundle — 当前活动 Bundle
+   - this._artifactBundlesByVersion — 版本冻结的历史 Bundle
+   - this._artifactBundleGeneration — Bundle 代次号
+
+3. 矩阵计算防抖系统 (行32-39)
+   - V8.3：阈值触发改为"唯一新增 tag" Set 累积
+   - this._accumulatedNewTagIds — 新增 Tag ID 集合
+   - this._matrixRebuildTimer — 矩阵重建定时器
+   - this._isMatrixRebuilding — 重建中标志
+
+4. Tag 对语义距离 (行44-48) — V8.2-γ
+   - this.tagPairSimilarities — Map: "a:b" → cosineSim
+   - 边视角的语义邻近度，与 tagIntrinsicResiduals (节点视角) 正交
+   - this.modelSig — embedding 模型签名 (含维度)，跨模型自动失效
+
+5. 环境标志控制 (行59-82)
+   - KNOWLEDGEBASE_EPA_BACKGROUND_RECOMPUTE — EPA 后台重算开关
+   - TAGMEMO_INTRINSIC_RESIDUAL_FORCE_RECOMPUTE — 残差强制重算
+   - TAGMEMO_IR_RECOMPUTE_ON_THRESHOLD — 阈值触发残差重算 (默认 true)
+   - TAGMEMO_MATRIX_REBUILD_QUIET_MS — 矩阵重建静默期 (默认 300000ms)
+
+四、派生缓存检测 (行84-100)
+
+_hasWarmDerivedCaches() 检查四个缓存是否就绪：
+- epaReady: EPA 正交基底已初始化且非空
+- pairwiseReady: tagPairSimilarities Map 非空
+- intrinsicReady: tagIntrinsicResiduals Map 非空
+- matrixReady: tagCooccurrenceMatrix Map 非空
+
+_shouldSkipPostStartupDerivedRefresh() 判断是否可跳过启动后派生刷新：
+- EPA 后台重算关闭
+- 残差强制重算关闭
+- 无新增 Tag 变更
+- 四个缓存均已就绪
+
+五、依赖模块
+
+- EPAModule (行7) — EPA 投影核心
+- ResidualPyramid (行8) — 残差金字塔分析
+- 这两个模块在构造函数中延迟初始化
+
+六、统一构型探针
+
+scripts/tagmemo_unified_geometry_probe.js 是配套的离线探针脚本，用于从 SQLite 重建 V9.1 风格有向传播核并进行几何一致性检验。该脚本以只读模式运行，不初始化 KnowledgeBaseManager。
+
+七、与 V10 Alpha 的关系
+
+TagMemoEngine.js 同时承载 V9.1 生产逻辑与 V10 Alpha 实验入口。V10 Alpha 是统一认知几何实验，不替换 V9.2 生产搜索，在同一不可变 V10 Artifact 与对称候选超集上运行 Local/Transfer 双尺度场及 Pure/Gated/Observed 三臂。
+
+八、2026-07-24 更新——RiverMemo Topology V3 生产构型
+- RiverMemo Topology V3 已成为 LightMemo 的默认生产引擎（enginemode=rivermemo）
+- 算法标识: rivermemo.topology-v3.1 (Rust原生内核: rivermemo.topology-v3.1-rust)
+- 核心方程: 双场语义基线 + Ω_Q授权的条件拓扑创新 + 直接锚点创新
+- JS入口 RiverMemoEngine.js (839行) 仅准备查询场和消费原生结果
+- Rust内核 rivermemo_topology_v3.rs (2520行) 执行全部重计算
+- 新增 memo_sensing.rs (Spike感知), memo_pipeline.rs (V9.2融合管线), memo_dtsc.rs (DSTC双轨)
+- LightMemo v1.4.0 TagMemoAB 命令现对比 KNN/V9/Rust V3 三轨并集
+- TagMemoV10Engine.js (1706行) 提供 V10 Artifact 基础设施，被 RiverMemo 复用
+
+Tag: TagMemoEngine, V9.1, V10 Alpha, 势能场, ArtifactBundle, RCU风格, Spike Propagation, EPA投影, 残差金字塔, 共现矩阵, 统一构型探针, RiverMemo, Topology V3, 2026-07-24

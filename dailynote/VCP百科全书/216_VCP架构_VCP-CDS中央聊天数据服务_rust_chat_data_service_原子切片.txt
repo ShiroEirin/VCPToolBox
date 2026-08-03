@@ -1,0 +1,184 @@
+[2026-07-29] - 哈雷酱
+[VCP百科全书] VCP-CDS 中央聊天数据服务 (rust_chat_data_service)
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-29
+适用范围：`rust_chat_data_service/` 当前源码
+事实来源：
+- `rust_chat_data_service/Cargo.toml`
+- `rust_chat_data_service/README.md` (263行)
+- `rust_chat_data_service/src/main.rs` (299行)
+- `rust_chat_data_service/src/config.rs` (107行)
+- `rust_chat_data_service/src/protocol.rs` (572行)
+- 上游commit: `d00c10b 完成底层数据库重构` / `c937290 强化deepmemo功能` (2026-07-29)
+
+一、概述
+VCP-CDS (VCP Chat Data Service) 是 VCPChat 的中央聊天数据服务，使用 Rust 编写。第一阶段建立旁路镜像，第二阶段已承接 DeepMemo 搜索与 VCPMobileSync 消息同步数据面。
+
+二、架构分层
+| 层 | 存储 | 角色 |
+|----|------|------|
+| 真源 | `history.json` | 桌面聊天兼容真源，仍是主要写入目标 |
+| 查询镜像 | SQLite (`chat_data.sqlite3`) | 完整查询镜像，也是移动消息同步的中央索引 |
+| 搜索派生物 | Tantivy (`chat_search_index/`) | 可删除、可重建的全文搜索索引 |
+
+数据流：普通桌面聊天保存 → 先写 `history.json` → 由直接通知或 `notify` 摄取 → 写入 SQLite → 补齐 Tantivy revision。
+
+三、Rust 源码模块（11个文件，共6125行）
+| 文件 | 行数 | 功能 |
+|------|------|------|
+| `main.rs` | 299 | 程序入口，实例锁、握手、路由注册、CancellationToken |
+| `config.rs` | 107 | CLI 参数解析 (clap)、ServiceConfig、PROTOCOL_VERSION=1、SCHEMA_VERSION=1 |
+| `domain.rs` | 161 | 领域模型：MemoryWindow、SearchHit 等 |
+| `error.rs` | 134 | ServiceError / ServiceResult 错误类型 |
+| `identity.rs` | 133 | IdentityResolver：ownerId 精确定位 → Agent 显示名匹配 → maid 包含匹配 |
+| `ingest.rs` | 1093 | Reconciler：history.json → SQLite 摄取，变更检测、原子投影 |
+| `protocol.rs` | 572 | AppState、ReadyHandshake、HTTP 路由 (axum)、Bearer Token 鉴权 |
+| `search.rs` | 619 | SearchIndex：Tantivy 全文搜索、MemoryApiRequest/Response |
+| `storage.rs` | 1331 | Database：SQLite 操作，消息 CRUD、Tombstone、change_log |
+| `sync.rs` | 1322 | Manifest/Diff/Pull/Push 同步协议，聚合哈希、Change Feed |
+| `watcher.rs` | 354 | 文件监视 (notify)，history.json 变更触发摄取 |
+
+四、关键依赖 (Cargo.toml)
+| 依赖 | 版本 | 用途 |
+|------|------|------|
+| axum | 0.8 | HTTP 框架 |
+| rusqlite | 0.37 (bundled+backup) | SQLite 数据库 |
+| tantivy | 0.25 | 全文搜索引擎 |
+| jieba-rs | 0.7 | 中文分词 |
+| notify | 8 | 文件系统监视 |
+| blake3 | 1 | 哈希指纹 |
+| clap | 4 (derive+env) | CLI 参数 |
+| tokio | 1 (full) | 异步运行时 |
+| tower-http | 0.6 (limit+timeout+trace) | HTTP 中间件 |
+| subtle | 2 | 常量时间比较（Token 鉴权） |
+| ammonia | 4 | HTML 消毒 |
+| fs2 | 0.4 | 文件锁（实例单例） |
+
+五、启动与握手
+服务只允许绑定回环地址 (127.0.0.1)。Port 0 让操作系统自动选择可用端口。
+
+启动命令：
+```
+vcp_chat_data_service --app-data ../AppData --port 0
+```
+
+成功启动后 stdout 输出一次握手：
+```json
+{
+  "type": "ready",
+  "protocolVersion": 1,
+  "schemaVersion": 1,
+  "port": 49152,
+  "instanceId": "uuid",
+  "authToken": "ephemeral-token"
+}
+```
+后续结构化日志写入 stderr。实例锁通过 `fs2::FileExt::try_lock_exclusive` 确保单例运行。
+
+六、数据位置
+```
+AppData/
+├── databases/
+│   ├── chat_data.sqlite3
+│   ├── chat_data.sqlite3-wal
+│   ├── chat_data.sqlite3-shm
+│   ├── chat_data_service.lock
+│   └── chat_search_index/
+├── Agents/
+├── AgentGroups/
+└── UserData/
+```
+Node 消费者不得直接打开中央 SQLite 或 Tantivy 目录。
+
+七、身份模型
+- 内部 Topic 身份：`(owner_type, owner_id, topic_id)`
+- 内部消息身份：`(owner_type, owner_id, topic_id, msg_id)`
+- 原始 `topicId` 和消息 `id` 不会被拼接、替换或写回新格式
+- 不同分支 Topic 复制相同消息 ID 是受支持的正常情况
+- 群聊消息保存 `speaker_agent_id` 区分会话 Owner (Group) 和消息发言者 (Group 中的 Agent)
+
+DeepMemo 旧名称兼容（身份解析位于 CDS 的 DeepMemo 请求规范化层）：
+1. `ownerId` 精确定位
+2. Agent 显示名精确匹配
+3. 旧 `maid` 参数唯一包含匹配
+4. 多个包含候选返回 `AMBIGUOUS_IDENTITY`
+
+示例：`maid = Nova` → `display_name = vcp小助手Nova`，当且仅当包含结果唯一时解析为对应 Agent。Tantivy 始终接收解析后的精确 Owner ID，不执行名称猜测。
+
+八、Feature Flags
+默认值位于主程序设置管理器：
+| Flag | 默认值 | 说明 |
+|------|--------|------|
+| ChatDataServiceEnabled | True | 是否启用 VCP-CDS |
+| ChatDataServiceShadowMode | True | 影子模式（旁路镜像不接管） |
+| ChatDataServiceNotifyEnabled | True | 文件监视通知 |
+| ChatDataServiceTantivyEnabled | True | Tantivy 搜索索引 |
+| MobileSyncUseCentralIndex | True | 移动同步使用中央索引 |
+| DeepMemoUseCentralSearch | False | DeepMemo 使用中央搜索 |
+| DeepMemoLegacyFallback | True | DeepMemo 旧版回退 |
+
+关闭一期服务 (`ChatDataServiceEnabled=False`) 后：现有聊天读写不受影响，VCPMobileSync 继续使用旧同步数据库，DeepMemo 继续使用旧 EXE，中央数据库保留供诊断或后续恢复。
+
+九、HTTP API
+无鉴权：
+- `GET /v1/health` — 健康检查
+
+需要启动握手中的 Bearer Token：
+- `GET /v1/status` — 服务状态（content_revision, indexed_revision, owners, topics, messages 等）
+- `GET /v1/changes?after=<sequence>&limit=<limit>` — 变更流（游标式）
+- `POST /v1/reconcile` — 从 history.json 重建 SQLite
+- `POST /v1/rebuild-search-index` — 从 SQLite 重建 Tantivy
+- `POST /v1/ingest/history-path` — 摄取指定 history.json
+- `POST /v1/search/messages` — 消息搜索
+- `POST /v1/search/memories` — 记忆搜索（DeepMemo 接口）
+- `POST /v1/sync/manifest` — 同步清单
+- `POST /v1/sync/message-manifest` — 消息清单
+- `POST /v1/sync/topic-diff` — Topic 差异
+- `POST /v1/sync/message-diff` — 消息差异
+- `POST /v1/sync/messages/pull` — 拉取消息
+- `POST /v1/sync/messages/push` — 推送消息
+- `POST /v1/flush` — 刷新
+- `POST /v1/shutdown` — 关闭服务
+
+同步 Push 接受 Topic 批次。每个 Topic 可携带新增/修改消息和 `deletedMessageIds`；CDS 合并后原子投影 `history.json`，在同一摄取事务中更新 SQLite 消息、Tombstone 与 `change_log`，随后补齐 Tantivy revision。
+
+十、VCPMobileSync 中央模式
+中央模式下 VCPMobileSync 保留手机鉴权、WebSocket、HTTP/NDJSON 和 DTO 编排，但：
+1. 启动时等待 CDS READY 并执行一次 reconcile
+2. 不初始化旧 `sync_state.db`
+3. 不扫描历史文件
+4. 不启动旧 chokidar watcher
+5. 消息下载与上传通过中央客户端转发
+6. `/api/mobile-sync/changes` 暴露带游标的 Change Feed
+
+十一、构建与部署
+从项目根目录执行 `npm run build`，调用 `rust_chat_data_service/build-runtime.js`：
+1. 执行 Cargo Release 构建 (LTO=thin, codegen-units=1, strip=true)
+2. 将当前平台原生运行时复制到 `modules/services/chatDataService/bin/<platform>-<arch>/`
+
+支持平台：win32-x64, win32-arm64, darwin-x64, darwin-arm64, linux-x64, linux-arm64
+Windows 二进制名：`vcp_chat_data_service.exe`
+macOS/Linux 二进制名：`vcp_chat_data_service`
+
+`npm run build` 只原生构建当前主机。跨平台发布包必须在对应操作系统的构建机或 CI Runner 上执行。Electron 打包命令 `npm run pack` / `npm run dist` 会自动先部署当前平台运行时。
+
+十二、恢复机制
+SQLite 无法通过快速检查时：
+1. 原数据库被改名隔离
+2. 创建新数据库
+3. 从 Agent/Group 配置和 `history.json` 重建
+
+Tantivy 无法打开或目录被删除时：
+1. SQLite 保持不变
+2. 损坏索引目录被改名隔离
+3. 从 SQLite 的所有有效 Topic 全量重建
+4. 重建后更新 `indexed_revision`
+
+十三、关联模块
+- DeepMemo (35)：深度回忆插件，通过 VCP-CDS 中央搜索接口工作
+- VCPMobileSync：移动消息同步，中央模式下由 VCP-CDS 提供数据面
+- AdminPanel-Vue：管理面板，展示服务状态
+- rust-vexus-lite (209/212)：ToolBox 侧的 Rust 向量引擎，与 VCP-CDS 属于不同 Rust 项目
+
+Tag: VCP-CDS, rust_chat_data_service, Rust, SQLite, Tantivy, 中央数据服务, DeepMemo搜索, 移动同步, axum, 2026-07-29

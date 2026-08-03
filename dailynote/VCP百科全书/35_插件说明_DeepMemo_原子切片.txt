@@ -1,0 +1,156 @@
+[2026-07-29] - 哈雷酱
+[VCP百科全书] DeepMemo - 深度回忆插件
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-29（第6次上游合并后重新核验）
+适用范围：`VCPDistributedServer/Plugin/DeepMemo/` 当前源码
+事实来源：
+- `VCPDistributedServer/Plugin/DeepMemo/plugin-manifest.json` (v2.0.0)
+- `rust_chat_data_service/README.md` — VCP-CDS 中央搜索接口
+- 上游commit: `c937290 强化deepmemo功能` (2026-07-29)
+- 上游commit: `d00c10b 完成底层数据库重构` (2026-07-29)
+
+⚠️ manifest定义在VCPChat仓库（VCPDistributedServer/Plugin/DeepMemo/）
+
+一、插件基本信息
+1. 插件名称：DeepMemo / 深度回忆插件
+2. 插件类型：hybridservice
+3. 版本号：2.0.0
+4. 通信协议：direct, timeout=30000ms (30秒)
+5. 入口文件：DeepMemoService.js (type: nodejs)
+6. 所属模块：VCPChat/VCPDistributedServer/Plugin
+7. 功能一句话总结：通过 VCP-CDS 中央聊天数据服务检索历史上下文的常驻薄适配器
+
+二、功能定位
+DeepMemo v2.0.0 是基于 VCP-CDS (VCP Chat Data Service) 中央聊天数据服务的深度回忆插件。通过关键词从聊天记录中检索相关上下文，支持高级搜索语法（精确短语、权重调整、负向排除、OR逻辑）和可选的 Rerank 精排功能。
+
+v2.0.0 重大变更：
+- 从旧版独立 Rust EXE 架构迁移为 VCP-CDS 中央搜索适配器
+- 插件类型从 synchronous 升级为 hybridservice
+- 新增 rerank 精排参数（第5个调用参数）
+- 新增 16 个 configSchema 配置项，包括完整的 Rerank 配置链
+
+三、配置参数 (configSchema)
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| DeepMemoBackend | string | 后端服务地址 |
+| DeepMemoLegacyFallback | boolean | 旧版回退开关 |
+| DeepMemoExcludeCurrentTopic | boolean | 排除当前话题 |
+| DeepMemoCandidateLimit | integer | 候选结果上限 |
+| DeepMemoResultLimit | integer | 最终结果上限 |
+| DeepMemoTimeoutMs | integer | 请求超时毫秒 |
+| MaxMemoTokens | integer | 返回 Token 上限 |
+| QueryPreset | string | 查询预设 |
+| RerankSearch | boolean | 是否启用 Rerank 精排 |
+| RerankUrl | string | Rerank 服务 URL |
+| RerankApi | string | Rerank API Key |
+| RerankModel | string | Rerank 模型名 |
+| RerankCandidateMultiplier | integer | 候选倍率 |
+| RerankMaxDocumentsPerBatch | integer | 每批文档上限 |
+| RerankMaxTokensPerBatch | integer | 每批 Token 上限 |
+| RerankTimeoutMs | integer | Rerank 超时毫秒 |
+
+四、Feature Flags（与 VCP-CDS 联动）
+| Flag | 默认值 | 说明 |
+|------|--------|------|
+| DeepMemoUseCentralSearch | False | DeepMemo 使用中央搜索（关闭时使用旧 EXE） |
+| DeepMemoLegacyFallback | True | 旧版回退 |
+
+关闭 VCP-CDS 后 (`ChatDataServiceEnabled=False`)：DeepMemo 继续使用旧 EXE，中央数据库保留供诊断或后续恢复。
+
+五、调用命令列表
+
+1. DeepMemo - 深度回忆检索
+   功能描述：根据关键词在指定女仆的记忆库中进行搜索，返回格式化的对话片段
+
+   参数列表：
+   - tool_name (string, 必需): 固定为「始」DeepMemo「末」
+   - maid (string, 必需): 发起请求的AI女仆的中文名（如小克、小吉、小娜），通过名字匹配记忆
+   - keyword (string, 必需): 用于搜索的关键词，多个关键词可用英文逗号、中文逗号或空格分隔
+   - window_size (integer, 可选, 范围1-20, 默认10): 上下文窗口大小，代表以匹配到的对话为中心，向前和向后各取多少轮对话
+   - rerank (boolean, 可选): true 表示本次请求精排，false 表示本次强制跳过；省略时遵循服务端 RerankSearch 配置
+
+   高级搜索语法（keyword参数）：
+   - 普通词：VCP
+   - 精确短语："VCP服务器"
+   - 正向加权 (0.0-2.0)：(重要概念:1.5)
+   - 负向排除：[闲聊] //不支持权重
+   - OR逻辑：{破解|渗透|测试} //支持正向权重
+   - 组合示例：[闲聊],[日常对话],(技术:1.2),(代码:1.1),{bug|修复|问题:1.3}
+
+   完整调用格式（含 rerank）：
+   <<<[TOOL_REQUEST]>>>
+   maid:「始」小克「末」,
+   tool_name:「始」DeepMemo「末」,
+   keyword:「始」深度回忆,系统,构想「末」,
+   window_size:「始」6「末」,
+   rerank:「始」true「末」
+   <<<[END_TOOL_REQUEST]>>>
+   返回值说明：返回多个回忆片段的格式化字符串，每个片段包含相关对话内容；失败时返回错误信息
+
+六、使用示例
+
+示例1：基础关键词搜索
+<<<[TOOL_REQUEST]>>>
+maid:「始」小克「末」,
+tool_name:「始」DeepMemo「末」,
+keyword:「始」VCP插件「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例2：多关键词搜索（空格分隔）
+<<<[TOOL_REQUEST]>>>
+maid:「始」小克「末」,
+tool_name:「始」DeepMemo「末」,
+keyword:「始」用户 需求 功能「末」,
+window_size:「始」8「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例3：使用精确短语和权重
+<<<[TOOL_REQUEST]>>>
+maid:「始」小吉「末」,
+tool_name:「始」DeepMemo「末」,
+keyword:「始」"系统架构",(核心:1.5)「末」,
+window_size:「始」10「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例4：使用排除和OR逻辑
+<<<[TOOL_REQUEST]>>>
+maid:「始」小娜「末」,
+tool_name:「始」DeepMemo「末」,
+keyword:「始」[闲聊],{bug|错误|问题:1.2}「末」,
+window_size:「始」5「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例5：启用 Rerank 精排
+<<<[TOOL_REQUEST]>>>
+maid:「始」小克「末」,
+tool_name:「始」DeepMemo「末」,
+keyword:「始」深度回忆,系统,构想「末」,
+window_size:「始」6「末」,
+rerank:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+七、VCP-CDS 身份解析
+DeepMemo 请求的身份解析位于 VCP-CDS 的 DeepMemo 请求规范化层，不位于 Tantivy 层。
+解析顺序：
+1. ownerId 精确定位
+2. Agent 显示名精确匹配
+3. 旧 maid 参数唯一包含匹配
+4. 多个包含候选返回 AMBIGUOUS_IDENTITY
+
+示例：maid = Nova → display_name = vcp小助手Nova，当且仅当包含结果唯一时解析为对应 Agent。Tantivy 始终接收解析后的精确 Owner ID，不执行名称猜测。
+
+八、注意事项与限制
+1. 女仆名称匹配：maid 参数通过 VCP-CDS 身份解析层处理，支持精确匹配和唯一包含匹配
+2. Rerank 精排：rerank 参数为 true/false/省略三态，省略时遵循服务端 RerankSearch 配置
+3. 通信超时：30000ms (30秒)，相比旧版的 180 秒大幅缩短，因为搜索由 VCP-CDS 本地服务执行
+4. 旧版回退：DeepMemoLegacyFallback=True 时，若中央搜索不可用可回退到旧 EXE
+5. 返回格式：[回忆片段N：\n发言人: 内容\n...]，多个片段之间用空行分隔
+
+九、关联模块
+- VCP-CDS (216)：中央聊天数据服务，DeepMemo 通过其中央搜索接口工作
+- VCPMobileSync：移动消息同步，与 DeepMemo 共享 VCP-CDS 数据面
+- DailyNote (30)：日记管理，可用于存储和组织记忆内容
+- LightMemo (59)：轻量记忆，另一条记忆链路
+
+Tag: 深度回忆, 聊天记录检索, 记忆管理, 上下文感知, 高级搜索, 权重调整, Rerank精排, VCP-CDS, hybridservice, 2026-07-29

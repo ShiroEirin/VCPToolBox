@@ -1,0 +1,72 @@
+[2026-07-24] - 哈雷酱
+# ResultDeduplicator 结果去重器与 TagConsistencyService 标签一致性服务
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-24
+适用范围：`ResultDeduplicator.js`（418行）+ `modules/knowledgeBase/tagConsistencyService.js`（566行）+ `tests/resultDeduplicator.test.js`（123行）
+事实来源：
+- `D:\github\VCP\VCPToolBox\ResultDeduplicator.js`（16KB，418行）
+- `D:\github\VCP\VCPToolBox\modules\knowledgeBase\tagConsistencyService.js`（21KB，566行）
+- `D:\github\VCP\VCPToolBox\tests\resultDeduplicator.test.js`（6KB，123行）
+- 上游commit: `95597e72 多个核心管线加固和优化`
+
+## 核心结论
+本次更新新增了两个重要的后处理组件。ResultDeduplicator 是 KnowledgeBaseManager 的通用结果去重器，提供硬去重（chunkId/正文/路径身份）和语义去重（余弦近重复抑制）两层机制。TagConsistencyService 是标签一致性服务，负责扫描知识库目录、维护标签快照、检测标签与文件的一致性。两者都不属于 TagMemo/RiverMemo 的 Rust 查询主链，只处理各召回引擎已返回的候选。
+
+## ResultDeduplicator.js
+
+### 两层去重机制
+1. **硬去重** — 按 chunkId、规范化正文和稳定路径身份消除完全重复项
+2. **语义去重** — 对有向量的候选执行余弦近重复抑制，无向量候选始终安全保留
+
+### 配置参数
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| dimension | 3072 | 向量维度 |
+| semanticThreshold | 0.92 | 语义去重余弦阈值 |
+| maxResults | 1000 | 最大结果数 |
+| minSemanticCandidates | 2 | 最小语义去重候选数 |
+
+### 来源优先级
+| 来源 | 优先级 |
+|------|--------|
+| rag | 50 |
+| time | 45 |
+| bm25_body | 40 |
+| bm25_tag | 40 |
+| continuity | 35 |
+| associate | 10 |
+| unknown | 0 |
+
+### 定位
+- 不属于 TagMemo/RiverMemo 的 Rust 查询主链
+- 为霰弹枪查询、多路 BM25/Time 合并和最终输出提供统一的后处理能力
+- 有配套测试文件 `tests/resultDeduplicator.test.js`（123行）
+
+## TagConsistencyService.js
+
+### 核心功能
+- 扫描知识库目录，维护标签快照（TTL 30分钟）
+- 检测标签与文件的一致性
+- 支持内置忽略目录（node_modules, .git, dist, target, image）
+- 支持自定义忽略文件夹和前缀
+
+### 关键参数
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| SNAPSHOT_TTL_MS | 30 * 60 * 1000 | 快照存活时间30分钟 |
+| DETAIL_LIMIT | 200 | 详情返回上限 |
+
+### 架构位置
+- 属于 `modules/knowledgeBase/` 模块
+- 构造函数要求传入 owner（KnowledgeBaseManager 实例）
+- 可选注入 VexusIndex（用于向量相关操作）
+- 使用 EmbeddingUtils 的 getEmbeddingsBatch 做批量嵌入
+
+### 内置忽略目录
+```
+node_modules, .git, dist, target, image
+```
+
+关联节点：KnowledgeBaseManager(200), RAGDiaryPlugin(03), rust-vexus-lite记忆管线(209), RiverMemoEngine与TopologyV3(207)
+Tag: ResultDeduplicator, 硬去重, 语义去重, 余弦近重复, TagConsistencyService, 标签一致性, 快照, KnowledgeBaseManager, 后处理, 2026-07-24
