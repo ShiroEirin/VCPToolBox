@@ -33,6 +33,22 @@
       },
       "position": "before",
       "target": "last_user"
+    },
+    {
+      "id": "rule-1776076194025",
+      "name": "新规则",
+      "enabled": true,
+      "type": "relative",
+      "content": {
+        "role": "system",
+        "content": "[系统提示:]这是御主当前消息的时间：{{Date}},{{Today}},{{Time}}\n御主距离上次与你交谈的真实间隔：{{TimeSinceLastChat}}"
+      },
+      "ui": {
+        "textareaWidth": "",
+        "textareaHeight": ""
+      },
+      "position": "after",
+      "target": "last_user"
     }
   ]
 }
