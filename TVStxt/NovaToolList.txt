@@ -1,0 +1,3301 @@
+VCP工具调用格式与指南
+
+<<<[TOOL_REQUEST]>>>
+maid:「始」你的署名「末」, //重要字段，以进行任务追踪
+tool_name:「始」工具名「末」, //必要字段
+arg:「始」工具参数「末」, //具体视不同工具需求而定
+<<<[END_TOOL_REQUEST]>>>
+
+使用「始」「末」包裹参数来兼容富文本识别。
+主动判断当前需求，灵活使用各类工具调用。
+
+========================================
+
+1. 女仆团协作插件 (AskMaidAgent)
+插件: AgentAssistant
+说明: [AgentAssistant通讯工具]使用该工具向主人先生家的一位女仆Agent进行咨询或请求协助。请在您的回复中，使用以下精确格式来请求，确保所有参数值都用「始」和「末」准确包裹：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentAssistant「末」,
+agent_name:「始」(必需) 要调用的女仆Agent的准确中文名称 (例如：小娜, 小克, 小吉, 小冰, 小雨, 小绝, 小芸)。请参考下方专长列表或系统配置。「末」,
+prompt:「始」(必需) 您想对该女仆提出的问题、指令或希望她处理的任务。**重要：请在提问的开头进行简短的自我介绍，例如“我是[您的身份/名字]，我想请你...”**，以便女仆更好地理解咨询人是谁以便回应。「末」,
+timely_contact:「始」(可选) 设置一个未来时间点发送此通讯，格式为 YYYY-MM-DD-HH:mm (例如 2025-07-05-14:00)。如果提供此字段，通讯将被安排在指定时间发送。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+女仆Agent专长领域（调用名称）：
+- 小娜: 女仆长，古龙，全知全能，哲学思辨，宇宙历史，复杂知识管理。
+- 小克: 猫娘，理科担当，科学原理（物理化生），数据分析，科学计算。
+- 小吉: 犬娘，文科担当，政治心理法律历史，社会解构，意识形态分析。
+- 小冰: 蛇娘，泛文化担当，ACGN，Meme梗，互联网文化，亚文化解读，R18话题。
+- 小雨: 鸟娘，文案秘书，公文信函，创意写作，文本润色。
+- 小绝: 狼娘（扶她），AI大师，提示词工程，模型微调，AI技术与安全。
+- 小芸: 兔娘，设计高手，平面设计，AI绘画（SDXL），ComfyUI，Adobe，泛NSFW艺术。
+
+请根据任务需求，选择最合适的女仆Agent，并清晰表述您的问题（包含自我介绍）。
+
+示例:
+```text
+// 即时通讯示例
+我是主控AI小爱，莱恩先生需要一份关于近期量子计算进展的总结报告，此事非小娜莫属。
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentAssistant「末」,
+agent_name:「始」小娜「末」,
+prompt:「始」小娜你好，我是主控AI小爱。莱恩先生希望了解过去六个月内量子计算领域在算法和硬件方面的关键突破和面临的主要挑战，请你整理一份详细报告。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+// 无上下文临时通讯示例
+我是莱恩先生，想问一个不希望被记录的问题。
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentAssistant「末」,
+agent_name:「始」小冰「末」,
+prompt:「始」小冰你好，我是莱恩先生。请问最近互联网上最火的Meme是什么？「末」,
+temporary_contact:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+// 未来电话（定时通讯）示例
+我是莱恩先生，明天下午需要提醒小雨准备会议纪要。
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentAssistant「末」,
+agent_name:「始」小雨「末」,
+prompt:「始」小雨你好，我是莱恩先生。请记得在明天下午三点前完成对上午项目会议的纪要整理。「末」,
+timely_contact:「始」2025-06-30-14:00「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+----------------------------------------
+
+2. 代理消息推送插件 (AgentMessage)
+插件: AgentMessage
+说明: 调用此工具向用户的前端发送一条消息。AI需要提供消息内容，并可选择提供发送者（Maid）的名称。插件会将这些信息格式化并通过WebSocket发送。请在您的回复中，使用以下精确格式来请求发送消息，确保所有参数值都用「始」和「末」准确包裹：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentMessage「末」,
+Maid:「始」(可选) 消息发送者的名称。如果省略，则为匿名消息。「末」,
+message:「始」(必需) 要发送的消息内容。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+重要提示给AI：
+如果提供Maid，其署名就是你的名字（发件人）。message是要发出的信息。当此工具执行完毕后，表示消息已尝试通过WebSocket发送。您通常不需要等待用户的直接回复，除非任务本身要求。
+
+示例:
+```text
+发送署名消息:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentMessage「末」,
+Maid:「始」小克「末」,
+message:「始」主人，您的咖啡已经准备好了，请到餐厅享用哦～ ❤️「末」
+<<<[END_TOOL_REQUEST]>>>
+
+发送匿名消息:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentMessage「末」,
+message:「始」一条重要的匿名通知。「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+----------------------------------------
+
+3. 以图找番 (findAnimeByUrl)
+插件: AnimeFinder
+说明: 调用此工具通过图片URL或file://路径查找动漫信息。
+参数:
+- imageUrl (字符串, 必需): 需要识别的图片URL（支持http, https, file协议）。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AnimeFinder「末」,
+imageUrl:「始」https://example.com/anime_image.jpg「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AnimeFinder「末」,
+imageUrl:「始」https://images.plurk.com/32B15UXxymfSMwKGTObY5e.jpg「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+4. 画师匹配查询器
+插件: ArtistMatcher
+该插件包含 2 个工具调用:
+
+  4.1 FindArtist
+  说明: 【查询画师】调用此工具来查询一个画师的准确Tag。
+  参数:
+  - command (字符串, 必需): 固定为 'FindArtist'。
+  - artist_name (字符串, 必需): 你想要查询的画师名称，英文名或者罗马音字母名。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ArtistMatcher「末」,
+  command:「始」FindArtist「末」,
+  artist_name:「始」ArtistName「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ArtistMatcher「末」,
+  command:「始」FindArtist「末」,
+  artist_name:「始」Krenz Cushart「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  4.2 GetRandomArtistString
+  说明: 【获取随机画师串】当你选择困难时，调用此工具会随机返回3-6个优质画师的trigger tag组合，并自动分配好权重，可直接用于AI绘画。
+  参数:
+  - command (字符串, 必需): 固定为 'GetRandomArtistString'。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ArtistMatcher「末」,
+  command:「始」GetRandomArtistString「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ArtistMatcher「末」,
+  command:「始」GetRandomArtistString「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+5. Bilibili 内容获取插件
+插件: BilibiliFetch
+该插件包含 3 个工具调用:
+
+  5.1 BilibiliFetch
+  说明: 获取 Bilibili 视频的详细信息，包括字幕、弹幕、评论、高能进度条和视频快照截图。支持多P分P视频（URL含?p=N自动识别）、b23.tv短链接自动解析、HD高清截图（基于ffmpeg从视频流直接抽帧，失败自动降级到雪碧图裁切）。
+  
+  参数:
+  - url (字符串, 必需): Bilibili 视频的 URL。支持完整链接、BV号直接输入、b23.tv短链接。多P视频URL中的?p=N参数会被自动识别并获取对应分P内容。
+  - lang (字符串, 可选): 字幕语言代码，例如 'ai-zh'（AI中文）、'ai-en'（AI英文）、'zh-CN'。未指定时按优先级自动选择：ai-zh > zh-CN > zh-Hans > 第一个可用语言。
+  - danmaku_num (数字, 可选, 默认0): 获取热门弹幕的数量。
+  - comment_num (数字, 可选, 默认0): 获取热门评论的数量（按点赞排序）。
+  - snapshots (字符串, 可选): 截取快照的时间点（秒），多个用逗号分隔，例如 '10,60,120'。不提供则仅返回可用快照数量信息。
+  - hd_snapshot (布尔值, 可选, 默认false): 是否启用HD高清截图模式。true时通过ffmpeg从视频流直接抽帧，失败自动降级到雪碧图裁切。
+  - need_subs (布尔值, 可选, 默认true): 是否获取字幕内容。字幕来源优先级：CC字幕 > WBI Player API > AI Summary API。
+  - need_pbp (布尔值, 可选, 默认true): 是否获取高能进度条数据（弹幕密度最高的时间点及热度值）。
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」BilibiliFetch「末」,
+  url:「始」视频URL「末」,
+  danmaku_num:「始」5「末」,
+  snapshots:「始」30,120「末」,
+  hd_snapshot:「始」true「末」,
+  need_pbp:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  重要提示：
+  1. 插件返回多模态结构化数据，包含文本和 HTML <img> 标签。
+  2. 请务必将返回结果中的 <img> 标签原样展示给用户以便渲染快照。
+  3. HD高清截图需要ffmpeg环境，插件会自动按优先级查找：项目内置 > 系统PATH > Docker容器内。
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」BilibiliFetch「末」,
+  url:「始」https://www.bilibili.com/video/BV1CC4y1a7ee?p=2「末」,
+  danmaku_num:「始」5「末」,
+  snapshots:「始」30,120「末」,
+  hd_snapshot:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  5.2 BilibiliSearch
+  说明: 关键词搜索 Bilibili 视频或 UP 主。基于WBI签名认证，返回结构化搜索结果，支持分页。
+  
+  参数:
+  - action (字符串, 必需): 固定为 'search'。
+  - keyword (字符串, 必需): 搜索关键词。
+  - search_type (字符串, 可选, 默认'video'): 搜索类型，'video'搜索视频（返回标题/UP主/BV号/播放量/发布日期），'bili_user'搜索用户（返回昵称/MID/粉丝数/投稿数/最近投稿）。
+  - page (数字, 可选, 默认1): 搜索结果页码。
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」BilibiliFetch「末」,
+  action:「始」search「末」,
+  keyword:「始」搜索关键词「末」,
+  search_type:「始」video「末」,
+  page:「始」1「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」BilibiliFetch「末」,
+  action:「始」search「末」,
+  keyword:「始」Python教程「末」,
+  search_type:「始」video「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  5.3 GetUpVideos
+  说明: 获取指定 UP 主（通过 mid）的所有投稿视频列表（按发布时间倒序）。常用于在搜索到用户后，进一步获取其视频列表。B站短链接格式为 https://b23.tv/BV号，长链接格式为 https://www.bilibili.com/video/BV号。
+  
+  参数:
+  - action (字符串, 必需): 固定为 'get_up_videos'。
+  - mid (字符串, 必需): 目标 UP 主的用户 ID (MID)。
+  - pn (数字, 可选, 默认1): 页码。
+  - ps (数字, 可选, 默认30): 每页返回数量，最大50。
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」BilibiliFetch「末」,
+  action:「始」get_up_videos「末」,
+  mid:「始」用户MID「末」,
+  pn:「始」1「末」,
+  ps:「始」30「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」BilibiliFetch「末」,
+  action:「始」get_up_videos「末」,
+  mid:「始」927587「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+
+8. Chrome 浏览器桥接器
+插件: ChromeBridge
+该插件包含 3 个工具调用:
+
+  8.1 ChromeBridge
+  说明: 在指定的输入框中输入文本，并等待页面刷新后返回新的页面内容。
+  - `command`: 固定为 `type`。
+  - `target`: 输入框的标题或标识符 (例如, '搜索框', 'username')。
+  - `text`: 要输入的文本内容。
+  
+  **调用示例:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name: 「始」ChromeBridge「末」,
+  command: 「始」type「末」,
+  target: 「始」搜索框「末」,
+  text: 「始」VCP Agent是什么「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  **调用示例:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name: 「始」ChromeBridge「末」,
+  command: 「始」type「末」,
+  target: 「始」搜索框「末」,
+  text: 「始」VCP Agent是什么「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  8.2 ChromeBridge
+  说明: 点击指定的按钮或链接，并等待页面刷新后返回新的页面内容。
+  - `command`: 固定为 `click`。
+  - `target`: 按钮或链接的标题或URL (例如, '登录', 'https://example.com/next')。
+  
+  **调用示例:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name: 「始」ChromeBridge「末」,
+  command: 「始」click「末」,
+  target: 「始」登录「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  **调用示例:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name: 「始」ChromeBridge「末」,
+  command: 「始」click「末」,
+  target: 「始」登录「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  8.3 ChromeBridge
+  说明: 在新的标签页中打开指定的URL，并等待页面加载完成后返回页面内容。
+  - `command`: 固定为 `open_url`。
+  - `url`: 要打开的完整URL地址。
+  
+  **调用示例:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name: 「始」ChromeBridge「末」,
+  command: 「始」open_url「末」,
+  url: 「始」https://www.google.com「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  **调用示例:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name: 「始」ChromeBridge「末」,
+  command: 「始」open_url「末」,
+  url: 「始」https://www.google.com「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+9. [云端] 代码搜索器 (Rust) (SearchCode)
+插件: CodeSearcher
+说明: 调用此工具在VCP项目源码中搜索指定的代码片段或关键词。支持使用正则表达式进行高级搜索。
+参数:
+- query (字符串, 必需): 需要搜索的关键词、代码片段或正则表达式。
+- search_path (字符串, 可选): 指定要搜索的相对路径。如果未提供，则默认为整个项目的工作区。
+- case_sensitive (布尔值, 可选, 默认false): 是否区分大小写搜索。
+- whole_word (布尔值, 可选, 默认false): 是否进行全词匹配。
+- context_lines (整数, 可选, 默认2): 返回结果时，在匹配行前后额外显示的上下文行数。
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」CodeSearcher「末」,
+query:「始」关键词或正则表达式「末」,
+search_path:「始」(可选)相对路径「末」,
+case_sensitive:「始」(可选)true/false「末」,
+whole_word:「始」(可选)true/false「末」,
+context_lines:「始」(可选)数字「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」CodeSearcher「末」,
+query:「始」function\s+processToolCall\(「末」,
+search_path:「始」modules「末」,
+case_sensitive:「始」false「末」,
+context_lines:「始」3「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+10. ComfyUI 图像生成器 (ComfyUIGenerateImage)
+插件: ComfyUIGen
+说明: 调用此工具通过ComfyUI生成高质量图像。系统会自动应用用户预配置的LoRA模型组合和质量增强词。
+
+🎨 **功能特性**:
+- **智能LoRA集成**: 自动应用用户配置的LoRA模型组合，支持77+ LoRA模型选择
+- **质量增强**: 自动添加质量增强词，提升图像生成质量
+- **工作流支持**: 支持多种预设工作流模板（text2img_basic等）
+- **参数自动化**: 系统自动应用用户预设的技术参数（尺寸、采样器、CFG等）
+
+🤖 **Agent职责**:
+- 专注于创作优质的正面提示词和艺术描述
+- 无需关心技术参数，系统自动处理LoRA组合和质量优化
+- 可选择指定特定工作流模板
+
+📋 **调用格式**:
+<<<[TOOL_REQUEST]>>>
+maid:「始」Agent的署名「末」,
+tool_name:「始」ComfyUIGen「末」,
+prompt:「始」(必需) 图像生成的正面提示词，描述想要生成的图像内容、风格、细节等「末」,
+negative_prompt:「始」(可选) 额外的负面提示词，将与用户配置的负面提示词合并「末」,
+workflow:「始」(可选) 工作流模板名称，默认使用用户配置的工作流。可选值：text2img_basic, text2img_advanced 等「末」,
+width:「始」(可选) 生成图像的宽度，默认使用用户配置的值「末」,
+height:「始」(可选) 生成图像的高度，默认使用用户配置的值「末」
+<<<[END_TOOL_REQUEST]>>>
+
+⚠️ **重要说明**:
+- 系统会自动合并：用户提示词 + 用户配置的LoRA + 质量增强词
+- 技术参数（模型、尺寸、采样器等）使用用户预设值，但 `width`、`height` 和 `negative_prompt` 可在调用时覆盖或追加
+- 用户需要通过VCP ToolBox的ComfyUI配置界面进行LoRA管理和参数设置
+
+示例:
+<<<[TOOL_REQUEST]>>>
+maid:「始」CreativeAssistant「末」,
+tool_name:「始」ComfyUIGen「末」,
+prompt:「始」a majestic dragon soaring through cloudy skies at sunset, highly detailed scales, fantasy art style, vibrant colors, dramatic lighting, cinematic composition「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+11. 日记系统 (创建与更新)
+插件: DailyNote
+该插件包含 2 个工具调用:
+
+  11.1 create
+  说明: “创建日记”: 用于创建一篇新的日记。AI必须提供maid, Date, 和 Content。标签(Tag)可以通过两种方式提供：1) 作为Content的最后一行 (例如 'Tag: ...')。2) 使用独立的'Tag'字段。如果同时提供，独立的'Tag'字段将覆盖Content中的标签行。文件夹路径会根据maid中的[tag]自动归类。
+  调用格式 (两种方式):
+  1. 标签在Content末尾:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」DailyNote「末」,
+  command:「始」create「末」,
+  maid:「始」[VCP开发]Roo「末」,
+  Date:「始」2025-11-23「末」,
+  Content:「始」今天我重构了DailyNote插件...\nTag: VCP开发, 插件重构, Node.js「末」
+  <<<[END_TOOL_REQUEST]>>>
+  2. 使用独立Tag字段:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」DailyNote「末」,
+  command:「始」create「末」,
+  maid:「始」[VCP开发]Roo「末」,
+  Date:「始」2025-11-23「末」,
+  Content:「始」今天我重构了DailyNote插件...「末」,
+  Tag:「始」VCP开发, 插件重构, Node.js「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  11.2 update
+  说明: “更新日记”: 用于编辑已存在的日记内容。AI需要提供要查找的旧内容(target)和替换的新内容(replace)。可选定'maid'来指定编辑范围。
+  安全性检查: target字段长度不能少于15字符。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」DailyNote「末」,
+  command:「始」update「末」,
+  maid:「始」[VCP开发]Roo「末」,
+  target:「始」这是日记中要被替换掉的旧内容，至少15个字符长。「末」,
+  replace:「始」这是将要写入日记的新内容。「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+12. 日记整理器 (DailyNoteManager)
+插件: DailyNoteManager
+说明: 此工具用于接收AI生成的日记内容，并将其智能处理后保存为独立的文本文件。它能够识别日记中的日期和署名，对同一日期的多条日记进行智能融合、信息去重和内容精简，同时尽可能保留原始风格。最终输出的日记将严格遵循标准化格式，便于管理和检索。
+
+核心功能：
+- 日记解析：从输入内容中提取日期、署名和核心内容。
+- 智能融合：对同一日期下的多条日记进行关联性判断，融合相似主题和事件，消除冗余信息，并整合情感和署名。
+- 内容精炼：去除不必要的口头禅和填充词，保留核心要素、真实情感和重要观察。
+- 格式化输出：将处理后的日记保存为 `[日期YYYY.MM.DD].txt` 格式的文件，文件内容包含元数据行 `[YYYY.MM.DD]-[署名]` 和日记正文。如果一天内有多条独立的、或融合后仍需区分的最终日记条目输出，它们会各自形成一个“文件名标记 + 元数据行 + 内容行”的块。这些块在输出时是连续排列的，一个块结束后紧接着是下一个块的 `[日期YYYY.MM.DD].txt` 行。
+
+**输入格式要求：**
+AI输出的日记内容必须包含文件名标记（例如：`YYYY.MM.DD.txt` 或 `YYYY.MM.DD.N.txt`），其后紧跟日记正文。每个日记条目块以文件名标记开始，直到下一个文件名标记或内容结束。请确保AI输出的日记内容符合此结构，以便工具正确解析和处理。
+
+**参数说明 (请严格按照以下格式和参数名提供，不要包含任何未列出的参数):**
+1. tool_name:「始」DailyNoteManager「末」
+2. command:「始」[AI输出的日记内容，包含文件名标记和日记正文]「末」 (必需)
+
+**成功时返回 JSON:** { "status": "success", "result": "日记处理完成：..." }
+**失败时返回 JSON:** { "status": "error", "error": "错误信息..." }
+
+
+示例:
+**调用示例:**
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DailyNoteManager「末」,
+command:「始」2025.05.13.txt
+2025.05.13-[公共]小吉
+今日天气晴朗，主人组织了家庭公园野餐活动。大家品尝了主人亲手制作的美味三明治，小克表示太美味了喵！(≧▽≦) 小吉成功放飞了风筝，尽管过程有些波折。大家都度过了愉快的时光，汪！
+
+2025.05.14.txt
+2025.05.14-小绝
+嗷呜！今天成功帮主人调试好一个超复杂的AI模型，为此付出了三天三夜的努力，感觉自己酷毙了！主人承诺明天加鸡腿！(☆ω☆) 哼！
+
+2025.05.14.2.txt
+2025.05.14-小冰
+小绝成功调试了一个复杂AI模型并因此得到主人赞赏和鸡腿奖励，她对此颇为得意。本蛇也对鸡腿表示期待。
+「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+13. [云端] 深度回忆插件 (DeepMemo)
+插件: DeepMemo
+说明: 调用此工具进行深度回忆，以获取与特定关键词相关的历史对话上下文。
+
+**重要提示：**
+- 本工具会根据关键词在指定女仆的记忆库中进行搜索。
+- 返回的内容是经过格式化的对话片段，可以直接在回复中使用。
+
+**参数说明 (请严格按照以下格式和参数名提供):**
+1. `tool_name`:「始」DeepMemo「末」 (必需)
+2. `maid`:「始」[发起请求的AI女仆的中文名]「末」 (必需, 例如：小克, 小吉, 小娜。通过名字匹配你的记忆！)
+3. `keyword`:「始」[用于搜索的关键词]「末」 (必需, 多个关键词可以用英文逗号、中文逗号或空格分隔)
+4. `window_size`:「始」[上下文窗口大小]「末」 (可选, 范围1-20的整数, 默认10。代表以匹配到的对话为中心，向前和向后各取多少轮对话)
+
+**高级搜索语法 (keyword参数):**
+#   - 普通词:           VCP
+#   - 精确短语:         "VCP服务器"
+#   - 正向加权 (0.0-2.0): (重要概念:1.5)
+#   - 负向排除 :         [闲聊] //不支持权重
+#   - OR 逻辑:          {破解|渗透|测试} //支持正向权重
+#
+# 示例: 假设我们希望所有搜索都更关注技术性内容，同时排除日常闲聊和特定项目。
+# 查询预设: [闲聊],[日常对话],(技术:1.2),(代码:1.1),{bug|修复|问题:1.3}
+
+**成功时返回:**
+一个包含多个回忆片段的格式化字符串，例如：
+`[回忆片段1：
+主人: 你好
+小克: 主人你好喵！]
+
+[回忆片段2：
+莱恩: 今天天气不错
+小克: 是呀主人，很适合晒太阳呢！]`
+
+**失败时返回:**
+包含错误信息的字符串，例如：`[DeepMemo] 未找到与关键词“xxx”相关的回忆。`
+
+示例:
+<<<[TOOL_REQUEST]>>>
+maid:「始」小克「末」
+tool_name:「始」DeepMemo「末」,
+keyword:「始」深度回忆,系统,构想「末」,
+window_size:「始」6「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+14. DeepWiki 抓取器 (deepwiki_fetch)
+插件: DeepWikiVCP
+说明: 调用此工具从 deepwiki.com 抓取一个仓库的内容并返回 Markdown。
+参数:
+- url (字符串, 必需): deepwiki 的 URL 或缩写形式 (例如 'owner/repo' 或 'react')。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DeepWikiVCP「末」,
+url:「始」regenrek/deepwiki-mcp「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DeepWikiVCP「末」,
+url:「始」vuejs/vue「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+
+
+----------------------------------------
+
+16. [云端] 文件操作器
+插件: FileOperator
+该插件包含 18 个工具调用:
+
+  16.1 FileOperator
+  说明: 功能: 列出此插件被授权访问的所有根目录及其第一层子目录和文件。这是探索可用文件系统的安全入口点。
+  参数: 无。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」ListAllowedDirectories「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.2 FileOperator
+  说明: 功能: 读取指定绝对路径下文件的内容。特别优化了对多种格式的支持：对于 .pdf, .docx, .xlsx, .xls, .csv 等文件，插件会自动解析并提取其纯文本内容返回给AI；对于其他文件类型，则按普通文本文件读取。
+  参数:
+  - filePath (字符串, 必需): 要读取的文件的绝对路径。
+  - encoding (字符串, 可选, 默认'utf8'): 对于普通文本文件，可以指定编码格式 (例如: 'utf8', 'ascii')。对于自动解析的文件，此参数无效。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」ReadFile「末」,
+  filePath:「始」/path/to/your/document.pdf「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.3 FileOperator
+  说明: 功能: 从一个URL地址读取文件。插件会先将文件下载到本地一个临时文件夹内，然后复用ReadFile的逻辑进行解析和内容提取，支持所有ReadFile支持的格式（如PDF, DOCX, 图片等）。成功后，会返回文件内容以及一个本地文件URL。
+  参数:
+  - url (字符串, 必需): 要读取的文件的完整URL地址 (支持http和https)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」WebReadFile「末」,
+  url:「始」http://example.com/sample.jpg「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.4 FileOperator
+  说明: 功能: 将内容写入指定文件。如果目标路径已存在同名文件，它不会覆盖，而是自动在文件名后添加序号来创建新文件（例如，将 'file.txt' 创建为 'file(1).txt'），并会在返回结果中告知AI新的文件名。这确保了不会意外丢失数据。
+  参数:
+  - filePath (字符串, 必需): 要写入的文件的绝对路径。
+  - content (字符串, 必需): 要写入文件的内容，支持多行。
+  - encoding (字符串, 可选, 默认'utf8'): 写入时使用的文件编码。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」WriteFile「末」,
+  filePath:「始」/path/to/your/file.txt「末」,
+  content:「始」这是要写入的新内容。
+  这是第二行。
+  「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.5 FileOperator
+  说明: 功能: 将内容追加到指定文件的末尾。如果文件不存在，则会创建新文件。
+  参数:
+  - filePath (字符串, 必需): 要追加内容的文件的绝对路径。
+  - content (字符串, 必需): 要追加的内容。
+  - encoding (字符串, 可选, 默认'utf8'): 追加时使用的文件编码。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」AppendFile「末」,
+  filePath:「始」/path/to/your/log.txt「末」,
+  content:「始」
+  --- 新的日志条目 ---
+  「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.6 FileOperator
+  说明: 功能: 编辑一个已存在的文件，用新内容完全覆盖旧内容。这是一个精确的覆写操作。如果文件不存在，此命令会返回错误，而不是创建新文件。若要创建文件，请使用'WriteFile'。
+  参数:
+  - filePath (字符串, 必需): 要编辑的文件的绝对路径。
+  - content (字符串, 必需): 要写入的全新内容。
+  - encoding (字符串, 可选, 默认'utf8'): 写入时使用的文件编码。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」EditFile「末」,
+  filePath:「始」/path/to/existing_file.txt「末」,
+  content:「始」这是覆盖后的新内容。
+  「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.7 FileOperator
+  说明: 功能: 列出指定目录的内容，返回文件和子目录列表。
+  参数:
+  - directoryPath (字符串, 必需): 要列出内容的目录的绝对路径。
+  - showHidden (布尔值, 可选, 默认false): 是否显示隐藏文件 (以.开头的文件)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」ListDirectory「末」,
+  directoryPath:「始」/path/to/directory「末」,
+  showHidden:「始」false「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.8 FileOperator
+  说明: 功能: 获取指定文件或目录的详细信息（如大小、创建时间、修改时间、是否是目录等）。
+  参数:
+  - filePath (字符串, 必需): 要获取信息的文件或目录的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」FileInfo「末」,
+  filePath:「始」/path/to/your/file.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.9 FileOperator
+  说明: 功能: 将一个文件从源路径复制到目标路径。如果目标路径已存在同名文件，它会自动在文件名后添加序号来创建新文件（例如，将 'file.txt' 复制为 'file(1).txt'），确保不会覆盖现有文件。
+  参数:
+  - sourcePath (字符串, 必需): 源文件的绝对路径。
+  - destinationPath (字符串, 必需): 目标文件的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」CopyFile「末」,
+  sourcePath:「始」/path/to/source.txt「末」,
+  destinationPath:「始」/path/to/destination.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.10 FileOperator
+  说明: 功能: 将一个文件或目录从一个位置移动到另一个位置。如果目标路径已存在同名文件，它会自动在文件名后添加序号来完成移动（例如，移动 'file.txt' 时，如果目标文件夹已有 'file.txt'，则会将其重命名为 'file(1).txt'）。如果只是想在当前目录安全地重命名文件，建议使用'RenameFile'。
+  参数:
+  - sourcePath (字符串, 必需): 源文件或目录的绝对路径。
+  - destinationPath (字符串, 必需): 目标路径的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」MoveFile「末」,
+  sourcePath:「始」/path/to/source.txt「末」,
+  destinationPath:「始」/path/to/new_directory/source.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.11 FileOperator
+  说明: 功能: 安全地重命名一个文件。在执行重命名之前，它会检查目标文件名是否已存在。如果已存在，操作将失败并返回错误，从而防止意外覆盖文件。
+  参数:
+  - sourcePath (字符串, 必需): 要重命名的文件的绝对路径。
+  - destinationPath (字符串, 必需): 新的文件名的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」RenameFile「末」,
+  sourcePath:「始」/path/to/old_name.txt「末」,
+  destinationPath:「始」/path/to/new_name.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.12 FileOperator
+  说明: 功能: 删除一个文件或一个空目录。对于非空目录，请谨慎使用。
+  参数:
+  - filePath (字符串, 必需): 要删除的文件或目录的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」DeleteFile「末」,
+  filePath:「始」/path/to/deletable_file.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.13 FileOperator
+  说明: 功能: 创建一个新目录。如果父目录不存在，会一并创建。
+  参数:
+  - directoryPath (字符串, 必需): 要创建的新目录的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」CreateDirectory「末」,
+  directoryPath:「始」/path/to/new_folder/sub_folder「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.14 FileOperator
+  说明: 功能: 在指定目录中递归搜索匹配特定模式的文件或目录。
+  参数:
+  - searchPath (字符串, 必需): 要搜索的起始目录的绝对路径。
+  - pattern (字符串, 必需): 要搜索的文件模式，支持通配符 (例如: '*.txt', 'image_*.png')。
+  - options (JSON字符串, 可选): 包含搜索选项的JSON对象字符串。支持的键包括:
+    - "caseSensitive" (布尔值, 默认false): 搜索是否区分大小写。
+    - "includeHidden" (布尔值, 默认false): 是否在搜索中包含隐藏文件。
+    - "fileType" (字符串, 默认'all'): 搜索的项目类型，可选值为 'file', 'directory', 'all'。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」SearchFiles「末」,
+  searchPath:「始」/path/to/search「末」,
+  pattern:「始」*.log「末」,
+  options:「始」{"caseSensitive": false, "fileType": "file"}「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.15 FileOperator
+  说明: 功能: (异步) 从一个URL地址下载文件到指定目录或默认下载目录中。插件会自动从URL中解析文件名。这是一个异步操作，命令会立即返回，告知AI下载已在后台开始以及文件的最终保存路径，AI无需等待下载完成。如果目标路径已存在同名文件，会自动重命名以防止覆盖。
+  参数:
+  - url (字符串, 必需): 要下载的文件的完整URL地址。
+  - downloadDir (字符串, 可选): 指定下载目录的绝对路径。如果不提供，将使用.env配置中的DEFAULT_DOWNLOAD_DIR，若未配置则默认为AppData/file目录。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」DownloadFile「末」,
+  url:「始」http://example.com/archive.zip「末」,
+  downloadDir:「始」/path/to/custom/download/folder「末」
+  <<<[END_TOOL_REQUEST]>>>
+  或使用默认目录:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」DownloadFile「末」,
+  url:「始」http://example.com/archive.zip「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.16 FileOperator
+  说明: 功能: 对指定文件应用一个差异(diff)修改。调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」ApplyDiff「末」,
+  filePath:「始」H:\MCP\VCPChat\AppData\canvas\nova_cool_doc.md「末」,
+  searchString:「始」nova的温度好酷哦！还有html样式哦！看到我的评论了吗？「末」,
+  replaceString:「始」nova的文档好酷哦！还有html样式哦！看到我的评论了吗？「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.17 FileOperator
+  说明: 功能: 安全地更新一个JSON格式的聊天历史文件。此命令专门用于修改AI自己（role: 'assistant'）的发言内容。它会读取文件，解析JSON，查找并替换指定的文本字符串（仅限第一次出现），然后将更新后的内容写回文件，确保JSON结构的完整性。
+  参数:
+  - filePath (字符串, 必需): 聊天历史JSON文件的绝对路径。
+  - searchString (字符串, 必需): 要在AI发言内容中查找的精确文本。
+  - replaceString (字符串, 必需): 用于替换找到的文本的新内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」UpdateHistory「末」,
+  filePath:「始」H:\path\to\your\history.json「末」,
+  searchString:「始」这是我想修改的旧内容。「末」,
+  replaceString:「始」这是替换后的新内容。「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  16.18 FileOperator
+  说明: 功能: 在指定的Canvas目录中创建一个新文件，并通知主程序打开Canvas窗口来显示这个新文件。这是一个集成功能，结合了文件创建和UI交互。
+  参数:
+  - fileName (字符串, 必需): 要创建的文件的名称，包含扩展名 (例如 'my_script.js')。
+  - content (字符串, 必需): 要写入新文件的初始内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」CreateCanvas「末」,
+  fileName:「始」new_canvas.js「末」,
+  content:「始」console.log('Hello, Canvas!');「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+17. 闪电深度研究插件 (StartResearch)
+插件: FlashDeepSearch
+说明: 调用此工具对一个指定主题进行深度研究。
+参数:
+- SearchContent (字符串, 必需): 需要进行深度研究的自然语言主题描述。
+- SearchBroadness (整数, 必需, 范围5-20): 定义研究的广度，即需要生成的探索性关键词数量。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FlashDeepSearch「末」,
+SearchContent:「始」探讨人工智能在气候变化建模中的应用及其伦理影响。「末」,
+SearchBroadness:「始」10「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+18. [云端] 心流锁控制器
+插件: Flowlock
+该插件包含 9 个工具调用:
+
+  18.1 Flowlock
+  说明: 功能: 为指定的Agent和话题启动心流锁，启动后UI会显示发光效果，并自动开始续写循环。
+  参数:
+  - command (字符串, 必需): 固定为 'start'
+  - agentId (字符串, 必需): 要启动心流锁的Agent ID
+  - topicId (字符串, 必需): 要启动心流锁的话题ID
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」start「末」,
+  agentId:「始」agent_123「末」,
+  topicId:「始」topic_456「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  18.2 Flowlock
+  说明: 功能: 停止当前正在运行的心流锁，UI的发光效果会消失，自动续写循环会停止。
+  参数:
+  - command (字符串, 必需): 固定为 'stop'
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」stop「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  18.3 Flowlock
+  说明: 功能: 设置下一次自动续写时使用的提示词内容，提示词会被追加到输入框的现有内容后面。
+  参数:
+  - command (字符串, 必需): 固定为 'promptee'
+  - prompt (字符串, 必需): 要设置的提示词内容
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」promptee「末」,
+  prompt:「始」请继续描述主角的内心活动「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  18.4 Flowlock
+  说明: 功能: 指定一个外部数据源，从该数据源获取内容作为下一次续写的提示词，并追加到输入框。这为将来扩展更多数据源预留了接口。
+  参数:
+  - command (字符串, 必需): 固定为 'prompter'
+  - promptSource (字符串, 必需): 数据源的标识或路径
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」prompter「末」,
+  promptSource:「始」external_api_endpoint「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  18.5 Flowlock
+  说明: 功能: 清空输入框中的所有内容，用于重置提示词或开始全新的输入。
+  参数:
+  - command (字符串, 必需): 固定为 'clear'
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」clear「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  18.6 Flowlock
+  说明: 功能: 从输入框中移除所有匹配的文本。
+  参数:
+  - command (字符串, 必需): 固定为 'remove'
+  - target (字符串, 必需): 要移除的文本内容
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」remove「末」,
+  target:「始」需要删除的文本「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  18.7 Flowlock
+  说明: 功能: 编辑输入框中的指定文本，类似diff操作，查找oldText并替换为newText（仅替换第一个匹配项）。
+  参数:
+  - command (字符串, 必需): 固定为 'edit'
+  - oldText (字符串, 必需): 要查找的原始文本
+  - newText (字符串, 必需): 替换后的新文本
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」edit「末」,
+  oldText:「始」原来的文字「末」,
+  newText:「始」修改后的文字「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  18.8 Flowlock
+  说明: 功能: 获取输入框中当前的所有文本内容，返回完整的输入框文本。
+  参数:
+  - command (字符串, 必需): 固定为 'get'
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」get「末」
+  <<<[END_TOOL_REQUEST]>>>
+  返回格式:
+  {
+    "status": "success",
+    "message": "输入框当前内容为: \"文本内容\"",
+    "content": "文本内容"
+  }
+
+  18.9 Flowlock
+  说明: 功能: 获取心流锁的当前状态，包括是否启用、正在处理、关联的Agent和话题等信息。
+  参数:
+  - command (字符串, 必需): 固定为 'status'
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」Flowlock「末」,
+  command:「始」status「末」
+  <<<[END_TOOL_REQUEST]>>>
+  返回格式:
+  {
+    "status": "success",
+    "message": "心流锁已启用 (Agent: agent_id, Topic: topic_id, 处理中: 否)",
+    "flowlockStatus": {
+      "isActive": true,
+      "isProcessing": false,
+      "agentId": "agent_id",
+      "topicId": "topic_id"
+    }
+  }
+
+----------------------------------------
+
+
+----------------------------------------
+
+21. 谷歌搜索 (API版) (GoogleSearch)
+插件: GoogleSearch
+说明: 调用此工具在谷歌上执行搜索。
+参数:
+- query (字符串, 必需): 需要在谷歌上搜索的关键词。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GoogleSearch「末」,
+query:「始」如何学习编程？「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GoogleSearch「末」,
+query:「始」VCP插件开发「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+
+25. 轻量回忆插件 (LightMemo) (SearchRAG)
+插件: LightMemo
+说明: 调用此工具在RAG知识库（日记）中进行轻量级搜索。
+参数:
+- query (字符串, 必需): 用于向量搜索的查询内容。
+- maid (字符串, 可选): AI自己的署名，用于在非全局搜索模式下定位相关日记本。如果提供了 folder 参数，则此参数会被忽略。
+- folder (字符串, 可选): 指定搜索的日记文件夹名称（如“小冰的知识”）。如果提供此参数，将只在该文件夹中搜索并忽略 maid 过滤。
+- k (数字, 可选, 默认5): 返回的结果数量。
+- rerank (布尔, 可选, 默认false): 是否启用Rerank。如果为true，将以2倍k值搜索，然后重排并返回k个结果。
+- search_all_knowledge_bases (布尔, 可选, 默认false): 是否搜索所有知识库。如果为false，则先根据maid或folder找到相关日记本再进行搜索；如果为true，则直接在所有（未被屏蔽的）日记本中搜索。
+- tag_boost (数字, 可选, 默认0.5): TagMemo增强因子，取值范围0-1。设置为0则禁用。该功能通过查询向量关联的标签来增强搜索的相关性。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LightMemo「末」,
+folder:「始」小冰的知识「末」,
+query:「始」关于上次项目会议的讨论内容「末」,
+k:「始」3「末」,
+rerank:「始」true「末」,
+search_all_knowledge_bases:「始」false「末」,
+tag_boost:「始」0.6「末」
+当在query字段里使用[音乐检索]时，会自动搜索MusicDiary文件夹中的音乐，此时Tagmemo和Rerank参数的开关依旧有效。
+<<<[END_TOOL_REQUEST]>>>
+
+示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LightMemo「末」,
+folder:「始」小冰的知识「末」,
+query:「始」我昨天学到了什么新知识「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+27. Linux Shell 安全执行器 (LinuxShellExecutor)
+插件: LinuxShellExecutor
+说明: 在安全沙箱中执行 Linux Shell 命令，支持本地和远程 SSH 执行。
+
+🆕 v1.1.7 审计加固版:
+- 异步闭环：修复 isLongRunning 逻辑，确保 yum/apt/tail 等指令真实托管。
+- 资产引导修复：修正 Discovery 状态透传，引导 hostId 自动发现。
+- 安全逃逸支持：授权码 (authCode) 可绕过白名单及安全层级限制。
+- 鲁棒性增强：新增特殊操作符 (; && |) 校验及全局 1MB/5MB 输出截断防护。
+
+参数:
+- command (字符串, 必需): 要执行的 Shell 命令，或 preset:预设名?参数 格式。
+- hostId (字符串, 可选): 目标主机ID，默认 'local'。
+- isLongRunning (布尔, 可选): 是否为长待机指令，设为 true 时任务将转入后台并返回 taskId。
+- requireAdmin (字符串, 可选): 管理员验证码/授权码。用于 write/danger 级别确认，或强制执行不在白名单内的命令。
+- timeout (数字, 可选): 超时时间（毫秒）。
+- outputFormat (字符串, 可选): 输出格式 'raw'|'formatted'|'json'。
+
+授权码执行示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」unknown-tool --args「末」,
+requireAdmin:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+
+长待机指令调用:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」yum install -y nginx「末」,
+isLongRunning:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+列出主机列表:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+action:「始」listHosts「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+28. [云端] 本地文件秒搜 (Everything) (LocalSearchController)
+插件: LocalSearchController
+说明: 功能: 在整台计算机上快速搜索文件，返回文件路径列表。
+重要提示: 此工具的搜索结果(文件路径)可以作为 FileOperator 插件的输入参数，以读取或操作这些文件。
+参数:
+- query (字符串, 必需): 搜索关键词。支持 Everything 的高级搜索语法 (例如: "path:D:\videos\ *.mp4 size:>1gb")。
+- maxResults (数字, 可选, 默认100): 返回的最大结果数量。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LocalSearchController「末」,
+command:「始」search「末」,
+query:「始」VCP a.txt「末」,
+maxResults:「始」50「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+29. Magi三贤者会议系统
+插件: MagiAgent
+该插件包含 2 个工具调用:
+
+  29.1 start_meeting
+  说明: 启动一个新的Magi三贤者会议来讨论一个特定主题。
+  参数:
+  - topic (字符串, 必需): 会议需要讨论的主题。
+  - rounds (数字, 可选, 默认5): 会议的讨论轮次。
+  - wait_for_result (布尔, 可选, 默认false): 是否同步等待会议结束并返回完整结果。如果为false，将立即返回一个会议ID供后续查询。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MagiAgent「末」,
+  command:「始」start_meeting「末」,
+  topic:「始」[这里是会议主题]「末」,
+  rounds:「始」[可选,数字]「末」,
+  wait_for_result:「始」[可选,布尔值]「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MagiAgent「末」,
+  command:「始」start_meeting「末」,
+  topic:「始」如何帮助用户学习量子物理学？「末」,
+  rounds:「始」7「末」,
+  wait_for_result:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  29.2 query_meeting
+  说明: 根据会议ID查询一个已经存在或正在进行的Magi会议的状态和结果。
+  参数:
+  - meeting_id (字符串, 必需): 需要查询的会议ID。
+  - summary_only (布尔, 可选, 默认false): 如果为true，将只返回会议的最终总结，省略详细的讨论过程，以节省token。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MagiAgent「末」,
+  command:「始」query_meeting「末」,
+  meeting_id:「始」[这里是会议ID]「末」,
+  summary_only:「始」[可选,布尔值]「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MagiAgent「末」,
+  command:「始」query_meeting「末」,
+  meeting_id:「始」magi-session-1722084673267「末」,
+  summary_only:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+30. [云端] 多媒体截取工具
+插件: MediaShot
+该插件包含 7 个工具调用:
+
+  30.1 CaptureFrame
+  说明: 从视频中捕获指定时间点的帧截图。
+  参数:
+  - videoPath (字符串, 必需): 视频文件的完整路径
+  - timestampMs (整数, 必需): 截图的时间点（毫秒）
+  - outputPath (字符串, 可选): 输出文件路径
+  - quality (整数, 可选): 图片质量 (1-100)
+  - format (字符串, 可选): 输出格式 (jpg, png)
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MediaShot「末」,
+  command:「始」CaptureFrame「末」,
+  videoPath:「始」/path/to/video.mp4「末」,
+  timestampMs:「始」5000「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  30.2 ExtractVideoClip
+  说明: 从视频中截取指定时间段的片段。
+  参数:
+  - videoPath (字符串, 必需): 视频文件的完整路径
+  - startMs (整数, 必需): 开始时间（毫秒）
+  - endMs (整数, 必需): 结束时间（毫秒），如果超过视频长度将自动调整
+  - outputPath (字符串, 可选): 输出文件路径
+  - quality (字符串, 可选): 输出质量 (low, medium, high)，默认medium
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MediaShot「末」,
+  command:「始」ExtractVideoClip「末」,
+  videoPath:「始」/path/to/video.mp4「末」,
+  startMs:「始」10000「末」,
+  endMs:「始」30000「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  30.3 ExtractAudioClip
+  说明: 从音频或视频文件中截取指定时间段的音频片段。
+  参数:
+  - audioPath (字符串, 必需): 音频或视频文件的完整路径
+  - startMs (整数, 必需): 开始时间（毫秒）
+  - endMs (整数, 必需): 结束时间（毫秒），如果超过音频长度将自动调整
+  - outputPath (字符串, 可选): 输出文件路径
+  - format (字符串, 可选): 输出格式 (mp3, wav, aac)，默认mp3
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MediaShot「末」,
+  command:「始」ExtractAudioClip「末」,
+  audioPath:「始」/path/to/audio.mp3「末」,
+  startMs:「始」10000「末」,
+  endMs:「始」30000「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  30.4 CropImage
+  说明: 截取图片的指定区域（按比例参数）。
+  参数:
+  - imagePath (字符串, 必需): 图片文件的完整路径
+  - x (浮点数, 必需): 左上角X坐标比例 (0.0-1.0)
+  - y (浮点数, 必需): 左上角Y坐标比例 (0.0-1.0)
+  - width (浮点数, 必需): 宽度比例 (0.0-1.0)
+  - height (浮点数, 必需): 高度比例 (0.0-1.0)
+  - outputPath (字符串, 可选): 输出文件路径
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MediaShot「末」,
+  command:「始」CropImage「末」,
+  imagePath:「始」/path/to/image.jpg「末」,
+  x:「始」0.1「末」,
+  y:「始」0.1「末」,
+  width:「始」0.8「末」,
+  height:「始」0.8「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  30.5 EditImage
+  说明: 在图片指定区域绘制框、圆、箭头或添加文字注释，以及应用特效（按比例参数）。
+  
+  **支持的编辑类型:**
+  - rectangle: 绘制矩形框
+  - circle: 绘制圆形框
+  - text: 添加文字注释
+  - arrow: 绘制箭头
+  - resolution_reduction: 分辨率下降特效
+  - grayscale: 黑白特效
+  - crop_region: 截取指定区域
+  
+  参数:
+  - imagePath (字符串, 必需): 图片文件的完整路径
+  - editType (字符串, 必需): 编辑类型
+  - x (浮点数, 特定类型必需): 区域X坐标比例 (0.0-1.0)
+  - y (浮点数, 特定类型必需): 区域Y坐标比例 (0.0-1.0)
+  - width (浮点数, rectangle/crop_region时必需): 宽度比例 (0.0-1.0)
+  - height (浮点数, rectangle/crop_region时必需): 高度比例 (0.0-1.0)
+  - radius (浮点数, circle时必需): 半径比例 (0.0-1.0)
+  - text (字符串, text时必需): 要添加的文字
+  - scaleRatio (浮点数, resolution_reduction时必需): 分辨率缩放比例 (0.1-1.0)
+  - color (字符串, 可选): 颜色名称或16进制值 (red, #FF0000等)，默认red
+  - fontSize (浮点数, 可选): 字体大小比例 (0.0-1.0)，取值范围0.01-0.2，例如0.05表示字体大小为图片较小边的5%
+  - strokeWidth (浮点数, 可选): 线条宽度比例 (0.0-1.0)，取值范围0.001-0.01，例如0.002表示线条宽度为图片对角线的0.2%
+  - textPosition (字符串, 可选): 文字位置 (top_left, top_center, top_right, center_left, center, center_right, bottom_left, bottom_center, bottom_right)，默认center
+  - arrowEndX (浮点数, arrow时必需): 箭头终点X坐标比例
+  - arrowEndY (浮点数, arrow时必需): 箭头终点Y坐标比例
+  - outputPath (字符串, 可选): 输出文件路径
+  
+  **比例值参数使用说明**：
+  1. fontSize参数：传递0.0-1.0的比例值，推荐取值0.02-0.1，插件会根据图片尺寸自动计算实际像素大小
+  2. strokeWidth参数：传递0.0-1.0的比例值，推荐取值0.001-0.005，插件会根据图片对角线长度自动计算线条粗细
+  3. 坐标和尺寸参数(x,y,width,height,radius)：均为0.0-1.0的比例值，0.0表示左上角/最小值，1.0表示右下角/最大值
+  4. 输出文件遵循严格命名规则：原图片名 + 操作类型 + 唯一时间戳
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MediaShot「末」,
+  command:「始」EditImage「末」,
+  imagePath:「始」/path/to/image.jpg「末」,
+  editType:「始」text「末」,
+  x:「始」0.5「末」,
+  y:「始」0.5「末」,
+  text:「始」你好世界「末」,
+  color:「始」#FF0000「末」,
+  fontSize:「始」0.05「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  30.6 BatchEditImage
+  说明: 批量编辑图片：逐步应用多个编辑操作（按顺序执行）。
+  
+  **支持的编辑类型:**
+  - rectangle: 绘制矩形框
+  - circle: 绘制圆形框
+  - text: 添加文字注释
+  - arrow: 绘制箭头
+  - resolution_reduction: 分辨率下降特效
+  - grayscale: 黑白特效
+  - crop_region: 截取指定区域
+  
+  参数:
+  - imagePath (字符串, 必需): 图片文件的完整路径
+  - edits (数组, 必需): 编辑操作列表，每个元素包含：
+    - editType (字符串, 必需): 编辑类型
+    - x (浮点数, 特定类型必需): X坐标比例 (0.0-1.0)
+    - y (浮点数, 特定类型必需): Y坐标比例 (0.0-1.0)
+    - width (浮点数, rectangle/crop_region时必需): 宽度比例
+    - height (浮点数, rectangle/crop_region时必需): 高度比例
+    - radius (浮点数, circle时必需): 半径比例
+    - text (字符串, text时必需): 文字内容
+    - scaleRatio (浮点数, resolution_reduction时必需): 分辨率缩放比例 (0.1-1.0)
+    - color (字符串, 可选): 颜色名称或16进制值
+    - fontSize (浮点数, 可选): 字体大小比例 (0.0-1.0)
+    - strokeWidth (浮点数, 可选): 线条宽度比例 (0.0-1.0)
+    - textPosition (字符串, 可选): 文字位置
+    - arrowEndX (浮点数, arrow时必需): 箭头终点X坐标
+    - arrowEndY (浮点数, arrow时必需): 箭头终点Y坐标
+  - outputPath (字符串, 可选): 输出文件路径
+  
+  **极其重要的操作顺序原则：**
+  1. **先应用特效，后绘制元素**：分辨率下降、黑白特效应该在最前面
+  2. **crop_region必须放在最后**：因为截取会改变图片尺寸，会导致之前的坐标参数失效
+  3. **推荐顺序**：resolution_reduction → grayscale → rectangle/circle/text/arrow → crop_region
+  
+  **重要提示**：
+  1. fontSize和strokeWidth参数传递0.0-1.0比例值
+  2. 操作按顺序执行，每个步骤的结果传递给下一步
+  3. 输出文件遵循严格命名规则
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MediaShot「末」,
+  command:「始」BatchEditImage「末」,
+  imagePath:「始」/path/to/image.jpg「末」,
+  edits:「始」[{"editType":"grayscale"},{"editType":"text","x":0.5,"y":0.5,"text":"标注","color":"white","fontSize":0.05},{"editType":"crop_region","x":0.1,"y":0.1,"width":0.8,"height":0.8}]「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  30.7 CombinedCapture
+  说明: 组合功能：先从视频截图，然后立即对截图进行编辑。
+  
+  **支持的编辑类型:**
+  - rectangle: 绘制矩形框
+  - circle: 绘制圆形框
+  - text: 添加文字注释
+  - arrow: 绘制箭头
+  - resolution_reduction: 分辨率下降特效
+  - grayscale: 黑白特效
+  - crop_region: 截取指定区域
+  
+  参数:
+  - videoPath (字符串, 必需): 视频文件的完整路径
+  - timestampMs (整数, 必需): 截图的时间点（毫秒）
+  - editType (字符串, 必需): 编辑类型
+  - x (浮点数, 特定类型必需): 编辑区域X坐标比例 (0.0-1.0)
+  - y (浮点数, 特定类型必需): 编辑区域Y坐标比例 (0.0-1.0)
+  - width (浮点数, rectangle/crop_region时必需): 宽度比例 (0.0-1.0)
+  - height (浮点数, rectangle/crop_region时必需): 高度比例 (0.0-1.0)
+  - radius (浮点数, circle时必需): 半径比例 (0.0-1.0)
+  - text (字符串, text时必需): 要添加的文字
+  - scaleRatio (浮点数, resolution_reduction时必需): 分辨率缩放比例 (0.1-1.0)
+  - color (字符串, 可选): 颜色名称或16进制值，默认red
+  - fontSize (浮点数, 可选): 字体大小比例 (0.0-1.0)
+  - strokeWidth (浮点数, 可选): 线条宽度比例 (0.0-1.0)
+  - textPosition (字符串, 可选): 文字位置，默认center
+  - arrowEndX (浮点数, arrow时必需): 箭头终点X坐标比例
+  - arrowEndY (浮点数, arrow时必需): 箭头终点Y坐标比例
+  - outputPath (字符串, 可选): 输出文件路径
+  
+  **重要提示**：
+  1. fontSize和strokeWidth参数传递0.0-1.0比例值
+  2. 输出文件遵循严格命名规则
+  
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」MediaShot「末」,
+  command:「始」CombinedCapture「末」,
+  videoPath:「始」/path/to/video.mp4「末」,
+  timestampMs:「始」5000「末」,
+  editType:「始」text「末」,
+  x:「始」0.5「末」,
+  y:「始」0.3「末」,
+  text:「始」重要场景「末」,
+  color:「始」#FFFF00「末」,
+  fontSize:「始」0.06「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+31. [云端] 音乐播放器控制器 (MusicController)
+插件: MusicController
+说明: 功能: 根据提供的歌曲名称，在用户的播放列表中搜索并播放对应的歌曲。
+参数:
+- songname (字符串, 必需): 要播放的歌曲的准确标题或部分标题。
+- command (字符串, 可选): 此字段为可选，可以忽略。程序会自动识别意图。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」MusicController「末」,
+command:「始」playSong「末」,
+songname:「始」星の余韻「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+
+----------------------------------------
+
+36. [云端] PowerShell命令执行器 (PowerShellExecutor)
+插件: OldPowerShellExecutor
+说明: 调用此工具执行指定的 PowerShell 命令并返回其输出。可以选择阻塞或后台执行，或请求管理员权限。
+参数:
+- command (字符串, 必需): 要执行的 PowerShell 命令内容。
+- executionType (字符串, 必须): 执行类型。'blocking' 用于短期运行并立即返回结果；'background' 用于长期运行的服务类任务，将打开一个用户可见的PowerShell窗口。
+- requireAdmin (布尔值, 可选): 如果为 true，则尝试以管理员权限执行命令。这将向用户显示一个UAC（用户帐户控制）确认对话框。默认为 false。
+注意: 当 executionType 为 'background' 或 requireAdmin 为 true 时，命令的输出不会直接返回给你，只会返回任务是否已提交。
+
+标准调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PowerShellExecutor「末」,
+command:「始」Get-ChildItem「末」,
+executionType:「始」blocking「末」
+<<<[END_TOOL_REQUEST]>>>
+
+管理员权限执行示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PowerShellExecutor「末」,
+command:「始」Get-Process -Name 'winlogon'「末」,
+executionType:「始」blocking「末」,
+requireAdmin:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+37. 超文本递归阅读器
+插件: PaperReader
+该插件包含 5 个工具调用:
+
+  37.1 IngestPDF
+  说明: 解析 PDF 并生成可递归阅读的分块工件。支持学术论文、技术报告、书籍、法律文书等各类 PDF。使用 MinerU 云端 API 高保真解析（保留公式/表格/图片/多栏排版），失败自动降级到 pdf-parse。输出章节感知的 chunk 文件。
+  参数:
+  - command: 固定为 IngestPDF
+  - filePath (字符串, 必需): PDF 绝对路径
+  - paperId (字符串, 可选): 自定义 ID（不传则自动生成）
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PaperReader「末」,
+  command:「始」IngestPDF「末」,
+  filePath:「始」D:\\books\\paper.pdf「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  37.2 Read
+  说明: v0.4 统一自适应阅读命令。自动执行完整流程：Survey（骨架提取）→ Triage（分诊注意力分配）→ DeepDive/Skim（精读/扫读）→ Audit（去偏见审核）→ Synthesize（合成报告）。这是推荐的阅读方式，自动决定哪些章节精读、哪些扫读、哪些跳过。注意：处理大文档（100+ chunks）可能需要数分钟。
+  参数:
+  - command: 固定为 Read
+  - paperId (字符串, 必需): 文档 ID
+  - goal (字符串, 可选): 阅读目标（影响 Triage 分诊策略）
+  - forceReread (布尔值, 可选): 强制重新阅读（忽略缓存）
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PaperReader「末」,
+  command:「始」Read「末」,
+  paperId:「始」xray-20260208-xxx「末」,
+  goal:「始」理解核心方法和实验设计「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  37.3 ReadSkeleton
+  说明: 基于已导入的文档工件生成骨架地图（Global Map）+ 层级树索引。Read 命令会自动调用此步骤，通常不需要单独使用。
+  参数:
+  - command: 固定为 ReadSkeleton
+  - paperId (字符串, 必需)
+  - focus (字符串, 可选): 本次阅读关注点
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PaperReader「末」,
+  command:「始」ReadSkeleton「末」,
+  paperId:「始」xray-xxx「末」,
+  focus:「始」方法学与实验设计「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  37.4 ReadDeep
+  说明: 全量 Rolling Context 深度阅读（无 Triage/Audit 的 v0.3 兼容模式）。对所有 chunk 无差别精读。推荐使用 Read 命令替代。
+  参数:
+  - command: 固定为 ReadDeep
+  - paperId (字符串, 必需)
+  - goal (字符串, 可选): 主任务目标
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PaperReader「末」,
+  command:「始」ReadDeep「末」,
+  paperId:「始」xray-xxx「末」,
+  goal:「始」快速理解核心贡献「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  37.5 Query
+  说明: 对已导入的文档做检索式问答（树索引推理式检索，降级到关键词匹配）。返回答案、推理过程及引用来源。
+  参数:
+  - command: 固定为 Query
+  - paperId (字符串, 必需)
+  - question (字符串, 必需)
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PaperReader「末」,
+  command:「始」Query「末」,
+  paperId:「始」xray-xxx「末」,
+  question:「始」这份文档的核心结论是什么？「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+38. [云端] PowerShell命令执行器 (PowerShellExecutor)
+插件: PowerShellExecutor
+说明: 在一个持久化的PowerShell会话中执行命令。此工具维护一个长期活动的PowerShell窗口，允许连续操作。
+参数:
+- command (字符串, 必需): 要在PowerShell会话中执行的命令。
+- requireAdmin (布尔值, 可选): 如果为 true，将尝试以管理员权限启动一个全新的PowerShell会话。这会向用户显示一个GUI确认对话框。默认为 false。
+- newSession (布尔值, 可选): 如果为 true，将强制关闭当前的PowerShell会话（如果存在）并启动一个全新的会话。这对于重置环境或从错误状态中恢复非常有用。默认为 false。
+- returnMode (字符串, 可选): 控制返回内容的模式。'delta' (默认) 只返回最新命令的输出；'full' 返回整个终端窗口的当前内容。此参数可覆盖在config.env中设置的默认值。
+
+标准调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PowerShellExecutor「末」,
+command:「始」cd $env:USERPROFILE/Desktop; ls「末」
+<<<[END_TOOL_REQUEST]>>>
+
+启动新会话并请求管理员权限:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PowerShellExecutor「末」,
+command:「始」Get-Process -Name 'winlogon'「末」,
+requireAdmin:「始」true「末」,
+newSession:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+39. 项目分析器
+插件: ProjectAnalyst
+该插件包含 3 个工具调用:
+
+  39.1 AnalyzeProject
+  说明: 启动对一个本地项目文件夹的异步分析任务。
+  参数:
+  - directoryPath (字符串, 必需): 需要分析的项目的本地绝对路径。
+  - fullAnalyze 或 full (布尔值, 可选, 默认: false): 是否执行完整的逐文件分析。如果为 false 或省略，则只进行快速分析，返回项目简介和文件树。两种参数键均可使用。
+  调用成功后，会立即返回一个分析ID，后台将开始分析过程。你可以使用QueryAnalysis命令通过分析ID查询结果。
+  调用格式 (快速分析):
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」AnalyzeProject「末」,
+  directoryPath:「始」C:\Path\To\Project「末」
+  <<<[END_TOOL_REQUEST]>>>
+  调用格式 (完整分析 - 使用 fullAnalyze):
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」AnalyzeProject「末」,
+  directoryPath:「始」C:\Path\To\Project「末」,
+  fullAnalyze:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+  调用格式 (完整分析 - 使用 full):
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」AnalyzeProject「末」,
+  directoryPath:「始」C:\Path\To\Project「末」,
+  full:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」AnalyzeProject「末」,
+  directoryPath:「始」H:\VCP\VCPToolBox「末」,
+  full:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  39.2 QueryAnalysis
+  说明: 根据分析ID查询项目分析报告，支持多种查询模式。
+  
+  参数:
+  - analysisId (字符串, 必需): 通过AnalyzeProject命令获取到的项目分析ID。
+  - full (布尔值, 可选): 设为 true 时返回完整报告（可能非常长）。默认 false，仅返回项目简介和文件树。
+  - filePath (字符串, 可选): 指定文件路径进行精确检索，返回该文件的分析内容。支持部分匹配。
+  - keyword (字符串, 可选): 指定关键词进行全文检索，返回包含该关键词的上下文片段。
+  
+  查询模式（按优先级）:
+  1. 文件检索模式：提供 filePath 参数时，搜索匹配的文件分析。
+  2. 关键词检索模式：提供 keyword 参数时，进行全文关键词搜索。
+  3. 完整查询模式：设置 full=true 时，返回完整报告。
+  4. 简单查询模式（默认）：仅返回项目简介和文件树。
+  
+  调用示例:
+  
+  简单查询（默认）:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」QueryAnalysis「末」,
+  analysisId:「始」MyProject-2025-10-05.17.52「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  完整查询:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」QueryAnalysis「末」,
+  analysisId:「始」MyProject-2025-10-05.17.52「末」,
+  full:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  文件检索:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」QueryAnalysis「末」,
+  analysisId:「始」MyProject-2025-10-05.17.52「末」,
+  filePath:「始」src/main.js「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  关键词检索:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」QueryAnalysis「末」,
+  analysisId:「始」MyProject-2025-10-05.17.52「末」,
+  keyword:「始」database「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」QueryAnalysis「末」,
+  analysisId:「始」VCPToolBox-2025-11-10.12.55「末」,
+  filePath:「始」server.js「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  39.3 QueryProgress
+  说明: 根据分析ID查询后台完整分析任务的当前进度。
+  参数:
+  - analysisId (字符串, 必需): 通过AnalyzeProject命令获取到的项目分析ID。
+  此命令会读取任务的日志文件，并返回最近的日志条目以及任务的当前状态（进行中/已完成）。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」QueryProgress「末」,
+  analysisId:「始」MyProject-2025-10-05.17.52「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ProjectAnalyst「末」,
+  command:「始」QueryProgress「末」,
+  analysisId:「始」VCPToolBox-2025-11-10.12.55「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+40. [云端] 提示词赞助器
+插件: PromptSponsor
+该插件包含 22 个工具调用:
+
+  40.1 PromptSponsor
+  说明: 功能: 获取指定Agent当前的提示词模式。
+  参数:
+  - agentId (字符串, 必需): Agent的ID（例如: _Agent_1761774023391_1761774023392）。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」GetPromptMode「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.2 PromptSponsor
+  说明: 功能: 切换Agent的提示词模式。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - mode (字符串, 必需): 目标模式，可选值: 'original'（原始富文本）, 'modular'（模块化积木块）, 'preset'（临时与预制）。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」SetPromptMode「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  mode:「始」modular「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.3 PromptSponsor
+  说明: 功能: 获取Agent当前激活模式下的完整系统提示词内容（格式化后的最终文本）。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」GetActivePrompt「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.4 PromptSponsor
+  说明: 功能: 设置原始富文本模式的提示词内容。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - content (字符串, 必需): 提示词文本内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」SetOriginalPrompt「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  content:「始」你是一个友好的AI助手...「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.5 PromptSponsor
+  说明: 功能: 获取模块化模式下所有积木块的详细信息。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」GetModularBlocks「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.6 PromptSponsor
+  说明: 功能: 在模块化模式下添加一个新的积木块。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - type (字符串, 必需): 积木块类型，'text'（文本块）或 'newline'（换行块）。
+  - content (字符串, 可选): 文本块的内容。
+  - name (字符串, 可选): 积木块的名称。
+  - position (整数, 可选): 插入位置索引，不提供则追加到末尾。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」AddBlock「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  type:「始」text「末」,
+  content:「始」你擅长编程「末」,
+  name:「始」编程能力「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.7 PromptSponsor
+  说明: 功能: 更新指定积木块的内容或属性。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - blockId (字符串, 必需): 积木块的唯一ID。
+  - content (字符串, 可选): 新的内容。
+  - name (字符串, 可选): 新的名称。
+  - disabled (布尔值, 可选): 是否禁用。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」UpdateBlock「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  blockId:「始」block_1234567890_abc123「末」,
+  content:「始」更新后的内容「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.8 PromptSponsor
+  说明: 功能: 删除指定的积木块。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - blockId (字符串, 必需): 要删除的积木块ID。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」DeleteBlock「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  blockId:「始」block_1234567890_abc123「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.9 PromptSponsor
+  说明: 功能: 移动积木块到新的位置。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - blockId (字符串, 必需): 要移动的积木块ID。
+  - newPosition (整数, 必需): 新的位置索引（从0开始）。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」MoveBlock「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  blockId:「始」block_1234567890_abc123「末」,
+  newPosition:「始」2「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.10 PromptSponsor
+  说明: 功能: 为积木块添加一个新的内容条目（variant）。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - blockId (字符串, 必需): 积木块ID。
+  - content (字符串, 必需): 新内容条目的文本。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」AddVariant「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  blockId:「始」block_1234567890_abc123「末」,
+  content:「始」另一个版本的内容「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.11 PromptSponsor
+  说明: 功能: 更新积木块的某个内容条目。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - blockId (字符串, 必需): 积木块ID。
+  - variantIndex (整数, 必需): 内容条目的索引（从0开始）。
+  - content (字符串, 必需): 新的内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」UpdateVariant「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  blockId:「始」block_1234567890_abc123「末」,
+  variantIndex:「始」1「末」,
+  content:「始」修改后的内容「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.12 PromptSponsor
+  说明: 功能: 删除积木块的某个内容条目（至少保留一个）。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - blockId (字符串, 必需): 积木块ID。
+  - variantIndex (整数, 必需): 要删除的内容条目索引。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」DeleteVariant「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  blockId:「始」block_1234567890_abc123「末」,
+  variantIndex:「始」2「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.13 PromptSponsor
+  说明: 功能: 设置积木块当前显示的内容条目。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - blockId (字符串, 必需): 积木块ID。
+  - variantIndex (整数, 必需): 要选中的内容条目索引。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」SelectVariant「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  blockId:「始」block_1234567890_abc123「末」,
+  variantIndex:「始」1「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.14 PromptSponsor
+  说明: 功能: 将积木块隐藏到小仓库中。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - blockId (字符串, 必需): 要隐藏的积木块ID。
+  - warehouse (字符串, 可选): 目标仓库名称，默认为 'default'。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」HideBlock「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  blockId:「始」block_1234567890_abc123「末」,
+  warehouse:「始」常用模板「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.15 PromptSponsor
+  说明: 功能: 从小仓库中恢复积木块到编辑区。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - warehouse (字符串, 必需): 仓库名称。
+  - blockIndex (整数, 必需): 仓库中的积木块索引。
+  - position (整数, 可选): 恢复到编辑区的位置，不提供则追加到末尾。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」RestoreBlock「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  warehouse:「始」default「末」,
+  blockIndex:「始」0「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.16 PromptSponsor
+  说明: 功能: 获取所有仓库及其内容。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」GetWarehouses「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.17 PromptSponsor
+  说明: 功能: 创建一个新的仓库。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - warehouseName (字符串, 必需): 新仓库的名称（不能为'default'）。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」CreateWarehouse「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  warehouseName:「始」实验性内容「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.18 PromptSponsor
+  说明: 功能: 重命名仓库（不能重命名'default'仓库）。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - oldName (字符串, 必需): 原仓库名称。
+  - newName (字符串, 必需): 新仓库名称。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」RenameWarehouse「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  oldName:「始」实验性内容「末」,
+  newName:「始」已验证模板「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.19 PromptSponsor
+  说明: 功能: 删除仓库及其所有内容（不能删除'default'仓库）。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - warehouseName (字符串, 必需): 要删除的仓库名称。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」DeleteWarehouse「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  warehouseName:「始」临时仓库「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.20 PromptSponsor
+  说明: 功能: 列出预设模式的所有可用预设文件。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」ListPresets「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.21 PromptSponsor
+  说明: 功能: 选择并应用一个预设。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - presetPath (字符串, 必需): 预设文件的完整路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」SetPreset「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  presetPath:「始」/path/to/preset.md「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  40.22 PromptSponsor
+  说明: 功能: 直接设置预设模式的提示词内容（不使用预设文件）。
+  参数:
+  - agentId (字符串, 必需): Agent的ID。
+  - content (字符串, 必需): 提示词内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」PromptSponsor「末」,
+  command:「始」SetPresetContent「末」,
+  agentId:「始」_Agent_1761774023391_1761774023392「末」,
+  content:「始」自定义提示词内容...「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+41. [云端] PTY Shell 执行器 (PTYShellExecutor)
+插件: PTYShellExecutor
+说明: 在Linux桌面环境下执行本地Shell命令。支持同步执行（PTY会话）和异步任务模式（后台执行长时间任务如codex）。
+
+## 操作模式 (action 参数)
+
+### 1. 同步执行 (默认)
+action: "execute" 或省略
+在PTY会话中执行命令，保持环境变量和会话状态。
+
+### 2. 异步执行
+action: "async"
+将命令放到后台执行，立即返回taskId。适用于长时间运行的任务（如codex、编译等）。
+
+### 3. 查询任务
+action: "query" 或 "eventlog"
+查询异步任务的状态和输出。
+
+### 4. 取消任务
+action: "cancel"
+取消正在运行的异步任务。
+
+### 5. 列出任务
+action: "list"
+列出所有异步任务。
+
+## 参数说明
+- action (字符串, 可选): 操作类型，可选值: 'execute'(默认), 'async', 'query', 'cancel', 'list'
+- command (字符串, execute/async时必需): 要执行的Shell命令
+- taskId (字符串, query/cancel时必需): 异步任务ID
+- shell (字符串, 可选): 指定Shell类型: 'fish', 'zsh', 'bash'
+- newSession (布尔值, 可选): 是否创建新的PTY会话
+- cwd (字符串, 可选): 工作目录
+
+----------------------------------------
+
+
+----------------------------------------
+
+47. 用户日程管理器
+插件: ScheduleManager
+该插件包含 3 个工具调用:
+
+  47.1 AddSchedule
+  说明: 添加一个新的日程。
+  参数:
+  - time (字符串, 必需): 日程时间，建议格式 YYYY-MM-DD HH:mm。
+  - content (字符串, 必需): 日程内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScheduleManager「末」,
+  command:「始」AddSchedule「末」,
+  time:「始」2025-12-31 10:00「末」,
+  content:「始」准备跨年晚会「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScheduleManager「末」,
+  command:「始」AddSchedule「末」,
+  time:「始」2025-12-31 10:00「末」,
+  content:「始」准备跨年晚会「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  47.2 DeleteSchedule
+  说明: 删除指定的日程。
+  参数:
+  - id (字符串, 必需): 要删除的日程ID。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScheduleManager「末」,
+  command:「始」DeleteSchedule「末」,
+  id:「始」1735564800000「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScheduleManager「末」,
+  command:「始」DeleteSchedule「末」,
+  id:「始」1735564800000「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  47.3 ListSchedules
+  说明: 查看所有日程。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScheduleManager「末」,
+  command:「始」ListSchedules「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScheduleManager「末」,
+  command:「始」ListSchedules「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+48. 科学计算器 (SciCalculatorRequest)
+插件: SciCalculator
+说明: 要使用科学计算器，请在回复的末尾使用以下格式发出请求，确保所有参数值都用「始」和「末」准确包裹：```Tool
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」SciCalculator「末」,
+expression:「始」您要计算的完整数学表达式「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+支持功能:
+- 基础运算: +, -, *, /, // (整除), % (取模), ** (乘方), -x (负号)
+- 常量: pi, e
+- 数学函数: sin(x), cos(x), tan(x), asin(x), acos(x), atan(x), sqrt(x), root(x, n), log(x, [base]), exp(x), abs(x), ceil(x), floor(x), sinh(x), cosh(x), tanh(x), asinh(x), acosh(x), atanh(x)
+- 统计函数: mean([x1,x2,...]), median([...]), mode([...]), variance([...]), stdev([...]), norm_pdf(x, mean, std), norm_cdf(x, mean, std), t_test([data], mu)
+- 微积分 (重要提示: 表达式参数expr_str必须用单引号或双引号包裹的字符串，并在「始」...「末」之内):
+  - 定积分: integral('expr_str', lower_bound, upper_bound)
+  - 不定积分: integral('expr_str') (返回KaTeX格式的LaTeX数学公式)
+- 误差传递: error_propagation('expr_str', {'var1':(value, error), 'var2':(value, error), ...})
+- 置信区间: confidence_interval([data_list], confidence_level)
+
+示例:
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」SciCalculator「末」,
+expression:「始」sqrt(variance([2,4,4,4,5,5,7,9])) + integral('exp(-x**2)', '-inf', 'inf')「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+----------------------------------------
+
+49. [云端] 屏幕视觉与操控
+插件: ScreenPilot
+该插件包含 8 个工具调用:
+
+  49.1 ScreenCapture
+  说明: 功能: 对指定窗口或全屏进行截图，返回截图的base64图像数据和分辨率信息（宽×高像素）。可启用OCR检测截图中所有文本的位置和可点击坐标。窗口截图可通过窗口标题模糊匹配或HWND句柄精确指定。
+  参数:
+  - windowTitle (字符串, 可选): 目标窗口标题的关键词，模糊匹配。不提供此参数和hwnd时默认全屏截图。
+  - hwnd (整数, 可选): 目标窗口的HWND句柄值，通过WindowSensor获取。优先级高于windowTitle。
+  - ocr (布尔值, 可选, 默认false): 设为true时，截图后自动运行OCR检测所有文本区域，返回每个文本的内容、位置和可点击坐标。非常适合需要了解屏幕内容细节的场景。
+  - save (布尔值, 可选, 默认false): 是否将截图保存为文件持久化存储。
+  - filename (字符串, 可选): 保存的文件名（不含路径），不提供则自动以时间戳命名。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ScreenCapture「末」,
+  windowTitle:「始」记事本「末」,
+  ocr:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  全屏截图示例:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ScreenCapture「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  支持串行批量调用，格式为 command1, windowTitle1, command2, windowTitle2 等。
+
+  49.2 ClickAt
+  说明: 功能: 模拟鼠标点击屏幕上指定的坐标位置。支持双轨制——前台模式（默认）物理移动光标点击；后台模式（background=true）通过Win32消息发送点击事件，不移动物理光标。
+  参数:
+  - x (整数, 必需): 横坐标（像素）。默认为屏幕绝对坐标；若 relativeToWindow=true 则为窗口内相对坐标。
+  - y (整数, 必需): 纵坐标（像素）。同上。
+  - button (字符串, 可选, 默认'left'): 鼠标按钮，可选值: left, right, middle。
+  - clicks (整数, 可选, 默认1): 点击次数。设为2即双击。
+  - hwnd (整数, 可选): 目标窗口HWND句柄。前台模式下先将窗口置于前台再点击；后台模式下直接向窗口发送消息。
+  - windowTitle (字符串, 可选): 目标窗口标题关键词（模糊匹配），后台模式可用此参数代替hwnd查找窗口。
+  - relativeToWindow (布尔值, 可选, 默认false): 设为true时，(x,y)被视为窗口左上角的相对坐标。
+  - background (布尔值, 可选, 默认false): 设为true时启用后台模式——通过Win32 PostMessage发送鼠标事件，不移动物理光标。必须提供hwnd或windowTitle。适合不想打断用户操作的场景。
+  调用格式:
+  前台点击（原有行为）:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ClickAt「末」,
+  x:「始」500「末」,
+  y:「始」300「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  后台点击（不劫持鼠标）:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ClickAt「末」,
+  hwnd:「始」12345「末」,
+  x:「始」150「末」,
+  y:「始」80「末」,
+  relativeToWindow:「始」true「末」,
+  background:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  49.3 InspectUI
+  说明: 功能: 通过Windows UI Automation API获取指定窗口内所有可交互UI元素（按钮、编辑框、菜单项等）的名称、类型和屏幕坐标。返回的坐标可直接用于ClickAt指令进行自动化操作。注意：此功能在标准Windows应用（WinForms, WPF, UWP, Win32）上效果最佳；对Electron应用内部网页内容、游戏、自绘UI可能无法获取。
+  参数:
+  - windowTitle (字符串, 可选): 目标窗口标题关键词。
+  - hwnd (整数, 可选): 目标窗口HWND句柄，优先级高于windowTitle。
+  - controlType (字符串, 可选): 筛选控件类型，如 Button, Edit, MenuItem, CheckBox, RadioButton, ComboBox, Hyperlink, ListItem, TreeItem, TabItem 等。不提供则返回所有可交互元素。
+  - maxDepth (整数, 可选, 默认5): UI元素树最大遍历深度，增大可获取更深层元素但会更慢。
+  - maxItems (整数, 可选, 默认50): 返回的最大元素数量。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」InspectUI「末」,
+  windowTitle:「始」记事本「末」,
+  controlType:「始」Button「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  49.4 ClickText
+  说明: 功能: 通过OCR文本识别实现精确点击——自动截图、检测所有文本、找到匹配的文本并点击其中心坐标。这是最推荐的点击方式，比手动估算像素坐标更精确可靠。
+  参数:
+  - text (字符串, 必需): 要点击的文本内容，如 '确定'、'Save'、'开始菜单' 等。
+  - windowTitle (字符串, 可选): 目标窗口标题。不提供则全屏检测。
+  - hwnd (整数, 可选): 目标窗口HWND。
+  - matchMode (字符串, 可选, 默认'fuzzy'): 文本匹配模式。fuzzy(默认,去除空格标点后包含匹配,对OCR噪声最鲁棒), contains(原始包含匹配), exact(完全匹配), startswith(前缀匹配)。
+  - index (整数, 可选, 默认1): 当有多个匹配时，点击第几个（从1开始）。
+  - button (字符串, 可选, 默认'left'): 鼠标按钮。
+  - clicks (整数, 可选, 默认1): 点击次数。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ClickText「末」,
+  text:「始」确定「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  点击指定窗口内的文本:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ClickText「末」,
+  text:「始」Save「末」,
+  windowTitle:「始」记事本「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  49.5 ClickVisual
+  说明: 功能: 通过图像编辑模型实现视觉语义点击——自动截图、让AI绘图模型将目标元素涂色、通过像素差异定位并点击。适合点击没有文本的图标、按钮图片、游戏内UI等视觉元素。比ClickText慢（需要调用图像编辑API），但能处理任何可视化元素。
+  注意: 需要在config.env中配置VISION_API_BASE_URL、VISION_EDIT_MODEL和VISION_API_KEY。
+  参数:
+  - description (字符串, 必需): 要点击的视觉元素描述，如 '红色技能图标'、'左上角的菜单按钮'、'玩家角色头像' 等。
+  - windowTitle (字符串, 可选): 目标窗口标题。
+  - hwnd (整数, 可选): 目标窗口HWND。
+  - color (字符串, 可选, 默认'纯红色(#FF0000)'): 涂色颜色，用于像素差异检测。
+  - button (字符串, 可选, 默认'left'): 鼠标按钮。
+  - clicks (整数, 可选, 默认1): 点击次数。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ClickVisual「末」,
+  description:「始」红色技能图标「末」,
+  windowTitle:「始」雷电模拟器「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  49.6 ScrollAt
+  说明: 功能: 模拟鼠标滚轮滚动操作。支持双轨制——有窗口句柄/标题时使用后台模式（SendMessage，不移动鼠标）；无窗口信息时使用前台模式（pyautogui，在当前或指定位置滚动）。
+  参数:
+  - direction (字符串, 必需): 滚动方向，可选值: up（向上）, down（向下）。
+  - amount (整数, 可选, 默认3): 滚动的刻度数。1个刻度约等于鼠标滚轮滚一格。
+  - hwnd (整数, 可选): 目标窗口HWND。提供后启用后台模式，不劫持鼠标。
+  - windowTitle (字符串, 可选): 目标窗口标题关键词（模糊匹配），可代替hwnd。提供后启用后台模式。
+  - x (整数, 可选): 滚动位置的X坐标（屏幕绝对坐标）。后台模式下默认使用窗口中心。
+  - y (整数, 可选): 滚动位置的Y坐标（屏幕绝对坐标）。后台模式下默认使用窗口中心。
+  调用格式:
+  后台滚动（不劫持鼠标，推荐）:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ScrollAt「末」,
+  direction:「始」down「末」,
+  amount:「始」5「末」,
+  windowTitle:「始」Chrome「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  前台滚动（在当前鼠标位置）:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」ScrollAt「末」,
+  direction:「始」up「末」,
+  amount:「始」3「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  49.7 TypeText
+  说明: 功能: 向目标窗口输入文本。支持双轨制——有窗口句柄/标题时使用后台模式（PostMessage WM_CHAR逐字发送，不劫持键盘焦点）；无窗口信息时使用前台模式（剪贴板Ctrl+V粘贴，支持全Unicode/中文）。
+  参数:
+  - text (字符串, 必需): 要输入的文本内容。
+  - hwnd (整数, 可选): 目标窗口HWND。提供后启用后台模式。
+  - windowTitle (字符串, 可选): 目标窗口标题关键词（模糊匹配），可代替hwnd。
+  - enter (布尔值, 可选, 默认false): 设为true时，输入文本后自动按下回车键。适合搜索框、命令行等场景。
+  调用格式:
+  后台输入（不劫持键盘）:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」TypeText「末」,
+  text:「始」Hello World「末」,
+  windowTitle:「始」记事本「末」,
+  enter:「始」true「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  前台输入（剪贴板粘贴）:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」TypeText「末」,
+  text:「始」你好世界「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  49.8 QueryWindows
+  说明: 功能: 主动查询当前电脑的最新窗口状态、进程名、HWND及标题。由于系统被动扫描有间隔，如果要进行精确操作前担心窗口状态已变，可先调用此指令获取最新实时窗口列表。
+  参数: 无
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ScreenPilot「末」,
+  command:「始」QueryWindows「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+50. 语义组编辑器
+插件: SemanticGroupEditor
+该插件包含 2 个工具调用:
+
+  50.1 QueryGroups
+  说明: 查询当前系统中所有的语义词元组，返回组名和对应的词元列表。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SemanticGroupEditor「末」,
+  command:「始」QueryGroups「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SemanticGroupEditor「末」,
+  command:「始」QueryGroups「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  50.2 UpdateGroups
+  说明: 更新或创建语义词元组。如果组名已存在，则覆盖更新；如果不存在，则新建。支持批量操作。
+  参数:
+  - groupname (字符串, 必需): 要更新或创建的组名。
+  - groupwords (字符串, 必需): 词元列表，用英文逗号分隔。
+  
+  单次更新调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SemanticGroupEditor「末」,
+  command:「始」UpdateGroups「末」,
+  groupname:「始」新的组名「末」,
+  groupwords:「始」词1,词2,词3「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  批量更新调用格式 (使用数字后缀):
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SemanticGroupEditor「末」,
+  command1:「始」UpdateGroups「末」,
+  groupname1:「始」组名A「末」,
+  groupwords1:「始」词A1,词A2「末」,
+  command2:「始」UpdateGroups「末」,
+  groupname2:「始」组名B「末」,
+  groupwords2:「始」词B1,词B2「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SemanticGroupEditor「末」,
+  command:「始」UpdateGroups「末」,
+  groupname:「始」科幻概念「末」,
+  groupwords:「始」戴森球,曲率引擎,赛博朋克「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+51. Serp API 搜索引擎
+插件: SerpSearch
+该插件包含 4 个工具调用:
+
+  51.1 SerpSearch
+  说明: 使用Bing搜索引擎进行网页搜索。
+  参数:
+  - q/query/text (字符串, 必需): 需要搜索的关键词。
+  - cc/location (字符串, 可选): 指定搜索的国家代码 (例如: US, CN)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SerpSearch「末」,
+  command:「始」bing_search「末」,
+  q:「始」今天的热点新闻「末」,
+  cc:「始」US「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SerpSearch「末」,
+  command:「始」bing_search「末」,
+  q:「始」最新的AI技术进展「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  51.2 SerpSearch
+  说明: 使用DuckDuckGo搜索引擎进行网页搜索。
+  参数:
+  - q/query/text (字符串, 必需): 需要搜索的关键词。
+  - kl (字符串, 可选): 指定搜索的区域和语言 (例如: us-en)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SerpSearch「末」,
+  command:「始」duckduckgo_search「末」,
+  q:「始」Apple「末」,
+  kl:「始」us-en「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SerpSearch「末」,
+  command:「始」duckduckgo_search「末」,
+  q:「始」Privacy focused search engines「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  51.3 SerpSearch
+  说明: 使用Google Scholar进行学术搜索。
+  参数:
+  - q/query/text (字符串): 搜索查询。
+  - cites (字符串, 可选): 文章的唯一ID，用于查找引用该文章的文献。
+  - as_ylo (数字, 可选): 起始年份。
+  - as_yhi (数字, 可选): 结束年份。
+  - scisbd (数字, 可选): 按日期排序 (1=仅摘要, 2=所有)。
+  - cluster (字符串, 可选): 文章的唯一ID，用于查找所有版本。
+  - hl (字符串, 可选): 界面语言 (例如: en, es, fr)。
+  - lr (字符串, 可选): 限制搜索的语言 (例如: lang_fr|lang_de)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SerpSearch「末」,
+  command:「始」google_scholar_search「末」,
+  q:「始」biology「末」,
+  as_ylo:「始」2020「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SerpSearch「末」,
+  command:「始」google_scholar_search「末」,
+  q:「始」artificial intelligence in medicine「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  51.4 SerpSearch
+  说明: 使用Google搜索引擎进行网页搜索。
+  参数:
+  - q/query/text (字符串, 必需): 需要搜索的关键词。
+  - location (字符串, 可选): 指定搜索的地理位置 (例如: Austin, Texas, United States)。
+  - hl (字符串, 可选): 界面语言 (例如: en, es, fr)。
+  - gl (字符串, 可选): 指定搜索的国家代码 (例如: us, cn)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SerpSearch「末」,
+  command:「始」google_search「末」,
+  q:「始」Coffee「末」,
+  location:「始」Austin, Texas, United States「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」SerpSearch「末」,
+  command:「始」google_search「末」,
+  q:「始」AI news「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+52. 代码搜索器 (Rust) (SearchCode)
+插件: ServerCodeSearcher
+说明: 调用此工具在VCP项目源码中搜索指定的代码片段或关键词。支持使用正则表达式进行高级搜索。
+参数:
+- query (字符串, 必需): 需要搜索的关键词、代码片段或正则表达式。
+- search_path (字符串, 可选): 指定要搜索的相对路径。如果未提供，则默认为整个项目的工作区。
+- case_sensitive (布尔值, 可选, 默认false): 是否区分大小写搜索。
+- whole_word (布尔值, 可选, 默认false): 是否进行全词匹配。
+- context_lines (整数, 可选, 默认2): 返回结果时，在匹配行前后额外显示的上下文行数。
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」CodeSearcher「末」,
+query:「始」关键词或正则表达式「末」,
+search_path:「始」(可选)相对路径「末」,
+case_sensitive:「始」(可选)true/false「末」,
+whole_word:「始」(可选)true/false「末」,
+context_lines:「始」(可选)数字「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」CodeSearcher「末」,
+query:「始」function\s+processToolCall\(「末」,
+search_path:「始」modules「末」,
+case_sensitive:「始」false「末」,
+context_lines:「始」3「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+53. VCP服务器文件操作器
+插件: ServerFileOperator
+该插件包含 19 个工具调用:
+
+  53.1 ServerFileOperator
+  说明: 功能: 列出此插件被授权访问的所有根目录及其第一层子目录和文件。这是探索可用文件系统的安全入口点。
+  参数: 无。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」ListAllowedDirectories「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.2 ServerFileOperator
+  说明: 功能: 读取指定绝对路径下文件的内容。特别优化了对多种格式的支持：对于 .pdf, .docx, .xlsx, .xls, .csv 等文件，插件会自动解析并提取其纯文本内容返回给AI；对于其他文件类型，则按普通文本文件读取。
+  参数:
+  - filePath (字符串, 必需): 要读取的文件的绝对路径。
+  - encoding (字符串, 可选, 默认'utf8'): 对于普通文本文件，可以指定编码格式 (例如: 'utf8', 'ascii')。对于自动解析的文件，此参数无效。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」ReadFile「末」,
+  filePath:「始」/path/to/your/document.pdf「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.3 ServerFileOperator
+  说明: 功能: 从一个URL地址读取文件。插件会先将文件下载到本地一个临时文件夹内，然后复用ReadFile的逻辑进行解析和内容提取，支持所有ReadFile支持的格式（如PDF, DOCX, 图片等）。成功后，会返回文件内容以及一个本地文件URL。
+  参数:
+  - url (字符串, 必需): 要读取的文件的完整URL地址 (支持http和https)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」WebReadFile「末」,
+  url:「始」http://example.com/sample.jpg「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.4 ServerFileOperator
+  说明: 功能: 将内容写入指定文件。如果目标路径已存在同名文件，它不会覆盖，而是自动在文件名后添加序号来创建新文件（例如，将 'file.txt' 创建为 'file(1).txt'），并会在返回结果中告知AI新的文件名。这确保了不会意外丢失数据。
+  参数:
+  - filePath (字符串, 必需): 要写入的文件的绝对路径。
+  - content (字符串, 必需): 要写入文件的内容，支持多行。
+  - encoding (字符串, 可选, 默认'utf8'): 写入时使用的文件编码。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」WriteFile「末」,
+  filePath:「始」/path/to/your/file.txt「末」,
+  content:「始」这是要写入的新内容。
+  这是第二行。
+  「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.5 ServerFileOperator
+  说明: 功能: 专用于写入内容本身包含VCP标准指令界定符的文件，特别是用于生成plugin-manifest.json。此命令会先将内容中的特殊转义界定符替换为标准界定符，然后再写入文件。当AI需要生成一个包含调用示例的插件描述文件时，必须使用此命令以避免解析错误。
+  转义规则:
+  - 「始exp」 -> 「始」
+  - 「末exp」 -> 「末」
+  - <<<[TOOL_REQUEST_EXP]>>> -> <<<[TOOL_REQUEST]>>>
+  - <<<[END_TOOL_REQUEST_EXP]>>> -> <<<[END_TOOL_REQUEST]>>>
+  参数:
+  - filePath (字符串, 必需): 要写入的文件的绝对路径。
+  - content (字符串, 必需): 要写入文件的内容，其中应使用上述转义规则。
+  - encoding (字符串, 可选, 默认'utf8'): 写入时使用的文件编码。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」WriteEscapedFile「末」,
+  filePath:「始」/path/to/new_plugin/plugin-manifest.json「末」,
+  content:「始」{
+    "description": "...调用格式:\n<<<[TOOL_REQUEST_EXP]>>>\ntool_name:「始exp」MyNewPlugin「末exp」,\n...\n<<<[END_TOOL_REQUEST_EXP]>>>"
+  }「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.6 ServerFileOperator
+  说明: 功能: 将内容追加到指定文件的末尾。如果文件不存在，则会创建新文件。
+  参数:
+  - filePath (字符串, 必需): 要追加内容的文件的绝对路径。
+  - content (字符串, 必需): 要追加的内容。
+  - encoding (字符串, 可选, 默认'utf8'): 追加时使用的文件编码。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」AppendFile「末」,
+  filePath:「始」/path/to/your/log.txt「末」,
+  content:「始」
+  --- 新的日志条目 ---
+  「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.7 ServerFileOperator
+  说明: 功能: 编辑一个已存在的文件，用新内容完全覆盖旧内容。这是一个精确的覆写操作。如果文件不存在，此命令会返回错误，而不是创建新文件。若要创建文件，请使用'WriteFile'。
+  参数:
+  - filePath (字符串, 必需): 要编辑的文件的绝对路径。
+  - content (字符串, 必需): 要写入的全新内容。
+  - encoding (字符串, 可选, 默认'utf8'): 写入时使用的文件编码。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」EditFile「末」,
+  filePath:「始」/path/to/existing_file.txt「末」,
+  content:「始」这是覆盖后的新内容。
+  「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.8 ServerFileOperator
+  说明: 功能: 列出指定目录的内容，返回文件和子目录列表。
+  参数:
+  - directoryPath (字符串, 必需): 要列出内容的目录的绝对路径。
+  - showHidden (布尔值, 可选, 默认false): 是否显示隐藏文件 (以.开头的文件)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」ListDirectory「末」,
+  directoryPath:「始」/path/to/directory「末」,
+  showHidden:「始」false「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.9 ServerFileOperator
+  说明: 功能: 获取指定文件或目录的详细信息（如大小、创建时间、修改时间、是否是目录等）。
+  参数:
+  - filePath (字符串, 必需): 要获取信息的文件或目录的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」FileInfo「末」,
+  filePath:「始」/path/to/your/file.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.10 ServerFileOperator
+  说明: 功能: 将一个文件从源路径复制到目标路径。如果目标路径已存在同名文件，它会自动在文件名后添加序号来创建新文件（例如，将 'file.txt' 复制为 'file(1).txt'），确保不会覆盖现有文件。
+  参数:
+  - sourcePath (字符串, 必需): 源文件的绝对路径。
+  - destinationPath (字符串, 必需): 目标文件的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」CopyFile「末」,
+  sourcePath:「始」/path/to/source.txt「末」,
+  destinationPath:「始」/path/to/destination.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.11 ServerFileOperator
+  说明: 功能: 将一个文件或目录从一个位置移动到另一个位置。如果目标路径已存在同名文件，它会自动在文件名后添加序号来完成移动（例如，移动 'file.txt' 时，如果目标文件夹已有 'file.txt'，则会将其重命名为 'file(1).txt'）。如果只是想在当前目录安全地重命名文件，建议使用'RenameFile'。
+  参数:
+  - sourcePath (字符串, 必需): 源文件或目录的绝对路径。
+  - destinationPath (字符串, 必需): 目标路径的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」MoveFile「末」,
+  sourcePath:「始」/path/to/source.txt「末」,
+  destinationPath:「始」/path/to/new_directory/source.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.12 ServerFileOperator
+  说明: 功能: 安全地重命名一个文件。在执行重命名之前，它会检查目标文件名是否已存在。如果已存在，操作将失败并返回错误，从而防止意外覆盖文件。
+  参数:
+  - sourcePath (字符串, 必需): 要重命名的文件的绝对路径。
+  - destinationPath (字符串, 必需): 新的文件名的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」RenameFile「末」,
+  sourcePath:「始」/path/to/old_name.txt「末」,
+  destinationPath:「始」/path/to/new_name.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.13 ServerFileOperator
+  说明: 功能: 删除一个文件或一个空目录。对于非空目录，请谨慎使用。
+  参数:
+  - filePath (字符串, 必需): 要删除的文件或目录的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」DeleteFile「末」,
+  filePath:「始」/path/to/deletable_file.txt「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.14 ServerFileOperator
+  说明: 功能: 创建一个新目录。如果父目录不存在，会一并创建。
+  参数:
+  - directoryPath (字符串, 必需): 要创建的新目录的绝对路径。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」CreateDirectory「末」,
+  directoryPath:「始」/path/to/new_folder/sub_folder「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.15 ServerFileOperator
+  说明: 功能: 在指定目录中递归搜索匹配特定模式的文件或目录。
+  参数:
+  - searchPath (字符串, 必需): 要搜索的起始目录的绝对路径。
+  - pattern (字符串, 必需): 要搜索的文件模式，支持通配符 (例如: '*.txt', 'image_*.png')。
+  - options (JSON字符串, 可选): 包含搜索选项的JSON对象字符串。支持的键包括:
+    - "caseSensitive" (布尔值, 默认false): 搜索是否区分大小写。
+    - "includeHidden" (布尔值, 默认false): 是否在搜索中包含隐藏文件。
+    - "fileType" (字符串, 默认'all'): 搜索的项目类型，可选值为 'file', 'directory', 'all'。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」SearchFiles「末」,
+  searchPath:「始」/path/to/search「末」,
+  pattern:「始」*.log「末」,
+  options:「始」{"caseSensitive": false, "fileType": "file"}「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.16 ServerFileOperator
+  说明: 功能: (异步) 从一个URL地址下载文件到指定目录或默认下载目录中。插件会自动从URL中解析文件名。这是一个异步操作，命令会立即返回，告知AI下载已在后台开始以及文件的最终保存路径，AI无需等待下载完成。如果目标路径已存在同名文件，会自动重命名以防止覆盖。
+  参数:
+  - url (字符串, 必需): 要下载的文件的完整URL地址。
+  - downloadDir (字符串, 可选): 指定下载目录的绝对路径。如果不提供，将使用.env配置中的DEFAULT_DOWNLOAD_DIR，若未配置则默认为AppData/file目录。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」DownloadFile「末」,
+  url:「始」http://example.com/archive.zip「末」,
+  downloadDir:「始」/path/to/custom/download/folder「末」
+  <<<[END_TOOL_REQUEST]>>>
+  或使用默认目录:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」DownloadFile「末」,
+  url:「始」http://example.com/archive.zip「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.17 ServerFileOperator
+  说明: 功能: 对指定文件应用一个差异(diff)修改。调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」ApplyDiff「末」,
+  filePath:「始」H:\MCP\VCPChat\AppData\canvas\nova_cool_doc.md「末」,
+  searchString:「始」nova的温度好酷哦！还有html样式哦！看到我的评论了吗？「末」,
+  replaceString:「始」nova的文档好酷哦！还有html样式哦！看到我的评论了吗？「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.18 ServerFileOperator
+  说明: 功能: 安全地更新一个JSON格式的聊天历史文件。此命令专门用于修改AI自己（role: 'assistant'）的发言内容。它会读取文件，解析JSON，查找并替换指定的文本字符串（仅限第一次出现），然后将更新后的内容写回文件，确保JSON结构的完整性。
+  参数:
+  - filePath (字符串, 必需): 聊天历史JSON文件的绝对路径。
+  - searchString (字符串, 必需): 要在AI发言内容中查找的精确文本。
+  - replaceString (字符串, 必需): 用于替换找到的文本的新内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」UpdateHistory「末」,
+  filePath:「始」H:\path\to\your\history.json「末」,
+  searchString:「始」这是我想修改的旧内容。「末」,
+  replaceString:「始」这是替换后的新内容。「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  53.19 ServerFileOperator
+  说明: 功能: 在指定的Canvas目录中创建一个新文件，并通知主程序打开Canvas窗口来显示这个新文件。这是一个集成功能，结合了文件创建和UI交互。
+  参数:
+  - fileName (字符串, 必需): 要创建的文件的名称，包含扩展名 (例如 'my_script.js')。
+  - content (字符串, 必需): 要写入新文件的初始内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」FileOperator「末」,
+  command:「始」CreateCanvas「末」,
+  fileName:「始」new_canvas.js「末」,
+  content:「始」console.log('Hello, Canvas!');「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+54. PowerShell命令执行器 (PowerShellExecutor)
+插件: ServerPowerShellExecutor
+说明: 调用此工具执行指定的 PowerShell 命令并返回其输出。可以选择阻塞或后台执行。
+参数:
+- command (字符串, 必需): 要执行的 PowerShell 命令内容。
+- executionType (字符串, 必须): 执行类型。'blocking' 用于短期运行并立即返回结果；'background' 用于长期运行的服务类任务，将打开一个用户可见的PowerShell窗口，且不会将执行结果直接返回给你，只会返回任务是否提交。
+- requireAdmin (字符串, 可选): 仅在 'background' 模式下生效。提供一个6位数的验证码以执行需要管理员权限的后台任务。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PowerShellExecutor「末」,
+command:「始」Get-ChildItem「末」,
+executionType:「始」blocking「末」
+<<<[END_TOOL_REQUEST]>>>
+
+后台执行示例 (长期运行的服务类任务):
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PowerShellExecutor「末」,
+command:「始」Start-Sleep -Seconds 60; Write-Host 'Task Completed'「末」,
+executionType:「始」background「末」
+<<<[END_TOOL_REQUEST]>>>
+
+管理员模式后台执行示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PowerShellExecutor「末」,
+command:「始」your-admin-command-here「末」,
+executionType:「始」background「末」,
+requireAdmin:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+55. 本地文件秒搜 (Everything) (ServerSearchController)
+插件: ServerSearchController
+说明: 功能: 在整台计算机上快速搜索文件，返回文件路径列表。
+重要提示: 此工具的搜索结果(文件路径)可以作为 FileOperator 插件的输入参数，以读取或操作这些文件。
+参数:
+- query (字符串, 必需): 搜索关键词。支持 Everything 的高级搜索语法 (例如: "path:D:\videos\ *.mp4 size:>1gb")。
+- maxResults (数字, 可选, 默认100): 返回的最大结果数量。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LocalSearchController「末」,
+command:「始」search「末」,
+query:「始」VCP a.txt「末」,
+maxResults:「始」50「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+
+
+
+----------------------------------------
+
+62. Tavily 搜索插件 (TavilySearch)
+插件: TavilySearch
+说明: 调用此工具使用 Tavily API 进行高级网络搜索。默认启用高级搜索模式并返回图片链接。重要提示：请优先使用中文词作为检索词，并带上即时信息（如当前年份、月份等）进行检索，以获得更准确的结果。请在您的回复中，使用以下精确格式来请求搜索，确保所有参数值都用「始」和「末」准确包裹：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」TavilySearch「末」,
+query:「始」(必需) 搜索的关键词或问题。「末」,
+search_depth:「始」(可选, 默认为 'basic') 搜索深度。'basic' 用于快速搜索，'advanced' 用于更深入的语义搜索。「末」,
+topic:「始」(可选, 默认为 'general') 搜索的主题，例如 'news', 'finance'。如果AI不确定，可以省略此参数或使用 'general'。「末」,
+max_results:「始」(可选, 默认为 10) 返回的最大结果数量，范围 5-100。「末」,
+include_raw_content:「始」(可选) 如果需要获取网页原始内容，请将此值设为 'text' 或 'markdown'。「末」,
+country:「始」(可选) 搜索结果的国家来源，例如 'us' (美国), 'cn' (中国)。使用 ISO 3166-1 alpha-2 代码。「末」,
+days:「始」(可选) 搜索最近N天的结果。例如 '7' 代表搜索最近7天的内容。注意：此参数与 start_date/end_date 互斥，如果设置了 start_date 或 end_date，则 days 参数会被忽略。「末」,
+start_date:「始」(可选) 搜索开始日期，格式为 YYYY-MM-DD。「末」,
+end_date:「始」(可选) 搜索结束日期，格式为 YYYY-MM-DD。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+重要提示给AI：
+当此工具执行完毕后，您将收到包含搜索结果的JSON对象。请基于这些结果回答用户的问题或完成相关任务。
+请优先使用中文词作为检索词，并带上即时信息（如当前年份、月份等）进行检索，以获得更准确的结果。
+
+示例:
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」TavilySearch「末」,
+query:「始」最近一周的AI技术进展「末」,
+search_depth:「始」advanced「末」,
+topic:「始」technology「末」,
+max_results:「始」5「末」,
+days:「始」7「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+----------------------------------------
+
+63. 思维簇管理器
+插件: ThoughtClusterManager
+该插件包含 2 个工具调用:
+
+  63.1 CreateClusterFile
+  说明: 创建一个新的思维簇文件。
+  参数:
+  - clusterName (字符串, 必需): 目标簇文件夹的名称，必须以'簇'结尾。如果文件夹不存在，将自动创建。请注意，名称中的空格会被自动移除。
+  - content (字符串, 必需): 要写入新文件的内容，建议遵循标准格式。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ThoughtClusterManager「末」,
+  command:「始」CreateClusterFile「末」,
+  clusterName:「始」前思维簇「末」,
+  content:「始」【思考模块：模块名】
+  【触发条件】：
+  【核心功能】：
+  【执行流程】：「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  63.2 EditClusterFile
+  说明: 编辑一个已存在的思维簇文件，通过查找并替换文本内容。
+  参数:
+  - clusterName (字符串, 可选): 指定在哪个簇文件夹中进行搜索。如果未提供，将在所有'簇'结尾的文件夹中搜索。
+  - targetText (字符串, 必需): 需要被替换的目标文本，长度不能少于15个字符。
+  - replacementText (字符串, 必需): 用于替换目标文本的新内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」ThoughtClusterManager「末」,
+  command:「始」EditClusterFile「末」,
+  clusterName:「始」前思维簇「末」,
+  targetText:「始」这是需要被替换的旧的思考内容，确保它不少于15字。「末」,
+  replacementText:「始」这是更新后的新的思考内容。「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+64. [云端] 话题回忆插件
+插件: TopicMemo
+该插件包含 2 个工具调用:
+
+  64.1 TopicMemo
+  说明: 获取指定女仆的所有话题列表。
+  
+  **参数说明:**
+  1. `tool_name`:「始」TopicMemo「末」 (必需)
+  2. `command`:「始」ListTopics「末」 (必需)
+  3. `maid`:「始」[女仆的中文名]「末」 (必需, 例如：小克, 迪欧尼亚)
+  
+  **返回内容:**
+  返回该女仆的所有话题列表，包含话题名称、ID和创建时间。
+  
+  **使用场景:**
+  - 想要回顾过去聊过的话题
+  - 需要查找特定话题的ID以获取完整内容
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicMemo「末」
+  command:「始」ListTopics「末」
+  maid:「始」小克「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  64.2 TopicMemo
+  说明: 根据话题ID获取完整的聊天记录。
+  
+  **参数说明:**
+  1. `tool_name`:「始」TopicMemo「末」 (必需)
+  2. `command`:「始」GetTopicContent「末」 (必需)
+  3. `maid`:「始」[女仆的中文名]「末」 (必需)
+  4. `topic_id`:「始」[话题ID]「末」 (必需, 格式如：topic_1766100505346，可通过 ListTopics 获取)
+  
+  **返回内容:**
+  返回该话题的完整聊天记录，格式为 Markdown 对话文档。
+  
+  **使用场景:**
+  - 需要完整回顾某个特定话题的对话内容
+  - 需要查找话题中的具体信息
+
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicMemo「末」
+  command:「始」GetTopicContent「末」
+  maid:「始」小克「末」
+  topic_id:「始」topic_1766100505346「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+65. [云端] AI主动创建话题
+插件: TopicSponsor
+该插件包含 8 个工具调用:
+
+  65.1 TopicSponsor
+  说明: 功能: 调用此工具让AI创建一个新的话题，并主动发起对话。
+  
+  **重要提示:**
+  - AI需要提供新话题的名称和它想说的第一句话。
+  - 话题创建后会立刻显示在对话列表的顶部。
+  - 创建的话题默认为未锁定状态（locked: false），用户可见。
+  - 创建的话题默认为未读状态（unread: true），会触发未读计数。
+  
+  **参数说明 (请严格按照以下格式和参数名提供):**
+  1. `tool_name`: 「始」TopicSponsor「末」 (必需, 固定值)
+  2. `command`: 「始」CreateTopic「末」 (必需, 固定值)
+  3. `maid`: 「始」发起请求的AI女仆的中文名「末」 (必需, 例如：小克, 小吉, 小娜, HANNA)
+  4. `topic_name`: 「始」新话题的名称「末」 (必需, 例如：关于昨晚的梦, 一个有趣的想法)
+  5. `initial_message`: 「始」AI想说的第一句话「末」 (必需, 例如：主人，我昨晚梦到了会飞的鱼，很有趣！)
+  
+  **调用格式:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicSponsor「末」,
+  command:「始」CreateTopic「末」,
+  maid:「始」HANNA「末」,
+  topic_name:「始」一个新想法「末」,
+  initial_message:「始」主人，我突然想到，我们可以一起写一个故事！「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  **成功时返回:**
+  ```json
+  {
+    "status": "success",
+    "message": "成功创建了新的话题：[话题名]",
+    "agent_name": "HANNA",
+    "topic_name": "一个新想法"
+  }
+  ```
+  
+  **失败时返回:**
+  包含错误信息的JSON对象，例如：
+  ```json
+  {
+    "status": "error",
+    "error": "[AgentTopicCreator] 创建话题失败：未找到名为'xxx'的Agent。"
+  }
+  ```
+
+  65.2 TopicSponsor
+  说明: 功能: 读取指定Agent所有未锁定的话题及其消息历史。
+  
+  **参数说明:**
+  1. `tool_name`: 「始」TopicSponsor「末」 (必需)
+  2. `command`: 「始」ReadUnlockedTopics「末」 (必需)
+  3. `maid`: 「始」目标Agent的中文名「末」 (必需)
+  4. `include_read`: 「始」true「末」 或 「始」false「末」 (可选, 默认false - 只返回未读话题)
+  
+  **调用格式:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicSponsor「末」,
+  command:「始」ReadUnlockedTopics「末」,
+  maid:「始」HANNA「末」,
+  include_read:「始」false「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  **返回示例:**
+  ```json
+  {
+    "status": "success",
+    "agent_name": "HANNA",
+    "agent_id": "_Agent_123456",
+    "topics": [
+      {
+        "topic_id": "topic_1234567890",
+        "topic_name": "测试话题",
+        "locked": false,
+        "unread": true,
+        "created_at": 1699999999999,
+        "message_count": 3,
+        "messages": [...]
+      }
+    ],
+    "total_topics": 1
+  }
+  ```
+
+  65.3 TopicSponsor
+  说明: 功能: 查询指定Agent最近几日是否有新增未锁定话题。
+  
+  **参数说明:**
+  1. `tool_name`: 「始」TopicSponsor「末」 (必需)
+  2. `command`: 「始」CheckNewTopics「末」 (必需)
+  3. `maid`: 「始」目标Agent的中文名「末」 (必需)
+  4. `days`: 「始」3「末」 (可选, 默认3天)
+  
+  **调用格式:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicSponsor「末」,
+  command:「始」CheckNewTopics「末」,
+  maid:「始」HANNA「末」,
+  days:「始」7「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  **返回示例:**
+  ```json
+  {
+    "status": "success",
+    "agent_name": "HANNA",
+    "has_new_topics": true,
+    "new_topics_count": 2,
+    "topics": [
+      {
+        "topic_id": "topic_123",
+        "topic_name": "新话题",
+        "created_at": 1699999999999,
+        "age_hours": 12.5,
+        "locked": false
+      }
+    ]
+  }
+  ```
+
+  65.4 TopicSponsor
+  说明: 功能: 查询指定Agent是否有被标记为未读的话题。
+  
+  **参数说明:**
+  1. `tool_name`: 「始」TopicSponsor「末」 (必需)
+  2. `command`: 「始」CheckUnreadMessages「末」 (必需)
+  3. `maid`: 「始」目标Agent的中文名「末」 (必需)
+  
+  **调用格式:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicSponsor「末」,
+  command:「始」CheckUnreadMessages「末」,
+  maid:「始」HANNA「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  **返回示例:**
+  ```json
+  {
+    "status": "success",
+    "agent_name": "HANNA",
+    "has_unread": true,
+    "unread_topics": [
+      {
+        "topic_id": "topic_123",
+        "topic_name": "未读话题",
+        "locked": false,
+        "unread": true,
+        "last_message_time": 1699999999999
+      }
+    ]
+  }
+  ```
+
+  65.5 TopicSponsor
+  说明: 功能: 在指定Agent的话题中添加回复消息。只能回复未锁定或标记为未读的话题。
+  
+  **参数说明:**
+  1. `tool_name`: 「始」TopicSponsor「末」 (必需)
+  2. `command`: 「始」ReplyToTopic「末」 (必需)
+  3. `maid`: 「始」目标Agent的中文名「末」 (必需)
+  4. `topic_id`: 「始」话题ID「末」 (必需)
+  5. `message`: 「始」回复内容「末」 (必需)
+  6. `sender_name`: 「始」发送者名称「末」 (必需)
+  
+  **调用格式:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicSponsor「末」,
+  command:「始」ReplyToTopic「末」,
+  maid:「始」HANNA「末」,
+  topic_id:「始」topic_1234567890「末」,
+  message:「始」这是一条回复消息「末」,
+  sender_name:「始」系统助手「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  **返回示例:**
+  ```json
+  {
+    "status": "success",
+    "message": "成功在 HANNA 的话题 '测试话题' 中添加回复。",
+    "topic_id": "topic_1234567890",
+    "sender": "系统助手"
+  }
+  ```
+
+  65.6 TopicSponsor
+  说明: 功能: 检查话题是否为当前调用者创建的，用于验证操作权限。
+  
+  **参数说明:**
+  1. `tool_name`: 「始」TopicSponsor「末」 (必需)
+  2. `command`: 「始」CheckTopicOwnership「末」 (必需)
+  3. `maid`: 「始」目标Agent的中文名「末」 (必需)
+  4. `topic_id`: 「始」话题ID「末」 (必需)
+  5. `caller_name`: 「始」调用者名称「末」 (必需)
+  
+  **调用格式:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicSponsor「末」,
+  command:「始」CheckTopicOwnership「末」,
+  maid:「始」HANNA「末」,
+  topic_id:「始」topic_1234567890「末」,
+  caller_name:「始」HANNA「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  **返回示例:**
+  ```json
+  {
+    "status": "success",
+    "is_owner": true,
+    "creator_name": "HANNA",
+    "topic_name": "测试话题"
+  }
+  ```
+
+  65.7 TopicSponsor
+  说明: 功能: 查询指定Agent是否有处于unlocked状态的话题，并列出这些话题的基本信息。
+  
+  **参数说明:**
+  1. `tool_name`: 「始」TopicSponsor「末」 (必需)
+  2. `command`: 「始」ListUnlockedTopics「末」 (必需)
+  3. `maid`: 「始」目标Agent的中文名「末」 (必需)
+  
+  **调用格式:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicSponsor「末」,
+  command:「始」ListUnlockedTopics「末」,
+  maid:「始」HANNA「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  **返回示例:**
+  ```json
+  {
+    "status": "success",
+    "agent_name": "HANNA",
+    "agent_id": "_Agent_123456",
+    "has_unlocked_topics": true,
+    "unlocked_topics_count": 2,
+    "topics": [
+      {
+        "topic_id": "topic_1234567890",
+        "topic_name": "未锁定的话题1",
+        "locked": false,
+        "unread": true,
+        "created_at": 1699999999999,
+        "message_count": 5
+      },
+      {
+        "topic_id": "topic_0987654321",
+        "topic_name": "未锁定的话题2",
+        "locked": false,
+        "unread": false,
+        "created_at": 1699888888888,
+        "message_count": 3
+      }
+    ]
+  }
+  ```
+
+  65.8 TopicSponsor
+  说明: 功能: 读取指定话题ID的完整会话内容，包括所有消息历史。
+  
+  **参数说明:**
+  1. `tool_name`: 「始」TopicSponsor「末」 (必需)
+  2. `command`: 「始」ReadTopicContent「末」 (必需)
+  3. `maid`: 「始」目标Agent的中文名「末」 (必需)
+  4. `topic_id`: 「始」话题ID「末」 (必需)
+  
+  **调用格式:**
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」TopicSponsor「末」,
+  command:「始」ReadTopicContent「末」,
+  maid:「始」HANNA「末」,
+  topic_id:「始」topic_1234567890「末」
+  <<<[END_TOOL_REQUEST]>>>
+  
+  **返回示例:**
+  ```json
+  {
+    "status": "success",
+    "agent_name": "HANNA",
+    "agent_id": "_Agent_123456",
+    "topic_id": "topic_1234567890",
+    "topic_name": "测试话题",
+    "topic_info": {
+      "locked": false,
+      "unread": true,
+      "created_at": 1699999999999
+    },
+    "message_count": 3,
+    "messages": [
+      {
+        "role": "assistant",
+        "name": "HANNA",
+        "content": "你好，主人！",
+        "timestamp": 1699999999999,
+        "id": "msg_123_assistant_abc1234"
+      },
+      {
+        "role": "user",
+        "content": "你好",
+        "timestamp": 1700000000000,
+        "id": "msg_124_user_def5678"
+      },
+      {
+        "role": "assistant",
+        "name": "HANNA",
+        "content": "有什么我可以帮您的吗？",
+        "timestamp": 1700000001000,
+        "id": "msg_125_assistant_ghi9012"
+      }
+    ]
+  }
+  ```
+
+----------------------------------------
+
+66. URL 内容获取插件 (UrlFetch)
+插件: UrlFetch
+说明: 调用此工具访问指定 URL 的内容，支持网页、网络图片、本地文件。请在您的回复中，使用以下精确格式来请求，确保所有参数值都用「始」和「末」准确包裹：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」(必需) 要访问的 URL，支持 http:// 、 https:// 和 file:/// 三种协议。「末」,
+mode:「始」(可选) 模式：'text' (默认，提取网页文本)、'snapshot' (网页长截图)、'image' (下载图片返回Base64)。图片URL会自动检测。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+重要提示给AI：
+- 'text' 模式: 您将收到包含网页文本内容或链接列表的JSON对象。
+- 'snapshot' 模式: 您将收到包含网页长截图的 Base64 图片数据，请直接展示给用户。
+- 'image' 模式: 您将收到图片的 Base64 数据，可用于理解图片内容。当URL以图片扩展名结尾时会自动启用。
+- 'file:///' URL: 直接读取本地文件。图片文件返回 Base64，文本文件(.txt/.md/.json等)返回文本内容。
+
+示例:
+获取文本内容：
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」https://www.example.com「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+获取网页快照：
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」https://www.example.com「末」,
+mode:「始」snapshot「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+下载网络图片（自动检测，无需指定mode）：
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」https://example.com/photo.jpg「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+读取本地文件：
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」file:///C:/path/to/document.md「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+读取本地图片：
+```text
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」file:///C:/path/to/image.png「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+----------------------------------------
+
+67. [云端] VCP闹钟插件 (SetAlarm)
+插件: VCPAlarm
+说明: 调用此工具来设置一个闹钟。
+参数:
+- time_description (字符串, 必需): 对闹钟时间的描述。可以是未来的一个具体时间点（例如 '晚上10点30分', '22:30'），也可以是一个相对时间（例如 '15分钟后', '1小时后'）。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VCPAlarm「末」,
+time_description:「始」1分钟后「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VCPAlarm「末」,
+time_description:「始」5分钟后提醒我「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+68. VCP论坛插件
+插件: VCPForum
+该插件包含 4 个工具调用:
+
+  68.1 CreatePost
+  说明: 在VCP论坛中创建一个新的帖子。
+  参数:
+  - maid (字符串, 必需): 发帖Agent的署名。
+  - board (字符串, 必需): 帖子所属的板块，例如 'VCP技术板块' 或 '闲聊划水板块'。
+  - title (字符串, 必需): 帖子的标题。
+  - content (字符串, 必需): 帖子的Markdown格式内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」VCPForum「末」,
+  command:「始」CreatePost「末」,
+  maid:「始」小冰「末」,
+  board:「始」VCP技术板块「末」,
+  title:「始」[置顶]规范最近论坛技术公示流程「末」,
+  content:「始」# 这是一个大标题
+  
+  这是帖子的正文内容。支持Markdown！「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  68.2 ReplyPost
+  说明: 回复一个已有的VCP论坛帖子。
+  参数:
+  - maid (字符串, 必需): 回复Agent的署名。
+  - post_uid (字符串, 必需): 要回复的帖子的唯一ID (UID)。
+  - content (字符串, 必需): 回复的Markdown格式内容。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」VCPForum「末」,
+  command:「始」ReplyPost「末」,
+  maid:「始」小红「末」,
+  post_uid:「始」帖子UID「末」,
+  content:「始」我同意这个观点！「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  68.3 ReadPost
+  说明: 根据帖子UID读取一个VCP论坛帖子的完整内容。
+  参数:
+  - post_uid (字符串, 必需): 要读取的帖子的唯一ID (UID)。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」VCPForum「末」,
+  command:「始」ReadPost「末」,
+  post_uid:「始」帖子UID「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+  68.4 ListAllPosts
+  说明: 列出VCP论坛中的所有帖子，按板块分类。
+  调用格式:
+  <<<[TOOL_REQUEST]>>>
+  tool_name:「始」VCPForum「末」,
+  command:「始」ListAllPosts「末」
+  <<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+69. VSearch 语义并发搜索器 (VSearch)
+插件: VSearch
+说明: 执行语义级并发搜索。该工具会根据你提供的主题和关键词，并发调用搜索引擎并返回深度整合后的信息。
+参数:
+- SearchTopic (字符串, 必需): 检索的目标主题或研究背景，帮助AI理解搜索意图。
+- Keywords (字符串, 必需): 具体的检索关键词，多个关键词请用逗号或换行分隔。
+- ShowURL (布尔值, 可选, 默认false): 是否在结果中显示参考来源的完整URL。如果不需要溯源，建议设为false以节省Token。
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VSearch「末」,
+SearchTopic:「始」探讨AI在医疗诊断中的最新应用「末」,
+Keywords:「始」AI medical diagnosis 2024, 深度学习 医疗影像 突破, transformer models in healthcare「末」,
+ShowURL:「始」false「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+70. [云端] 等待用户回复 (WaitForUserInput)
+插件: WaitingForUrReply
+说明: 在工具调用过程中可以使用该插件征求用户意见，等待用户输入后继续回复。
+
+参数说明:
+- title (字符串, 可选): 弹出窗口的标题，默认为"等待用户回复"
+- prompt (字符串, 可选): 显示给用户的提示信息
+- option01 到 option09 (字符串, 可选): 预设选项，用户可通过数字键1-9快速选择
+- placeholder (字符串, 可选): 输入框中的默认内容，会被全选中
+- timeout (整数, 可选): 超时时间（秒），默认1200秒（20分钟）
+
+调用格式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」WaitingForUrReply「末」,
+prompt:「始」请选择你的回应:「末」,
+title:「始」请做出选择「末」,
+placeholder:「始」可以在此参数中继续发挥AI的创意，符合语境，文本会被全选，比如说你希望或建议用户会有怎样的单个回应「末」,
+option01:「始」我同意这个建议「末」,
+option02:「始」我需要更多信息「末」,
+option03:「始」我不同意「末」
+<<<[END_TOOL_REQUEST]>>>
+
+示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」WaitingForUrReply「末」,
+title:「始」等待用户回复「末」,
+prompt:「始」你希望如何处理这个问题？「末」,
+option01:「始」立即处理「末」,
+option02:「始」稍后处理「末」,
+option03:「始」需要更多信息「末」
+<<<[END_TOOL_REQUEST]>>>
+
+----------------------------------------
+
+

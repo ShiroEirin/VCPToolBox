@@ -1,0 +1,25 @@
+{
+  "name": "MIDITranslator",
+  "displayName": "MIDI翻译器",
+  "version": "1.0.0",
+  "pluginType": "hybridservice",
+  "description": "高性能的MIDI文件解析与生成插件，核心引擎由Rust编写",
+  "author": "VCP Team",
+  "enabled": true,
+  "entry": "main.py",
+  "runtime": "python",
+  "commands": [
+    "list_midi_files",
+    "parse_midi",
+    "generate_midi",
+    "validate_dsl",
+    "validate_dsl_with_details",
+    "extract_events",
+    "list_output_files"
+  ],
+  "config": {
+    "inputDir": "./midi-input",
+    "outputDir": "./midi-output",
+    "timeout": 30
+  }
+}

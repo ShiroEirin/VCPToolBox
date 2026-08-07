@@ -24,9 +24,9 @@ const { existsSync } = require('fs');
 require('dotenv').config({ path: path.join(__dirname, 'config.env') });
 
 // --- 配置 ---
-const TAG_MODEL = process.env.TagModel || 'gemini-2.5-flash-preview-09-2025-thinking';
+const TAG_MODEL = process.env.TagModel || 'claude-sonnet-4-6';
 const TAG_MODEL_MAX_TOKENS = parseInt(process.env.TagModelMaxTokens || '40000', 10);
-const TAG_MODEL_PROMPT_FILE = process.env.TagModelPrompt || 'TagMaster.txt';
+const TAG_MODEL_PROMPT_FILE = process.env.TagModelPrompt || 'Plugin/DailyNoteWrite/TagMaster.txt';
 const API_KEY = process.env.API_Key;
 const API_URL = process.env.API_URL;
 

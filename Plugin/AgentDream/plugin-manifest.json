@@ -1,0 +1,20 @@
+{
+  "name": "AgentDream",
+  "displayName": "梦系统插件",
+  "version": "1.0.0",
+  "pluginType": "hybridservice",
+  "description": "Agent梦境系统，支持日记合并、删除和梦感悟",
+  "author": "VCP Team",
+  "enabled": true,
+  "entry": "main.py",
+  "runtime": "python",
+  "commands": [
+    "DiaryMerge",
+    "DiaryDelete",
+    "DreamInsight"
+  ],
+  "config": {
+    "maxDiarySize": 10000,
+    "enableAudit": true
+  }
+}

@@ -2,8 +2,8 @@ const http = require('http'); // 核心变更：使用Node.js内置的http模块
 const fs = require('fs');
 const path = require('path');
 
-// 仅加载插件自身的.env配置
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+// 加载插件自身的配置（与VCP框架Plugin.js保持一致，优先读取config.env）
+require('dotenv').config({ path: path.join(__dirname, 'config.env') });
 
 // --- 配置 ---
 // 新增：Everything HTTP服务器的端口配置
@@ -40,10 +40,13 @@ function searchWithEverythingHTTP(query, maxResults = 100) {
         const requestPath = `/?s=${encodedQuery}&json=1&path_column=1&n=${maxResults}`;
         
         const options = {
-            hostname: '127.0.0.1', // 只在本地访问
+            hostname: 'localhost', // 直接使用localhost更直观
             port: EVERYTHING_PORT,
             path: requestPath,
-            method: 'GET'
+            method: 'GET',
+            headers: {
+                'User-Agent': 'VCPToolBox-LocalSearchController/1.0.0' // 自定义User-Agent，避免被代理拦截
+            }
         };
 
         debugLog('Making HTTP request to Everything server', options);

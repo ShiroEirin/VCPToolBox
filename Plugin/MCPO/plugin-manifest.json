@@ -1,0 +1,24 @@
+{
+  "name": "MCPO",
+  "displayName": "MCPO 工具桥接器",
+  "version": "1.0.0",
+  "pluginType": "synchronous",
+  "description": "基于mcpo的MCP工具桥接插件，能够自动发现、缓存和调用MCP工具",
+  "author": "VCP Team",
+  "enabled": true,
+  "entry": "main.py",
+  "runtime": "python",
+  "commands": [
+    "list_tools",
+    "call_tool",
+    "get_tool_info",
+    "manage_server",
+    "discover_tools",
+    "list_configs",
+    "health_check"
+  ],
+  "config": {
+    "cacheExpiry": 3600,
+    "timeout": 30
+  }
+}

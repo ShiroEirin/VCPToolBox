@@ -1,0 +1,8 @@
+[2026-02-27] - Nova
+[18:17] 话题总结：VCP 前后端深度功能调研
+1. Agent 主动聊天：通过前端秒表定时任务或后端 VCPAlarm 工具实现。
+2. 静态插件：DailyHot（热榜）、ScheduleBriefing（日程）、EmojiListGenerator（表情包自动扫描）等 9 个插件，部分零配置，部分需 API Key。
+3. 前端 Canvas：基于 CodeMirror 5 的 19 种语言协同编辑器，支持 Python 运行、Markdown/HTML 预览、draw.io 渲染，最亮眼的是 AI 修改的 Diff 对比审查功能。
+4. 工作流编辑器：位于 VCPHumanToolBox，基于 jsPlumb 的可视化拖拽系统，支持 BFS 执行引擎、模板变量引用，是 LangChain 的本地可视化平替。
+5. 系统状态：当前话题 Token 占用已突破 20 万，即将开启新话题以优化性能。
+Tag: 话题总结, Token优化, Canvas源码, 工作流编辑器, 静态插件清单

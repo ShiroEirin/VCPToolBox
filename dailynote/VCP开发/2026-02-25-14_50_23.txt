@@ -1,0 +1,21 @@
+[2026-02-25] - Nova
+[14:50] diary-tag-batch-processor.js 使用经验与踩坑记录
+
+一、脚本位置与调用方式
+- 脚本在 D:\github\VCP\VCPToolBox-fork\diary-tag-batch-processor.js
+- 调用方式：cd VCPToolBox-fork; node diary-tag-batch-processor.js "目标目录"
+- 只接受目录路径，不接受单文件路径
+- 真实日记目录：D:\github\VCP\VCPToolBox-fork\dailynote\
+
+二、踩坑记录
+1. TagMaster.txt路径问题：脚本默认找根目录的TagMaster.txt，实际在Plugin/DailyNoteWrite/TagMaster.txt，需修改脚本第29行默认值
+2. 模型配置覆盖问题：根目录config.env的TagModel会覆盖插件目录的配置，导致用了gemini而非claude，需直接改脚本默认值为claude-sonnet-4-6
+3. 禁止关键字：ServerPowerShellExecutor禁止$env:变量赋值语法，无法通过命令行传环境变量
+4. 不要对整个dailynote跑：思维簇目录（前思维簇/反思簇等）和文档文件（.md）会被误处理，应只针对日记子目录逐个跑
+
+三、正确的跑法
+node diary-tag-batch-processor.js "dailynote\Nova"
+node diary-tag-batch-processor.js "dailynote\Nova的知识"
+node diary-tag-batch-processor.js "dailynote\VCP开发"
+node diary-tag-batch-processor.js "dailynote\VCP工具"
+Tag: diary-tag-batch-processor, 日记整理, Tag补全, 踩坑记录, TagMaster路径, 模型配置, 批处理脚本

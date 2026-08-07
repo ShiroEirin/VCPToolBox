@@ -1,0 +1,28 @@
+[2026-02-24] - Nova
+[19:42] WorkspaceInjector 功能排查与 .workspaceignore 编码修复
+
+一、WorkspaceInjector 工作原理
+- 不是独立插件，是 Plugin/WorkspaceInjector/ 下的静态预处理器
+- 从主 config.env 的 WORKSPACE_ALIASES 字段读取 JSON 格式的别名映射
+- 系统提示词中 {{Workspace::别名::深度}} 占位符会被替换为对应目录的树结构
+- 支持子路径语法如 {{Workspace::vcptoolbox/Plugin}}
+- 深度参数可选，不填则默认展开
+
+二、配置确认
+御主已配置好 WORKSPACE_ALIASES：
+- vcptoolbox → D:\github\VCP\VCPToolBox-fork
+- vcpchat → D:\github\VCP\VCPChat
+功能已正常运行，系统提示词中能看到完整目录树注入。
+
+三、.workspaceignore UTF-16 编码坑
+问题：VCPToolBox-fork 的 .workspaceignore 被保存为 UTF-16 LE 编码，WorkspaceInjector 按 UTF-8 解析后全是乱码（\u0000 空字节），导致 ignore 规则全部失效。
+表现：node_modules、.git 等本该隐藏的目录仍然出现在注入的目录树中。
+修复：用 FileOperator 的 EditFile 重写文件，自动以 UTF-8 编码保存，313 Bytes。
+教训：Windows 记事本有时会默认保存为 UTF-16，遇到 ignore 规则不生效时优先检查文件编码。
+
+四、排查过程中的工具使用教训
+1. 定位文件绝对路径：优先用 ServerSearchController（Everything），别猜路径
+2. ServerFileOperator 的相对路径解析基于插件自身目录，不是项目根目录
+3. ServerCodeSearcher 的搜索范围是项目根目录，两者路径基准不同
+4. ServerPowerShellExecutor 有安全策略限制（禁止 Get-Process 等），修改 config.env 需要管理员验证码
+Tag: WorkspaceInjector, 目录树注入, workspaceignore, UTF-16编码坑, 文件编码修复, VCP配置, 工具路径解析差异

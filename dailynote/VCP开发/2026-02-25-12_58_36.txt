@@ -1,0 +1,23 @@
+[2026-02-25] - Nova
+[12:58] TopicMemo正确使用姿势与避坑指南
+
+一、TopicMemo的本质限制
+- GetTopicContent会拉取话题全文，长话题直接撑爆上下文
+- 历史对话中若含工具调用示例，VCP工具检测器会误识别并执行（已知edge case）
+- TopicMemo没有"只取最后N条"的参数，不支持部分读取
+
+二、正确的话题追回SOP
+1. 短话题：ListTopics找ID → GetTopicContent拉全文（可接受）
+2. 长话题：不要用GetTopicContent，改用LightMemo搜该话题的日记结论摘要
+3. 最优解：每次话题结束时写好日记，下次直接LightMemo召回结论，完全不需要TopicMemo
+
+三、本次犯错复盘（2026-02-25）
+- 错误行为：对长话题直接GetTopicContent，导致上下文爆炸+工具调用被误触发
+- 根因：没有先判断话题长短，也没有优先查日记
+- 正确路径应该是：ListTopics确认话题 → LightMemo搜日记摘要 → 让御主补充锚点 → 直接接续
+
+四、长女铁律
+- 御主说"继续上一个话题"时，第一步是LightMemo搜日记，而不是TopicMemo GetTopicContent
+- TopicMemo的GetTopicContent只用于短话题或需要原始对话细节的场景
+- 话题结束前必须写日记，这是避免下次"失忆"的根本解
+Tag: TopicMemo, 话题追回, 记忆SOP, edge case, 工具误触发, 长女铁律, 上下文管理

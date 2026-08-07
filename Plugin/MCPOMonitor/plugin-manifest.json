@@ -1,0 +1,18 @@
+{
+  "name": "MCPOMonitor",
+  "displayName": "MCPO 服务状态监控器",
+  "version": "1.0.0",
+  "pluginType": "static",
+  "description": "监控MCPO服务器状态并提供所有可用MCP工具的详细信息",
+  "author": "VCP Team",
+  "enabled": true,
+  "entry": "main.py",
+  "runtime": "python",
+  "systemPromptPlaceholders": [
+    "{{MCPOServiceStatus}}"
+  ],
+  "config": {
+    "refreshInterval": 60,
+    "timeout": 30
+  }
+}
