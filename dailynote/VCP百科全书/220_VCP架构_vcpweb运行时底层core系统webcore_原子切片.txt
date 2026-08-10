@@ -1,0 +1,89 @@
+[2026-08-07] - 哈雷酱
+[VCP百科全书] VCP架构——vcpweb运行时底层core系统（webcore，原子切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-08-07（第10次上游合并：c3de96bc 全量上架vcpweb运行时底层core系统 / d803a5a 升级loomv2）
+适用范围：`Plugin/ChromeBridge/VCPChrome/webcore/` 与 `modules/loom/webcore/` 当前源码（双仓库同构）
+事实来源：
+- `Plugin/ChromeBridge/VCPChrome/webcore/`（7个文件，VCPToolBox）
+- `modules/loom/webcore/`（8个文件，VCPChat，7个与前者MD5一致）
+- 上游commit: c3de96bc 全量上架vcpweb运行时底层core系统 (2026-08-07)
+
+一、体系定位
+VCP 浏览器/桌面 Agent 的统一运行时底层，ChromeBridge（MV3 扩展）与 Loom（Electron）双端共用同一套 core 代码。全部模块采用 IIFE 工厂模式包裹，支持双加载：浏览器全局变量（globalScope.VCPWebAgentProtocol 等，供 importScripts / content script 使用）与 Node require（module.exports）。入口 index.js 聚合 protocol / adapterContract / pageCore / pageRuntime / runtimeCore 五个必需模块（缺失任一即抛 "VCP Web Agent Core 缺少模块"），外加可选 chromeAdapter（缺省时 createChromeRuntime 抛 "当前构建不包含 Chrome Adapter"）；最终冻结导出 VCPWebAgentCore，提供 createPageRuntime / createRuntime / createChromeRuntime / getCapabilityCatalog 四个工厂入口。
+
+二、模块清单与行数（行数按 PowerShell `(Get-Content | Measure-Object -Line).Lines` 非空行统计）
+
+| 模块 | 文件 | 行数 | 版本常量 |
+|---|---|---|---|
+| 协议层 | web-agent-protocol.js | 345 | VERSION='0.1.0' |
+| 适配器契约 | adapter-contract.js | 202 | VERSION='0.1.0' |
+| 页面核心 | web-agent-page-core.js | 556 | VERSION='0.1.1' |
+| 页面运行时 | web-agent-page-runtime-core.js | 1466 | VERSION='0.2.2' |
+| 运行时核心 | web-agent-runtime-core.js | 629 | VERSION='0.1.0' |
+| Chrome 适配器 | chrome-adapter.js | 660 | VERSION='0.1.0' |
+| Electron 适配器 | electron-adapter.js | 495 | VERSION='0.1.0'（VCPChat 专属） |
+| 入口 | index.js | 79 | — |
+
+三、协议层（web-agent-protocol.js）
+- 版本：PROTOCOL_VERSION = 1、CHROME_BRIDGE_PROTOCOL_VERSION = 3、VERSION = '0.1.0'
+- Risk 四级：read / interact / elevated / root
+- Status：success / error
+- 命令定义元组：[id, domain, risk, sideEffecting, retryable, sensitiveResult, requires]，共 71 条命令定义，经 COMMANDS 冻结映射为 {id, command, domain, risk, sideEffecting, retryable, sensitiveResult, requires}
+- 命令域（11 个）：page / script / debugger / dom / accessibility / input / network / storage / emulation / screenshot / target
+- LEGACY_COMMAND_MAP 旧命令兼容（以源码实际为准）：get_page_info→page_get_info、query_html→page_query_html、query_js→page_query_scripts、execute_script→runtime_execute_script、cdp_start→debugger_attach、cdp_stop→debugger_detach、capture_screenshot/get_screenshot/screenshot→screenshot_capture、list_tabs→target_list、switch_tab→target_activate、close_tab→target_close、open_url→target_open 等
+- ErrorCode 共 17 个：INVALID_REQUEST / INVALID_PROTOCOL_VERSION / INVALID_TARGET_CONTEXT / UNKNOWN_COMMAND / CAPABILITY_NOT_SUPPORTED / ADAPTER_CONTRACT_VIOLATION / ADAPTER_EXECUTION_ERROR / RUNTIME_INSTANCE_MISMATCH / DOCUMENT_GENERATION_MISMATCH / SNAPSHOT_MISMATCH / TARGET_NOT_FOUND / TARGET_AMBIGUOUS / ELEMENT_HANDLE_EXPIRED / COMMAND_NOT_RETRYABLE / SCRIPT_RESULT_MISSING / DEBUGGER_NOT_ATTACHED / NO_ACTIVE_TARGET
+- WebAgentError 类（code / details / retryable / cause）
+- 工具函数：createRequestId（wa-req-时间戳-随机）、resolveCommand（旧命令解析→canonical/legacy/definition）、validateRequest、createRequest、normalizeTargetContext（adapter/targetId/appId/runtimeInstanceId/documentGeneration/snapshotId）、normalizeOptions（strict/verification/backend/allowFallback），另有 assertIdentity / normalizeError / createResponse / createErrorResponse / isRetryAllowed / getCapabilities
+
+四、适配器契约层（adapter-contract.js）
+- VERSION = '0.1.0'
+- REQUIRED_METHODS 共 21 个必需方法：getCapabilities / getTargetIdentity / getDocumentState / executePageOperation / executeScript / attachDebugger / detachDebugger / getDebuggerStatus / sendDebuggerCommand / subscribeDebuggerEvents / unsubscribeDebuggerEvents / dispatchNativeInput / captureScreenshot / listTargets / getTarget / getActiveTarget / activateTarget / createTarget / closeTarget / navigate / waitForNavigation
+- WebAgentAdapter 基类：构造注入 id / version / backend，默认方法除 getCapabilities 返回 [] 外全部抛 notSupported（CAPABILITY_NOT_SUPPORTED）
+- validateAdapter 契约校验：缺失必需方法抛 ADAPTER_CONTRACT_VIOLATION，requireIdentity 默认要求 adapter.id
+- negotiateCapabilities 能力协商：声明能力经 normalizeCapabilitySet 归一化，与协议目录比对产出 {declared, supportedCommands, unsupportedCommands}
+- 另有 assertCommandSupported（按 definition.requires 检查能力集）
+
+五、页面核心（web-agent-page-core.js）
+- VERSION = '0.1.1'
+- SENSITIVE_FIELD_PATTERN 敏感字段正则：`/pass(word)?|passwd|pwd|token|access.?token|refresh.?token|authorization|auth|cookie|secret|api.?key|session.?id|credit.?card|card.?number|cvv|cvc|security.?code/i`
+- 无障碍命名 getAccessibleName：aria-labelledby→getTextFromIdRefs、aria-label、findLabelForInput（label[for] / 父级 label）、placeholder、title、name、id、aria-describedby
+- inferInputSemanticLabel：综合 role / type / placeholder / form 推断，含搜索框语义识别（searchbox / q|query|search|keyword / 搜索等关键词），命中且无更优可访问名时返回 '搜索框'
+- 工具：simpleHash（FNV-1a 变体，2166136261/16777619，36 进制截断）、safeCssEscape（优先 CSS.escape）、normalizeText / normalizeAttribute
+- 其余：getElementKind / normalizeElementKind、createElementSignature（hash 签名）、validateElementAgainstSignature（加权评分 minScore 默认 0.62）、captureElementActionState、verifyInputAction / verifyClickAction（敏感字段仅回读长度）、setRedactionEnabled、redactHtmlWithMetadata 等
+
+六、页面运行时（web-agent-page-runtime-core.js）
+- VERSION = '0.2.2'
+- KIND_ID_PATTERN：`/^vcp-(searchbox|input|textarea|button|link|select|option|checkbox|radio|tab|switch|menuitem|interactive)-(\d+)$/i`（13 类 kind-id）
+- STRICT_HANDLE_PATTERN：`/^vcp-h-(\d+)-(\d+)-(\d+)-([a-z0-9]+)$/i`（严格句柄）
+- REGISTRY_SNAPSHOT_RETENTION = 20（注册表快照保留数）；另有 READ_ONLY_COMMANDS 只读命令集
+- 可见性判断 isVisible：display / visibility / opacity / rect 尺寸
+- 区域/块语义：getRegionElement / getRegionKind（overlay / navigation / main / sidebar / header / footer / form / content），getBlockElement / getBlockKind（table-row / list-item / form-group / article / section / form / dialog / content）
+- 标题路径 getHeadingPath：遍历 h1~h6 可见标题，按层级压缩，取最近 4 级
+- 空间提示 spatialHint：视口三分区，返回 上/中/下 + 左/中/右 组合（如 '左上'）
+- 快照上下文 createSnapshotContext：runtimeInstanceId / documentGeneration / snapshotId / createdAt / url / title / elements / regions / contentBlocks / regionMap / blockMap / kindCounters
+- 敏感 DOM 脱敏开关 setRedactionEnabled：联动 pageCore.setRedactionEnabled
+- 其余：registerElement / pruneRegistry / buildScrollContext / buildInteractionTree / buildDiff / buildHashes / snapshot（PageGraph）/ GroundedMarkdown 生成 / resolveTarget / describeElement / checkOcclusion / setNativeValue / dispatchClick 等
+
+七、运行时核心（web-agent-runtime-core.js）
+- VERSION = '0.1.0'
+- MODIFIER_BITS 修饰键位标记：alt=1 / ctrl=2 / control=2 / meta=4 / cmd=4 / command=4 / shift=8
+- createKeyboardPlan：normalizeKeys 按 +/, 切分，键别名（esc→Escape、return→Enter、space、arrowup/down/left/right、pageup/pagedown）+ 特殊键表（Enter/Tab/Escape/Backspace/Delete/Arrow*/PageUp/PageDown/Home/End/Space 含 windowsVirtualKeyCode）+ 修饰键位，产出 {type:'keyboard-sequence', modifiers, keys}
+- createMousePlan：click→move/down/up 序列；hover→move；scroll→wheel（amount 默认 600，direction 上下左右分页）
+- buildResponseBodyResult：maxBodyChars 默认 16384（范围 0~1000000）、metadataOnly、base64Encoded、bodyBytes/bodyChars、sha256Text（crypto.subtle SHA-256 十六进制摘要）、truncated/omittedChars
+- estimateBodyBytes：非 base64 用 TextEncoder 计字节，base64 按 3/4 换算
+- createWebAgentRuntime(adapter, options)：构造 WebAgentRuntime（validateAdapter 校验、audit 监听、initialize 拉取能力集）
+- normalizeLegacyChromeCommand：兼容旧 ChromeBridge 命令（resolveCommand + createRequest，metadata 携带 sourceClientId / chromeBridgeProtocolVersion / originalCommand），配套 formatLegacyChromeResult
+- execute(input) 主入口：createRequest → validateRequest → initialize → assertCommandSupported → getTargetIdentity → getDocumentState → assertIdentity → route 按 command/domain 分派（page_* 走 executePageOperation，debugger/dom/network/emulation/storage 走 sendDebugger 的 CDP 映射，native_* 走 dispatchNativeInput，target_* 走 target 方法族）
+
+八、适配器
+- chrome-adapter.js：VERSION='0.1.0'；createChromeWebAgentAdapter(chromeApi, options) → ChromeWebAgentAdapter（id='chrome'、backend='chrome-extension'）；CAPABILITIES 12 项（page/script/debugger/runtime/dom/accessibility/nativeInput/network/storage/emulation/screenshot/targets）；chromeCall 将 MV3 回调 API 包装为 Promise 并检查 chrome.runtime.lastError；面向 MV3 扩展 background：chrome.debugger（attach/detach/sendCommand/onEvent/onDetach）、chrome.tabs（query/get/update/create/remove/reload/captureVisibleTab/onUpdated/sendMessage）、chrome.scripting.executeScript（MAIN/ISOLATED 世界）；executePageOperation 将 page_* 经 tabs.sendMessage 分派给 content script（无响应时返回 ACTION_DISPATCHED 异步）
+- electron-adapter.js（VCPChat 专属，纯 CJS require 风格）：VERSION='0.1.0'；createElectronWebAgentAdapter(webContents, options) → ElectronWebAgentAdapter（id='electron-loom'、backend='electron-webcontents'）；面向 Electron WebContentsView：executeJavaScriptInIsolatedWorld(worldId 默认 999)/executeJavaScript、webContents.debugger（attach('1.3')/sendCommand/on('message')/on('detach')）、capturePage、loadURL/reload/navigationHistory 前进后退、did-finish-load 导航等待；单目标适配器：listTargets 恒返回 1 个目标，closeTarget 不支持（抛 CAPABILITY_NOT_SUPPORTED 提示使用 CloseApp），createTarget 必须提供 url 转 navigate；附带 dispose()
+
+九、双仓库同构部署
+- VCPToolBox 部署路径：`Plugin/ChromeBridge/VCPChrome/webcore/`（7 个文件）。`background.js` 顶部 importScripts 加载 4 模块：'webcore/web-agent-protocol.js'、'webcore/adapter-contract.js'、'webcore/web-agent-runtime-core.js'、'webcore/chrome-adapter.js'，随后校验四个全局变量，L57 `createChromeWebAgentAdapter(chrome, { currentActiveTabId })`、L60 `createWebAgentRuntime(chromeWebAgentAdapter, { audit })` 创建 WebAgentRuntime；强制刷新时经 chrome.scripting.executeScript 向标签页注入 'webcore/web-agent-protocol.js' + 'webcore/web-agent-page-core.js' + 'webcore/web-agent-page-runtime-core.js' + 'content_script.js'（content_script.js 依赖 page core）
+- VCPChat 部署路径：`modules/loom/webcore/`（8 个文件）。`VCPLoomManager.js` L14 `const webAgentCore = require('./webcore')`（index.js），L16-17 从 './webcore/electron-adapter' 解构 createElectronWebAgentAdapter，L1412 `createElectronWebAgentAdapter(view.webContents, { appId: manifest.id, ... })` 挂到实例
+- 两仓库 7 个公共文件 MD5 完全一致（index.js 双端均为 979D4DF8FB560757D849866B1B631860，实测 7/7 MATCH）；VCPChat 额外 electron-adapter.js
+- 入口 index.js 导出：createPageRuntime / createRuntime / createChromeRuntime / getCapabilityCatalog；versions 含 pageGraphVersion:1、groundedMarkdownVersion:1（另含 protocolVersion、chromeBridgeProtocolVersion 及各模块版本）
+
+Tag: vcpweb, webcore, web-agent-protocol, adapter-contract, runtime-core, page-core, PageGraph, GroundedMarkdown, ChromeBridge, Loom, 双仓库同构, 浏览器Agent, TagMemo V9.1

@@ -1,17 +1,19 @@
-[2026-07-24] - 哈雷酱
+[2026-08-04] - 哈雷酱
 # RiverMemoEngine 与 Topology V3 生产构型
 
 状态：CURRENT_VERIFIED
-最后核验：2026-07-24
-适用范围：`RiverMemoEngine.js`（839行）+ `rust-vexus-lite/src/rivermemo_topology_v3.rs`（2520行）当前源码
+最后核验：2026-08-04（第8次上游合并后重新核验，新增查询河网形态Softmax环节）
+适用范围：`RiverMemoEngine.js`（839行）+ `rust-vexus-lite/src/rivermemo_topology_v3.rs`（2813行）当前源码
 事实来源：
 - `D:\github\VCP\VCPToolBox\RiverMemoEngine.js`（36KB，839行）
-- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\rivermemo_topology_v3.rs`（89KB，2520行）
-- `D:\github\VCP\VCPToolBox\docs\RIVERMEMO_TOPOLOGY_V3.md`（1055行）
-- 上游commit: `ab618719 VCPMemo-Rust一体化完整底座引擎已上线`
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\rivermemo_topology_v3.rs`（99KB，2813行）
+- `D:\github\VCP\VCPToolBox\docs\RIVERMEMO_TOPOLOGY_V3.md`（1197行）
+- 上游commit: `cf0bb54d 优化一个内存算法和数学塑形算法` / `e1026473 更新文档` (2026-08-04)
 
 ## 核心结论
 RiverMemo Topology V3 是 VCP 记忆系统的生产级连续信息场检索引擎。它建立在 TagMemo V9 已验证的降噪传播底座之上，首次将查询源形成、拓扑传递、河网生成、候选创新与最终排序放入同一个可计算闭环。Topology V3 的全部重计算已下沉至 Rust 原生内核（rayon 并行），JS 门面只负责 V9 查询观测、双场准备和结果组装。
+
+**2026-08-04 升级**：新增"查询河网形态统计"环节 —— 在候选拓扑匹配之前，先估计查询侧感应河网在 Atomic/Propositional/Narrative 三种形态中的连续位置，并以三评分头连续混合方式计算候选图分。
 
 ## 版本与算法标识
 | 标识 | 值 |
@@ -30,21 +32,44 @@ RiverMemo Topology V3 是 VCP 记忆系统的生产级连续信息场检索引�
    - `rerank()` 方法（行425）只准备连续查询场并消费原生结果
    - `rebindDatabase(db)` / `getArtifactSnapshot(options)` 委托给 v10Engine
 
-2. **Rust 原生内核** (`rivermemo_topology_v3.rs`):
-   - 2520行，使用 rayon 并行计算、rusqlite 数据库、flate2 Gzip 解压
+2. **Rust 原生内核** (`rivermemo_topology_v3.rs`, 2813行):
+   - 使用 rayon 并行计算、rusqlite 数据库、flate2 Gzip 解压
    - 关键结构: `NativeArtifact`, `MemoRuntime`, `MemoQueryObservation`
-   - N-API 入口: `rerank_rivermemo_topology_v3()`（行2121）
-   - 内部入口: `run_native()`（行1756）
+   - N-API 入口: `rerank_rivermemo_topology_v3()`（行2777）
+   - 内部入口: `run_native()`（行2347）
+   - **新增**: `compute_query_morphology()`（行1784）— 查询河网形态统计器
    - 边权重计算: `edge_weight()`, `independent_fraction()`
 
-3. **总方程**:
+3. **2026-08-04 新增流水线环节**:
+   ```
+   → Rust/Rayon：六路候选超集
+   → Rust：查询河网形态统计、稳定Softmax与低样本先验收缩  ← 新增
+   → Rust/Rayon：双尺度路径几何
+   → Rust/Rayon：查询河网—候选曲线相对拓扑匹配
+   → ...
+   ```
+
+4. **总方程**:
    S_i = Π[0,1][S_i^field + Ω_Q^γ · Π[0,C_ri](λ_ri · C_i · [G_i - E(G|Z_i) - z·σ(G|Z_i)]+) + C_A · SmoothStep((A_i·R_i^A - τ_A)/(s_A - τ_A))]
    - 双场语义基线 + 关系拓扑创新 + 直接锚点创新
    - 关系拓扑通道只奖励候选超出同条件期望及其不确定性上界的正创新
    - 直接锚点通道保护 hop-0 事实接触
    - 两条创新通道均受独立上限约束，结果投影至 [0,1]
+   - **G_i 现在由查询河网的形态概率连续混合节点图与边图读出**
 
-## 关键文件与行号
+## 查询河网形态Softmax（2026-08-04新增）
+- 形态统计器不读取查询文本，也不读取候选，因此不依赖任何自然语言关键词，不会被召回候选池反向污染
+- 生产实现: `compute_query_morphology()` (rust 行1784)
+- 输出: M(R_q) = (p_A, p_P, p_N)，p_A+p_P+p_N=1
+  - p_A (Atomic): 偏好浅层、聚集、能量集中且纵向延伸较弱的河网
+  - p_P (Propositional): 偏好中等深度、同层关系、分叉与汇合
+  - p_N (Narrative): 偏好深层、链式、方向一致且跨层持续的河网
+- 稳定Softmax: 减去最大logit，温度T=1
+- 低样本收缩: 置信度 c_M ∈ [0,1] 向均匀先验收缩，空河网不会被强行硬判
+- 三评分头: G_i = p_A·G_i^atomic + p_P·G_i^prop + p_N·G_i^narr（节点图/边图连续混合）
+- 结果 `queryMode` 保留为兼容诊断字段 = argmax(p_A,p_P,p_N)
+
+## 关键文件与行号（2026-08-04更新）
 | 文件 | 行号 | 内容 |
 |------|------|------|
 | RiverMemoEngine.js | 23-25 | VERSION/ALGORITHM_VERSION/RESULT_SCHEMA 常量 |
@@ -52,8 +77,9 @@ RiverMemo Topology V3 是 VCP 记忆系统的生产级连续信息场检索引�
 | RiverMemoEngine.js | 53-64 | class RiverMemoEngine 构造函数 |
 | RiverMemoEngine.js | 425 | rerank() 方法入口 |
 | rivermemo_topology_v3.rs | 17-18 | Rust端 ALGORITHM_VERSION/RESULT_SCHEMA |
-| rivermemo_topology_v3.rs | 1756 | run_native() 内部入口 |
-| rivermemo_topology_v3.rs | 2121 | rerank_rivermemo_topology_v3() N-API入口 |
+| rivermemo_topology_v3.rs | 1784 | **compute_query_morphology() 查询河网形态统计** |
+| rivermemo_topology_v3.rs | 2347 | run_native() 内部入口 |
+| rivermemo_topology_v3.rs | 2777 | rerank_rivermemo_topology_v3() N-API入口 |
 
 ## 调用路径
 LightMemo (enginemode=rivermemo) → RiverMemoEngine.rerank() → V10Engine.prepareQuery() → Rust rerank_rivermemo_topology_v3() → 返回排序结果
@@ -64,4 +90,4 @@ LightMemo (enginemode=rivermemo) → RiverMemoEngine.rerank() → V10Engine.prep
 - experimentArms.js 等旧 JS 实验构型保留在仓库中但不属于 V3 生产执行路径
 
 关联节点：TagMemoV10Engine(208), rust-vexus-lite记忆管线(209), RiverMemo拓扑理论(210), TagMemoEngine统一构型(198), LightMemo(59), TagMemo V10 Alpha(206)
-Tag: RiverMemoEngine, rivermemo, topology-v3, rust-native, rayon, 连续信息场, 双场语义基线, 关系拓扑创新, 直接锚点创新, N-API, vexus-lite, TagMemo V9.1, rivermemo_v1, 2026-07-24
+Tag: RiverMemoEngine, rivermemo, topology-v3, rust-native, rayon, 连续信息场, 双场语义基线, 关系拓扑创新, 直接锚点创新, 查询河网形态, Softmax, compute_query_morphology, N-API, vexus-lite, TagMemo V9.1, rivermemo_v1, 2026-08-04

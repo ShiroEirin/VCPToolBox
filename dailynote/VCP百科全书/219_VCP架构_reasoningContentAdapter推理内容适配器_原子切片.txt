@@ -1,0 +1,83 @@
+[2026-08-06] - 哈雷酱
+[VCP百科全书] reasoningContentAdapter 推理内容适配器
+
+状态：CURRENT_VERIFIED
+最后核验：2026-08-06（第9次上游合并新建）
+适用范围：`modules/reasoningContentAdapter.js`（150行）当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\modules\reasoningContentAdapter.js`（150行）
+- 上游commit: `f647af02 诸多底层优化` / `2b00d0d2 功能优化` (2026-08-06)
+
+一、模块基本信息
+1. 模块名称：reasoningContentAdapter
+2. 文件路径：modules/reasoningContentAdapter.js
+3. 文件大小：150行
+4. 功能一句话总结：将各厂商 AI 模型返回的不同格式推理内容（reasoning_content/reasoning/thinking 等）统一标准化提取并转换为 VCP 的 think/thinking 标签格式
+
+二、功能定位
+不同 AI 厂商（OpenAI、Anthropic、DeepSeek、Qwen 等）的推理模型在 API 响应中使用不同的字段名承载推理过程。reasoningContentAdapter 提供统一的标准化提取层，将这些异构字段归一化为 VCP 可渲染的 think 标签。
+
+三、支持的推理字段名（REASONING_KEYS，12个）
+```javascript
+const REASONING_KEYS = Object.freeze([
+  'reasoning_content',    // DeepSeek/DeepSeek-R1 风格
+  'reasoning',            // 通用
+  'reasoning_chunk',      // 流式分块
+  'reasoningChunk',       // camelCase 流式
+  'reasoning_summary',    // OpenAI o1/o3 风格
+  'reasoningSummary',     // camelCase
+  'reasoning_details',    // 详细推理
+  'reasoningDetails',     // camelCase
+  'reasoning_text',       // 文本推理
+  'reasoningText',        // camelCase
+  'thinking',             // Anthropic Claude 风格
+  'thoughts'              // 其他
+]);
+```
+
+同时定义 TEXT_VALUE_KEYS 辅助键集合（text/content/summary/value/reasoning/thinking），用于从嵌套对象中提取文本值。
+
+四、核心函数
+
+1. **normalizeReasoningTag(value)**
+   - 功能：统一推理标签名，'thinking' → 'thinking'，其他 → 'think'
+   - 返回：'think' 或 'thinking'
+
+2. **normalizeReasoningModelFilters(value)**
+   - 功能：规范化模型过滤器，支持数组或逗号分隔字符串
+   - 处理：trim + lowercase + 过滤空值
+   - 返回：小写过滤器数组
+
+3. **shouldConvertReasoningForModel(modelName, enabled, modelFilters)**
+   - 功能：判断是否应为指定模型转换推理内容
+   - 逻辑：enabled=true 且 modelName 非空时，检查模型名是否包含任一过滤器
+   - 返回：boolean
+
+4. **valueToReasoningText(value, seen)**
+   - 功能：递归提取嵌套结构中的推理文本
+   - 支持：string/number/bigint/array/嵌套object
+   - 循环引用保护：使用 Set 跟踪已访问对象
+   - 优先提取：TEXT_VALUE_KEYS 和 REASONING_KEYS 匹配的值
+   - 数组处理：逐项提取后以 \n 连接
+
+五、关联模块
+- modules/handlers/streamHandler.js（173行变更）— 流式响应处理器，推理适配的主要消费者
+- modules/handlers/nonStreamHandler.js（54行变更）— 非流式处理器
+- modules/messageProcessor.js — 消息处理器
+- modules/renderer/contentPipeline.js (VCPChat) — 内容渲染管线
+
+六、使用场景
+- DeepSeek-R1、Qwen-QwQ、OpenAI o1/o3、Anthropic Claude 等推理模型的响应统一处理
+- 流式/非流式响应中的推理链提取与转换
+- VCP 前端 think 标签渲染的源头数据标准化
+
+七、配套变更（同批上游提交）
+| 文件 | 变更 | 说明 |
+|------|------|------|
+| modules/handlers/streamHandler.js | 173行 | 流式处理器集成推理适配 |
+| modules/handlers/nonStreamHandler.js | 54行 | 非流式处理器集成 |
+| modules/vcpLoop/toolCallParser.js | 49行 | 工具调用解析器优化 |
+| VCPChat: modules/renderer/contentPipeline.js | 119行 | VCPChat 内容管线推理支持 |
+| VCPChat: modules/renderer/streamManager.js | 65行 | 流式管理器推理支持 |
+
+Tag: reasoningContentAdapter, 推理适配, reasoning_content, thinking标签, DeepSeek-R1, OpenAI o1, Claude thinking, 流式推理, 字段归一化, 2026-08-06

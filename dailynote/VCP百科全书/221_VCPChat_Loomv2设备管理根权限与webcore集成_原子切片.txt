@@ -1,0 +1,93 @@
+[2026-08-07] - 哈雷酱
+[VCP百科全书] VCPChat——Loom v2 设备管理根权限与 webcore 集成（原子切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-08-07（第10次上游合并：5506383 大工程的开始 / d803a5a 升级loomv2 / 9c0cc72 实现完整的loom设备管理根权限 / 339a6f3 竟态加固）
+适用范围：`modules/loom/` 当前源码（VCPChat）
+事实来源：
+- `modules/loom/VCPLoomManager.js`（1900 非空行 / 总行数 2080，含 180 空行；PowerShell 核实）
+- `Loommodules/device-menu.html`（Loom 设备中心，176 行）
+- `modules/loom/webcore/index.js`（79 行）与 `modules/loom/webcore/electron-adapter.js`（530 行）
+- `preloads/loom.js`（54 行）与 `preloads/loom-page.js`（128 行）
+- `VCPDistributedServer/Plugin/LoomController/plugin-manifest.json`（v1.3.0）与 `LoomControllerService.js`（553 行）
+- 上游commit: 9c0cc72 实现完整的loom设备管理根权限 (2026-08-07)
+
+一、定位
+（VCPChat 桌面端 LoomAPP 运行时管理器：创建/打开/关闭/查询/编辑 LoomAPP，管理设备权限（HID/USB/串口持久化授权 + 蓝牙选择，即摄像头/麦克风/定位之外的另一条根权限链路），集成 vcpweb webcore 执行 WebAgent 动作。配套 LoomController 插件 v1.3.0 供 Agent 通过 Loom ID + 动作 ID 安全操作。类 `VCPLoomManager` 自 223 行起，单例由 `initialize()`/`getManager()` 暴露）
+
+二、文件结构
+- `modules/loom/VCPLoomManager.js`：主管理器（类自 223 行；常量区 19-55 行；module.exports 于 2072-2080 行导出 VCPLoomManager / initialize / getManager / DEFAULT_MANIFEST / USER_AGENTS / LOOM_PAGE_ACTIONS / LOOM_ACTIONS）
+- `Loommodules/manager.html` + `shell.html` + `device-menu.html`：管理器页、LoomAPP 壳窗口、Loom 设备中心（device-menu.html 176 行，协议页签 hid/usb/serial/bluetooth）
+- `preloads/loom.js`：壳/管理器 preload，暴露 `window.loomAPI`（listApps / listOpenApps / getApp / getRuntimeSource / getRenderedText / createApp / saveApp / editAppSources / deleteApp / setEnabled / openApp / closeApp / clearSession / reloadRegistry / openManager / exportApp / importApp / openAppFolder / shellReady / shellAction / onDeviceCandidates 等；shellAction 复用 `loom:shell-action` 通道）
+- `preloads/loom-page.js`：页面 preload，解析 `--loom-page-profile=` 参数；profile 为 mobile 时在隔离上下文伪造 `navigator.userAgentData`（Chromium 146 / Pixel 8 Pro）、`platform='Linux armv8l'`、`maxTouchPoints=5`、`screen` 390x720、`orientation` 竖屏等（不合成真实输入事件）
+- `modules/loom/webcore/`：8 个 JS 文件（index.js / web-agent-protocol.js / web-agent-page-core.js / web-agent-page-runtime-core.js / web-agent-runtime-core.js / adapter-contract.js / electron-adapter.js / chrome-adapter.js）+ 1 个参考 manifest（后端运行时参考协议-plugin-manifest.json）
+- `AppData/LoomApps/<appId>/`：运行时数据目录，含 `loom.json` 清单、`inject.css`、`inject.js`、`device-permissions.json`
+
+三、核心常量与安全边界
+- MANIFEST_FILE='loom.json'、INJECT_CSS_FILE='inject.css'、INJECT_JS_FILE='inject.js'、DEVICE_PERMISSIONS_FILE='device-permissions.json'
+- PACKAGE_FORMAT='vcp-loom-package'、PACKAGE_VERSION=1
+- TITLE_BAR_HEIGHT=44、SAFE_APP_ID=/^[a-z0-9][a-z0-9_-]{1,63}$/（2-64 位小写字母/数字/短横线/下划线，字母或数字开头）
+- MAX_INJECT_BYTES=2*1024*1024（2MB）、MAX_SHARE_TEXT=100000、MAX_RUNTIME_SOURCE=4*1024*1024（4MB）、MAX_RENDERED_TEXT=500000
+- WEB_AGENT_WORLD_ID=999（executeJavaScriptInIsolatedWorld 世界 ID）
+- USER_AGENTS：desktop:''（空串）、mobile:'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36'、iphone:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+- LOOM_PAGE_ACTIONS（Object.freeze(Set)，13 个页面动作，以源码实际为准）：page_get_info / page_query_html / page_query_scripts / page_code_search / page_wait_for / page_click / page_type / page_set_value / page_send_keys / page_select_option / page_check / page_hover / page_scroll
+- LOOM_ACTIONS（Object.freeze(Set)）= webAgentCore.getCapabilityCatalog().map(def => def.command)，即 webcore 协议全量命令
+- 安全边界：appId 必须通过 SAFE_APP_ID 校验；inject/css/js 大小上限；startUrl 仅支持 http/https（LoomController CreateApp 描述）；Cookie/Host 请求头不可覆写；页面 webPreferences 均为 contextIsolation:true / nodeIntegration:false / sandbox:true / webSecurity:true
+
+四、LoomAPP 清单模型（DEFAULT_MANIFEST，57-95 行，Object.freeze）
+- 顶层：schemaVersion:1、id:''、name:'未命名 LoomAPP'、description:''、startUrl:'https://example.com/'、enabled:true、exposeInAppDrawer:true、exposeManagerInAppDrawer:true、icon:''、emoji:'🕸️'
+- window：width:420 / height:780 / minWidth:320 / minHeight:480 / maxWidth:null / maxHeight:null / resizable:true
+- viewport：width:390 / height:700 / autoResize:true
+- request：profile:'mobile'（可选 desktop/mobile/iphone/custom）/ userAgent:'' / headers:{}
+- navigation：allowPopups:false / openExternalOriginsInBrowser:false
+- injection：css:'inject.css' / js:'inject.js'
+- 归一化：mergeManifest 浅合并顶层 + 深合并 window/viewport/request/navigation/injection 五组嵌套对象；clampInteger/optionalBound 限制数值边界；normalizeHeaders 过滤非对象头
+
+五、设备管理根权限（9c0cc72 核心新增）
+- 持久化：`device-permissions.json` 位于 `appDir(appId)/device-permissions.json`（devicePermissionsPath，821 行），结构 { schemaVersion:1, grants:[{deviceType, origin, fingerprint, name, grantedAt}] }
+- 授权函数（以源码实际为准）：
+  - loadDevicePermissionGrants(appId)（858）：读取并过滤 deviceType ∈ ['hid','usb','serial'] 且 origin/fingerprint 为字符串的授权；自动 normalizeDeviceOrigin 与 normalizeStoredDeviceFingerprint（兼容旧版含 name/collections 的指纹格式，下次写入自然迁移）
+  - saveDevicePermissionGrants(instance)（886）：writeJson 落盘
+  - hasDevicePermission(instance, deviceType, origin, device)（893）：按 deviceType + 归一化 origin + 指纹三要素精确匹配
+  - grantDevicePermission(instance, deviceType, origin, device, name='')（903）：先写实例内 grants 再 await 落盘——注释明确"选择回调返回给 Chromium 之前必须完成持久化，否则 requestDevice() 已成功但紧随其后的刷新可能早于授权文件落盘"
+  - revokeDevicePermission(instance, deviceType, origin, device)（930）：filter 移除，变化时异步落盘（失败仅 console.warn）
+- 设备指纹（deviceFingerprint，833）：JSON{type, vendorId(vendorId??usbVendorId), productId(productId??usbProductId), serialNumber}；源码注释：Chromium 的设备选择事件与刷新后的 device permission 回调不保证提供相同的展示字段和 HID collections，只使用跨枚举稳定的硬件标识，deviceId、名称、collections 均不参与持久授权匹配
+- 授权中介 configureDevicePermissionBroker(instance)（948）：
+  - setPermissionCheckHandler / setPermissionRequestHandler / setDevicePermissionHandler：仅 ['hid','usb','serial'] 且 isAllowedHardwareOrigin(instance, origin) 通过（允许集合 = startUrl origin + 当前 URL origin）
+  - protocols 表（hid/usb/serial）：selectEvent / addedEvent / removedEvent / revokedEvent 对（select-hid-device、select-usb-device、select-serial-port 等）；onRevoked 自动 revokeDevicePermission
+  - bluetooth：contents.on('select-bluetooth-device')，仅候选发布 + 选择，不进入持久授权（WebBluetooth 无 getDevices()，不能靠盲目刷新确认）
+  - 候选通过 sendToShell(instance, 'loom:device-candidates', {protocol, devices:[{id,name,detail}]}) 推给设备中心；instance.pendingDeviceSelections(Map) 管理挂起选择（finish/cancel）
+- 壳交互链路（shell-action IPC，2028 起）：
+  - 'device-menu' → instance.deviceMenuOpen = payload===true 并 updateViewBounds（deviceMenuView 是后 addChildView 的原生 View，位于网页 View 上方，可真正覆盖网页，见 1427-1430）
+  - 'device-request' → requestDeviceFromShell(instance, protocolId)（1151）：向页面注入 navigator.hid.requestDevice({filters:[]}) / navigator.usb.requestDevice / navigator.serial.requestPort / navigator.bluetooth.requestDevice 脚本；requestState(committed 标记) 防旧异步结果覆盖已授权状态
+  - 'device-select' → selectDeviceFromShell(instance, {protocol, deviceId})（1249）：对 hid/usb/serial 先 grantDevicePermission 落盘，持久化失败则 pending.finish('') 取消 Chromium 选择并抛"设备授权持久化失败"，避免半提交；随后发送 connected 通知并 finish(deviceId) 提交给 Chromium
+  - 设备中心 UI（device-menu.html）：protocols 页签 [['hid','HID'],['usb','USB'],['serial','串口'],['bluetooth','蓝牙']]；api.shellAction('device-request'/'device-select')、api.onDeviceCandidates(renderCandidates)；关闭按钮 api.shellAction('device-menu', false)
+- 加载链：manager/shell 与 deviceMenuView 共用 preloads/loom.js（deviceMenuView webPreferences 含 preload + contextIsolation + sandbox，见 1372-1381）；页面 WebContentsView 使用 preloads/loom-page.js + `--loom-page-profile=` 附加参数（1358-1371）
+
+六、webcore 集成（v2.0 Loom）
+- 入口：`const webAgentCore = require('./webcore')`（index.js，79 行，UMD 式加载 6 子模块，导出 versions / protocol / adapterContract / pageCore / pageRuntime / runtimeCore / adapters.chrome / createPageRuntime / createRuntime / createChromeRuntime / getCapabilityCatalog）；`const { createElectronWebAgentAdapter } = require('./webcore/electron-adapter')`
+- getWebAgentSources()（480）：读 web-agent-protocol.js / web-agent-page-core.js / web-agent-page-runtime-core.js 三个文件，url 为 `vcp-loom-webcore://<file>`，缓存在 webAgentSourceCache
+- waitForDocumentReady(instance, generation)（494）：documentReadyPromise 与 30s 超时 Promise.race；若 generation !== instance.documentGeneration 抛 code='LOOM_DOCUMENT_CHANGED'
+- initializeWebAgentRuntime(instance, generation)（515）：executeJavaScriptInIsolatedWorld(WEB_AGENT_WORLD_ID=999) 注入 3 个源码文件 + bootstrap.js（globalThis.__vcpLoomWebAgentRuntime = core.createWebAgentPageRuntime({window,document,Node}, {runtimeInstanceId:`loom-${appId}-${generation}-${Date.now()}`, redactSensitiveDom:true})），再读 identity 并 instance.webAgentAdapter.updateDocumentState(identity)；成功置 instance.webAgentReady=true
+- ensureWebAgentRuntime(instance)（572）：懒加载单例，webAgentInitializationPromise 串行化并发调用
+- getWebAgentPageInfo(appId)（592）：调用运行时 runtime.snapshot()，返回 {appId, actionCatalog:getCapabilityCatalog(), ...snapshot}（Grounded Markdown 视图 + action handle）
+- normalizeLoomActionId(actionId)（613）：webAgentCore.protocol.resolveCommand 归一化，必须属于 LOOM_ACTIONS，否则抛"不支持的 Loom Web Agent 动作"
+- executeIsolatedPageOperation(instance, action, params, request)（622）：ISOLATED 世界执行 runtime.execute(action, params, {targetContext,...})，url 形如 `vcp-loom-webcore://action/<action>.js`
+- executeWebAgentAction(appId, actionId, params, options)（648）：走后端运行时 instance.webAgentRuntime.execute({command, targetContext:{adapter:'electron-loom', targetId:webContents.id, appId}, params, options, metadata:{source:'LoomController', loomAppId}})；response.status===protocol.Status.ERROR 时抛 code/details 结构化错误
+- 运行时装配（openApp，1411-1424）：instance.webAgentAdapter = createElectronWebAgentAdapter(view.webContents, {appId, worldId:999, executePageOperation: (a,p,r)=>this.executeIsolatedPageOperation(...)})；instance.webAgentRuntime = webAgentCore.createRuntime(adapter, {audit})
+- 文本/快照能力：captureRenderedSnapshot(424) / readRuntimeSource(445) / readRenderedText(465，MAX_RENDERED_TEXT 截断，truncateRuntimeContent 二分截断)
+- electron-adapter.js（530 行，任务标注 495 行以源码实际为准）：VERSION='0.1.0'，CAPABILITIES=[page, script, debugger, runtime, dom, accessibility, nativeInput, network, storage, emulation, screenshot, targets]；class ElectronWebAgentAdapter extends contract.WebAgentAdapter（id:'electron-loom'，backend:'electron-webcontents'）；契约实现 getTargetIdentity / getDocumentState / updateDocumentState / invalidateDocument（documentGeneration+1 且清 snapshotId）/ executePageOperation（network_query / network_clear / storage_* 本地处理，其余委托 executePageOperationHandler）+ bindDebuggerEvents；WebContentsView 桥接通过 webContents.id 定位 targetId、executeJavaScriptInIsolatedWorld 执行脚本、Debugger 域做 CDP 能力
+
+七、LoomController 插件（v1.3.0）
+- 位置: `VCPDistributedServer/Plugin/LoomController/`（plugin-manifest.json 74 行 + LoomControllerService.js 553 行 + README.md）
+- plugin-manifest.json：name:'LoomController'、displayName:'VCP Loom Agent 控制器'、version:'1.3.0'、pluginType:'hybridservice'、communication:{protocol:'direct', timeout:60000}、entryPoint:{type:'nodejs', script:'LoomControllerService.js'}
+- invocationCommands（11 个，以源码实际为准）：ListApps / ListOpenApps / CreateApp / OpenApp / CloseApp / GetAppSources / GetRuntimeSource / GetRenderedText / GetPageInfo / ExecuteAction / EditAppSources
+- LoomControllerService.js：initialize({services.loomManager}) 注入 loomManager；requireManager() 校验可用性；processToolCall 业务路由；支持串行命令（command1..N + targetN/strictN/snapshotIdN 自动归入第 N 步，wait 默认 1000ms 最大 30000ms）；module.exports = { initialize, processToolCall, _test }；用途：供 Agent 创建/感知/打开/关闭/查询/编辑 LoomAPP，通过 Loom ID + 动作 ID 安全操作（ExecuteAction 描述：权限等级、安全审核和用户审批由 VCP 后端引擎按已注册指令统一处理，LoomController 仅负责业务路由）
+
+八、竟态加固（339a6f3，以源码实际为准）
+- 文档代际 documentGeneration：did-start-navigation（主帧非原地）时 +1、loading=true、webAgentReady=false、重建 documentReadyPromise、webAgentAdapter.invalidateDocument()（1471-1478）；waitForDocumentReady / initializeWebAgentRuntime 各关键步骤后校验 generation，失配抛 code='LOOM_DOCUMENT_CHANGED'，放弃旧文档的初始化结果
+- did-finish-load（1492）：Promise.allSettled([applyInjections, ensureWebAgentRuntime, captureRenderedSnapshot]) 三者互不阻塞；仅当 generation 仍匹配且错误码非 LOOM_DOCUMENT_CHANGED 才置 webAgentReady=false
+- 实例初始化串行化：ensureWebAgentRuntime 用 instance.webAgentInitializationPromise 合并并发调用，finally 中仅当仍是当前 promise 才清空
+- 设备侧防竞态：pendingDeviceSelections(Map) 挂起选择统一 finish/cancel 生命周期；deviceRequestStates committed 标记——选择提交后旧 executeJavaScript 的 then/catch 结果一律忽略（页面刷新导致旧上下文销毁的 rejection 不覆盖"已授权"状态）；grantDevicePermission 落盘先于 Chromium 选择回调；selectDeviceFromShell 持久化失败即取消选择防半提交；requestDevice 完成后不主动 reload（厂商站点会自行重建/刷新控制应用，再次 reload 会销毁新页面刚打开的 HID/USB/Serial 句柄导致首条 sendReport()/transferOut() 失败）
+
+Tag: Loom, LoomAPP, VCPLoomManager, device-permissions, 设备权限, webcore, electron-adapter, LoomController, WebContentsView, 根权限, TagMemo V9.1

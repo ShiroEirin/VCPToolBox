@@ -1,0 +1,133 @@
+[2026-08-06] - 哈雷酱
+[VCP百科全书] PlaceholderExplorer 占位符索引管理器（双插件组）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-08-06（第9次上游合并新建）
+适用范围：`Plugin/PlaceholderExplorer/` + `Plugin/PlaceholderExplorerCommand/` 当前源码
+事实来源：
+- `Plugin/PlaceholderExplorer/plugin-manifest.json` (v1.0.0, static)
+- `Plugin/PlaceholderExplorerCommand/plugin-manifest.json` (v1.0.0, synchronous)
+- `Plugin/PlaceholderExplorer/README.md` (94行)
+- `Plugin/PlaceholderExplorerCommand/PlaceholderExplorerCommand.js` (98行)
+- `Plugin/PlaceholderExplorer/modules/` (10个子模块，~1339行)
+- 上游commit: `44af3c8a 新增占位符索引插件与后台管理面板` / `8b93bc5a Merge PR #425` (2026-08-06)
+
+一、插件组基本信息
+本插件组由两个独立插件组成，共享同一索引体系：
+
+| 插件 | 类型 | 版本 | 协议 | 功能 |
+|------|------|------|------|------|
+| PlaceholderExplorer | **static** | 1.0.0 | stdio, timeout=120000 | 定期扫描+输出占位符索引摘要 |
+| PlaceholderExplorerCommand | **synchronous** | 1.0.0 | stdio, timeout=120000 | 查询/编辑/预览/健康检查命令 |
+
+静态插件按 `refreshIntervalCron: */30 * * * *`（每30分钟）自动重建索引，并通过 `{{VCPPlaceholderMap}}` 系统提示占位符向 AI 提供动态折叠摘要。
+
+二、功能定位
+PlaceholderExplorer 为 VCPToolBox 建立"占位符 → 定义位置 → 引用位置"的统一索引，并解析 Tar/Var/Sar、Agent 与 Toolbox 指向文件后的嵌套引用链。
+
+组成：
+- `PlaceholderExplorer`：static 插件，定期扫描并向 {{VCPPlaceholderMap}} 输出动态折叠摘要
+- `PlaceholderExplorerCommand`：同步命令插件，提供 Scan、Locate、Edit、Preview、CheckDeadLinks 五个命令
+- `generated/placeholder-index.json`：最近一次全量索引样例和运行时索引
+- `backups/`：每次成功写入前的原文件备份（自动创建，最多保留20份）
+
+三、扫描范围
+- `config.env` 中所有 Tar*、Var*、SarPrompt* 定义
+- `sarprompt.json` 中的 Sar 定义
+- `Plugin/*/plugin-manifest.json` 中显式静态占位符与 {{VCP<插件名>}} 工具说明占位符
+- `TVStxt/**/*.{txt,md}` 与 `Agent/**/*.{txt,md}` 的 {{...}} / [[...]] 使用点
+- `agent_map.json`、`toolbox_map.json`、表情包目录和引擎内置占位符
+
+四、PlaceholderExplorerCommand 五个命令
+
+1. **Scan** — 重建全量占位符索引
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PlaceholderExplorerCommand「末」,
+command:「始」Scan「末」
+<<<[END_TOOL_REQUEST]>>>
+
+2. **Locate** — 查询占位符定义与引用
+   - 参数：placeholder（必需，可传 VarToolList 或 {{VarToolList}}）
+   - 返回：定义路径与行号、全部引用、nesting 边和 referenceChains 完整链
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PlaceholderExplorerCommand「末」,
+command:「始」Locate「末」,
+placeholder:「始」{{VarToolList}}「末」
+<<<[END_TOOL_REQUEST]>>>
+
+3. **Edit** — 安全编辑可写占位符
+   - 参数：placeholder（必需）、newValue（必需）、scope（可选，definition/file）
+   - 流程：读全文 → 内存修改 → 临时文件 → 校验 → 备份原文件 → 原子替换
+   - scope=definition：编辑 config.env/sarprompt.json 定义值
+   - scope=file：编辑该变量唯一指向的 TVStxt 文件正文
+   - **重要：修改 config.env 中 Tar/Var 后不会热重载，必须重启 VCP 服务才生效**
+   - Sar 的运行时真相源为 sarprompt.json，由现有 SarPromptManager 监听
+   - 内置、聚合、插件、表情包和声明式占位符只读，无写入入口
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PlaceholderExplorerCommand「末」,
+command:「始」Edit「末」,
+placeholder:「始」{{VarCity}}「末」,
+newValue:「始」Shanghai「末」,
+scope:「始」definition「末」
+<<<[END_TOOL_REQUEST]>>>
+
+4. **Preview** — 干跑展开预览
+   - 参数：placeholder（必需）、model/role/context/text（可选，role 默认 system）
+   - 直接复用 messageProcessor.js 的 replaceAgentVariables（即 resolveAllVariables）
+   - 不绕过特权角色判定；role=user 的普通内容不会获得 system 特权
+   - 独立进程无法读取主进程静态插件实时内存值，该类值会保留并说明限制
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PlaceholderExplorerCommand「末」,
+command:「始」Preview「末」,
+placeholder:「始」{{VarTimeNow}}「末」,
+role:「始」system「末」
+<<<[END_TOOL_REQUEST]>>>
+
+5. **CheckDeadLinks** — 双向健康检查
+   - 返回：死链（有引用无定义）、孤儿（有定义无引用）、缺失的 TVStxt/Agent 映射文件、无效 manifest 或其他扫描错误
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PlaceholderExplorerCommand「末」,
+command:「始」CheckDeadLinks「末」
+<<<[END_TOOL_REQUEST]>>>
+
+五、配置参数 (configSchema)
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| PLACEHOLDER_SCAN_ROOT | string | "." | 扫描根目录；相对路径以 VCP 项目根目录为基准 |
+| PLACEHOLDER_INDEX_FILE | string | "generated/placeholder-index.json" | 索引 JSON 输出路径 |
+| PLACEHOLDER_BACKUP_DIR | string | "backups" | 编辑前备份目录，必须位于本插件目录内 |
+| PLACEHOLDER_BACKUP_RETENTION | integer | 20 | 最多保留的备份文件数 |
+| PLACEHOLDER_MAX_EDIT_BYTES | integer | 1048576 | 单次编辑内容最大字节数(1MB) |
+
+备份目录必须位于 Plugin/PlaceholderExplorer/ 内，避免把敏感配置备份到任意外部路径。插件通过 PROJECT_BASE_PATH 自动获取 VCP 根目录。
+
+六、模块架构（PlaceholderExplorer/modules/，10个子模块共~1339行）
+| 模块 | 行数 | 功能 |
+|------|------|------|
+| scanner.js | 256 | 主扫描器，协调各源扫描 |
+| indexStore.js | 263 | 索引存储与查询 |
+| editor.js | 155 | 安全编辑器（读改校验备份替换） |
+| envScanner.js | 144 | config.env 变量扫描 |
+| preview.js | 142 | 干跑展开预览 |
+| sourceScanner.js | 141 | 源码引用点扫描 |
+| pathUtils.js | 84 | 路径工具 |
+| manifestScanner.js | 65 | 插件manifest扫描 |
+| usageScanner.js | 49 | 使用点扫描 |
+| reporter.js | 40 | {{VCPPlaceholderMap}} 摘要报告生成 |
+
+主入口 PlaceholderExplorer.js 仅12行，委托给 modules。
+
+七、AdminPanel 集成
+上游同时新增了管理面板集成：
+- `routes/admin/placeholderExplorer.js` (277行) — 后台 API 路由
+- `AdminPanel-Vue/src/api/placeholderExplorer.ts` — 前端 API
+- `AdminPanel-Vue/src/views/PlaceholderExplorerManager.vue` — 管理界面
+- `tests/placeholderExplorer.test.js` (220行) — 测试
+
+八、关联模块
+- messageProcessor.js：Preview 命令复用其 replaceAgentVariables/resolveAllVariables
+- SarPromptManager：sarprompt.json 的运行时监听者
+- TVStxt/Agent 目录：占位符使用点来源
+- DailyNote (30)：日记变量链
+
+Tag: PlaceholderExplorer, PlaceholderExplorerCommand, 占位符索引, VCPPlaceholderMap, Tar变量, Var变量, SarPrompt, 嵌套引用链, Scan, Locate, Edit, Preview, CheckDeadLinks, static插件, 2026-08-06
