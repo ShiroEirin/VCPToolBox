@@ -1,0 +1,70 @@
+[2026-07-22] - 哈雷酱
+# 日记/知识库搜索器 (Rust)｜DailyNoteSearcher｜使用 Rust 编写的高性能文本搜索插件，支持文本/正则/BM25搜索
+
+状态：CURRENT_VERIFIED
+最后核验：2026-08-12（第11次同步，跨平台二进制选择器 + 父进程存活检测架构，来自云端pull）
+适用范围：`Plugin/DailyNoteSearcher/` 当前源码
+事实来源：
+- 源码：`Plugin/DailyNoteSearcher/DailyNoteSearcher.js`（12.8KB，JS桥）+ `Plugin/DailyNoteSearcher/src/main.rs`（40.6KB）
+- 配置/Manifest：`Plugin/DailyNoteSearcher/plugin-manifest.json`（author: Kilo Code）
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- 版本：1.0.0，类型：hybridservice，协议：direct，超时：60000ms
+- 入口：`DailyNoteSearcher.js`（script 方式，内部按平台选择 Rust 二进制并常驻启动）
+- 使用 Rust 编写的高性能文本搜索插件，支持在日记目录或 knowledge 冷知识库目录中进行快速、精准的文本/正则/BM25 搜索
+- 以 hybridservice/direct 方式常驻启动本地 HTTP 服务（默认端口 38765），同时 Rust 可执行文件仍保留 stdin 一次性调用兼容路径
+- 供 RAGDiary 与其他模块统一调用
+
+⚠️ 架构更新（2026-08-12 云端pull带回）：
+- JS 桥 `DailyNoteSearcher.js` 按 process.platform/process.arch 选择原生二进制：win32:x64 → DailyNoteSearcher-x86_64-pc-windows-msvc.exe、win32:arm64 → aarch64-pc-windows-msvc.exe、linux:arm64 → aarch64-unknown-linux-musl、darwin:x64/arm64 → apple-darwin；候选查找含 src/target 构建产物（`build_rust_plugin` 脚本支持）
+- 具备父进程存活检测与优雅关闭能力：HTTP 响应上限 128MB、超时销毁请求、waitForProcessExit 等待子进程退出、无效 JSON 报错（body 前300字符提示）
+
+## 工作机制
+VCP 启动 → DailyNoteSearcher.js 作为 hybridservice 常驻 → 启动 Rust HTTP 服务监听 38765 端口 → VCP AI 或 RAGDiary 模块发起 SearchDailyNote 请求 → 通过 direct 协议调用本地 HTTP 服务（POST /search）→ Rust 侧执行文本/正则/BM25 搜索 → 返回匹配结果（含上下文行）
+
+两种搜索模式：
+- 默认文本/正则检索：支持 query 单关键词或 queries 多关键词 AND 匹配
+- BM25 排序召回：mode=bm25，按文件修改时间倒序取候选，BM25 相关性排序
+
+## 使用/排障边界
+- 默认搜索根目录为 dailynote，检索冷知识库时传入 root_path=knowledge
+- BM25 模式必须指定 folder（角色日记本目录），只检索该目录下的 md/txt 文件
+- bm25_search_mode: body 匹配正文，tag 只匹配底部 tags/标签行
+- 帧数必须满足 8n+1（如 81/121/241/441）
+- 常见错误：端口冲突（38765被占用）、日记目录路径不正确、ALLOWED_EXTENSIONS 过滤了目标文件
+
+## 命令与参数
+| command | 说明 |
+|---------|------|
+| SearchDailyNote | 在日记本或 knowledge 冷知识库文件中搜索指定文本或关键词 |
+
+默认文本/正则检索参数：query（必需）、queries（可选，多关键词AND）、folder（可选）、root_path（可选，默认dailynote）、allowed_extensions（可选）、ignored_folders（可选）、max_results（可选）、is_regex（可选，默认false）、case_sensitive（可选，默认false）、whole_word（可选，默认false）、context_lines（可选，默认2）
+
+BM25 排序召回参数：mode（必需，bm25）、query（必需）、query_tokens（可选）、folder（必需）、root_path（可选）、bm25_limit（可选，默认10）、bm25_search_mode（可选，body/tag，默认body）、tag_blacklist（可选）、max_results（可选）
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| DAILY_NOTE_SEARCHER_HOST | string | 127.0.0.1 | 常驻 HTTP 服务绑定地址，默认仅监听本机回环 |
+| DAILY_NOTE_SEARCHER_PORT | integer | 38765 | 常驻 HTTP 服务固定端口 |
+| DAILY_NOTE_SEARCHER_TIMEOUT | integer | 60000 | direct/HTTP 调用超时时间（毫秒） |
+| DAILY_NOTE_ROOT | string | dailynote | 日记本根目录的相对路径 |
+| MAX_RESULTS | integer | 200 | 单次搜索返回的最大结果数量 |
+| IGNORED_FOLDERS | string | VectorStore,DebugLog | 搜索时忽略的文件夹列表，逗号分隔 |
+| ALLOWED_EXTENSIONS | string | .md,.txt,.json,.html | 允许搜索的文件扩展名白名单 |
+
+## 调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DailyNoteSearcher「末」,
+mode:「始」bm25「末」,
+query:「始」分布式节点如何跨节点取文件「末」,
+folder:「始」VCP桌面知识「末」,
+root_path:「始」dailynote「末」,
+bm25_limit:「始」20「末」,
+bm25_search_mode:「始」body「末」
+<<<[END_TOOL_REQUEST]>>>
+
+关联节点：RAGDiaryPlugin, DailyNote, DailyNoteManager, VSearch
+Tag: DailyNoteSearcher, 文本搜索, BM25, 正则搜索, hybridservice, direct, Rust, TagMemo V9.1, 1.0.0

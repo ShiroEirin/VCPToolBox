@@ -1,0 +1,94 @@
+[2026-08-12] - 哈雷酱
+[VCP百科全书] Scriptorium 共笔文坊 - VDOCX/VPPTX 文档工程引擎 alpha（VCPChat）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-08-12（第11次同步+合并，上游commit ced62fc "引擎alpha落地啦"）
+适用范围：`D:\github\VCP\VCPChat\ScriptoriumModules\` 当前源码
+事实来源：
+- 源码：`ScriptoriumModules/`（47个文件：39个js + scriptorium.css 4811行 + scriptorium.html 949行 + README.md 383行 + AGENT.md 7行 + 3个font诊断json）
+- 上游commit: `ced62fc` 引擎alpha落地啦！(2026-08-12, 68文件+87207行)
+
+一、项目定位与现状
+1. Scriptorium（共笔文坊）是 VCPChat 的下一代文档工程引擎：让 AI 与人类在同一份文档上共笔协作，格式为自研 VDOCX（连续流文稿）/ VPPTX（逐页演示），非 OOXML。
+2. ⚠️ AGENT.md 明确声明：项目全量重构中；禁用测试脚本、禁止读取测试脚本（属旧工程已废弃）、禁止语法检测、禁止单元测试；不考虑向下兼容，能重构就优先重构，一切以最优范式为最终目标；任何语法错误由程序自动提醒。
+3. 核心思想：Markdown-first 混合 Source Buffer 作为唯一正文真源，渲染面只是派生视图。
+
+二、工程文件结构与模块清单（47个文件，行数实测）
+1. 主装配/入口：
+   - scriptorium.js (747)：窗口主入口，组装 window.scriptoriumAPI + VDocCore/VDocContainer/VDocHybridCompiler/VDocStyleLibrary/VDocPagination 等全部模块
+   - scriptorium.html (949) / scriptorium.css (4811)
+   - scriptorium-agent-port.js (1054)：Agent 端口，命令实现 + normalizeAuthor/textFromHtml/findAll 工具
+2. 文档模型核心（vdoc-*）：
+   - vdoc-core.js (690)：VDocCore 文档模型
+   - vdoc-container.js (302)：VDocContainer 容器
+   - vdoc-hybrid-compiler.js (914)：VDocHybridCompiler 混合编译器
+   - vdoc-style-library.js (409)：VDocStyleLibrary 样式库
+   - scriptorium-pagination.js (432)：分页
+3. 编辑器与渲染：
+   - scriptorium-flow-editor.js (1986)：连续流（VDOCX）编辑器，最大文件
+   - scriptorium-deck-editor.js (799)：演示（VPPTX）编辑器
+   - scriptorium-flow-renderer.js (391) / scriptorium-deck-renderer.js (290) / scriptorium-render-coordinator.js (284)
+   - scriptorium-rendered-text.js (671) / scriptorium-render-primitives.js (362) / scriptorium-formatting.js (396) / scriptorium-dom-selection.js (327)
+   - scriptorium-source-editor.js (391)：HTML源码编辑面(CodeMirror) / scriptorium-shell.js (370) / scriptorium-style-ui.js (381) / scriptorium-navigation.js (298) / scriptorium-visibility.js (255) / scriptorium-find.js (347) / scriptorium-async.js (129)
+4. 文档存取与适配：
+   - scriptorium-document-store.js (306) / scriptorium-flow-adapter.js (296) / scriptorium-deck-adapter.js (390)
+   - scriptorium-media.js (422)：媒体资源 / scriptorium-runtime.js (552) / scriptorium-programmable-content.js (412)：可编程内容
+   - scriptorium-objects.js (1359)：视觉对象语义
+5. 文脉/历史/导出：
+   - scriptorium-session.js (419) / scriptorium-lineage-store.js (215) / scriptorium-lineage-ui.js (629) / scriptorium-pr-diff.js (180) / scriptorium-edit-history.js (170)
+   - scriptorium-export.js (163) / scriptorium-flow-export.js (140) / scriptorium-deck-export.js (390) / scriptorium-export-resources.js (222) / scriptorium-pretext-bridge.js (151)
+6. 诊断文件（非代码）：font-name-diagnostics.json (65411行) / founder-font-summary.json (79) / founder-font-conversion-check.json (65) / font-font-test.html (251) / README.md (383)
+
+三、VDOCX / VPPTX 工程格式
+1. 一份 VDOCX = document.json 文档模型 + resources/media/（SHA-256 内容寻址，协议 `vdoc-resource://media/<sha256>`）+ resources/fonts/；以 Markdown-first 混合 Source Buffer 为唯一正文真源，可同时含 Markdown 标题/段落/列表/引文/表格、行内 HTML 与稳定 HTML island、LaTeX 与 Mermaid 原文、可编程内容及其依赖声明、独立的文档级 documentCss。
+2. 一份 VPPTX = 演示共享 deckCss + 多个 slide；每个 slide 只有一个完整 source，可含页面 `<style>`、HTML、依赖声明和内联 `<script>`；含页面名称、转场、时长、备注与资源元数据。
+3. 为什么不序列化渲染树：可编程页面在运行时创建 Canvas/SVG/控制节点或持续修改 class/style/data 属性，写回会污染源码并在重渲染时累积 → 人类在渲染面的修改使用定向写入。
+
+四、定向写入与视觉对象协议
+1. 定向写入规则：
+   - 每个可编辑文本块拥有稳定 `data-vdoc-text` 标识，文本编辑只更新该标识对应节点的内部语义 HTML
+   - 块级格式只同步明确允许的属性；新增/删除结构块只修改对应源码锚点
+   - 视觉对象用稳定 `data-vdoc-object-id` 定位；拖拽、环绕、图层、属性检查器只更新该对象
+   - 未被显式编辑的源码节点保持原样
+2. 视觉对象统一语义：
+   - `data-vdoc-object`：shape/image/video/audio/media-group
+   - `data-vdoc-object-id`：定向编辑的稳定身份
+   - `data-vdoc-object-layout`：VDOCX 中为 block/float-left/float-right，VPPTX 中为 free
+   - 参数化图形保留 `data-vdoc-shape-*` 高层参数，同时保存可独立导出的标准 SVG
+   - 自定义 SVG 必须单一 `<svg>` 根；检查器校验 XML，移除脚本、事件属性、独立执行宿主与危险外部引用
+   - 对象附加 CSS 原始内容保存在对象直属 `<style data-vdoc-object-style>`，运行规则自动附加当前 data-vdoc-object-id 上下文
+
+五、Agent 端口命令表（scriptorium-agent-port.js，17条）
+| 命令 | 说明 | 写操作 |
+|------|------|--------|
+| ListFonts | 字体发现（all / zh-CN / en 清单） | 否 |
+| GetDocumentInfo | 文档信息（kind: docx/pptx、slideCount、activeSlideIndex 等） | 否 |
+| GetRenderedText | 渲染文本 | 否 |
+| GetOutline | 大纲（heading） | 否 |
+| GetSection | 段落/区块 | 否 |
+| GetSource | 源码（flow: markdown-hybrid；deck: html） | 否 |
+| SearchSource | 源码搜索（sourceKind: all/html/deck-css） | 否 |
+| GetViewportSource | 视口源码（viewport/slide） | 否 |
+| GetVisualContext | 视觉上下文（含 activeSlideIndex） | 否 |
+| GetPrHistory | PR 历史 | 否 |
+| SubmitSourcePr | 提交源码 PR（替换/新增/插入） | 是 |
+| AddSlide | 向 VPPTX 末尾提交完整页面 PR | 是 |
+| InsertSlide | 向 VPPTX 指定位置提交完整页面 PR | 是 |
+| DeleteSlide | 提交删除页面 PR | 是 |
+| UpdatePresentationConfig | 提交画布、宽高比、主题、转场配置 PR | 是 |
+| CreateProject | 规范化并直接落盘完整 VDOCX / VPPTX | 直接创建文件 |
+| GetStorageInfo | 查询 Agent 工程落盘目录与冲突策略 | 否 |
+完整参数与 VCP 工具调用示例以插件清单为准。
+
+六、PR 协作协议与文脉机制
+1. 提交 PR 需带：maid 署名（author: {id,name,type:'agent'|'human'}）、summary、requestId（幂等，防重复提交）、expectedRevision（预期版本，防并发覆盖）。
+2. PR 文脉状态机：pending → applied / rejected / conflict / failed；超时 PR_RECEIPT_TIMEOUT（5分钟）。
+3. 自动允许策略：仅人类 UI 启用，按类型勾选（源码替换 / 新增末页 / 插入页面 / 删除页面），refuse 级永不自动。
+4. 文脉（Lineage）：刻点（名称+备注）+ 操作元数据 + changeSet + 版本快照；撤销保留 80 快照、2 秒合并窗口。
+5. 字体发现约定：ListFonts 支持 all / zh-CN / en 三种清单模式（README 专节说明，含 font-name-diagnostics.json 大数据）。
+
+七、导入导出边界（README）
+1. 导入：HTML / MD / TXT / RTF / DOCX（语义化）/ PPTX（静态版式）。
+2. 导出：VDOCX → 连续流 HTML / 分页 HTML / PDF；VPPTX → 单文件 HTML / 逐页 PDF；file:/http 图片转 data: 内联。
+
+Tag: Scriptorium, 共笔文坊, VDOCX, VPPTX, 文档工程, Markdown-first, 定向写入, Lineage, PR协议, Agent端口, alpha, VCPChat, TagMemo V9.1
