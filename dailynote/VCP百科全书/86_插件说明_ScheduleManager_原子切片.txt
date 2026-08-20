@@ -1,0 +1,63 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——ScheduleManager（原子切片）
+版本：1.0.0 | pluginType: synchronous | protocol: stdio | timeout: 5000ms
+
+一、插件身份
+- name: `ScheduleManager`
+- displayName: `用户日程管理器`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `5000`
+- author: `Kilo Code`
+- 入口: `node ScheduleManager.js`（Node.js）
+- command: `AddSchedule`, `DeleteSchedule`, `ListSchedules`
+
+二、命令与参数
+命令 `AddSchedule`，参数如下：
+- `time`（必需，字符串）：日程时间，建议格式 YYYY-MM-DD HH:mm
+- `content`（必需，字符串）：日程内容
+
+命令 `DeleteSchedule`，参数如下：
+- `id`（必需，字符串）：要删除的日程ID
+
+命令 `ListSchedules`：无参数，查看所有日程
+
+三、核心能力
+- 用于维护用户的日程，允许AI查看、添加和删除用户日程。
+- 提供可调用命令：AddSchedule、DeleteSchedule、ListSchedules。
+
+四、配置参数（configSchema）
+- manifest 中未定义 configSchema
+
+五、占位符与注入点
+- systemPromptPlaceholders: 无
+
+六、使用/排障边界
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+- DeleteSchedule 按日程ID精确匹配
+
+七、调用示例
+添加日程:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ScheduleManager「末」,
+command:「始」AddSchedule「末」,
+time:「始」2025-12-31 10:00「末」,
+content:「始」准备跨年晚会「末」
+<<<[END_TOOL_REQUEST]>>>
+
+列出日程:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ScheduleManager「末」,
+command:「始」ListSchedules「末」
+<<<[END_TOOL_REQUEST]>>>
+
+删除日程:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ScheduleManager「末」,
+command:「始」DeleteSchedule「末」,
+id:「始」1735564800000「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: ScheduleManager, synchronous, 同步调用, 记忆管理, AddSchedule, DeleteSchedule, ListSchedules, 1.0.0, TagMemo V9.1

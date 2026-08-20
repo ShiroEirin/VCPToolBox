@@ -1,0 +1,43 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——DailyHot（原子切片）
+
+一、插件身份
+- name: `DailyHot`
+- displayName: `每日热榜`
+- version: `2.0.0`
+- pluginType: `static`
+- author: `Kilo Code & Roo`
+- entryPoint: `node daily-hot.js`（nodejs）
+- protocol: `stdio`
+- timeout: `120000`
+- refreshIntervalCron: `0 */4 * * *`（每4小时刷新）
+- command: 无（自动触发）
+- 当前状态：`plugin-manifest.json.block`（禁用态清单）
+
+二、核心能力
+- 在后台周期性地获取所有主流平台的今日热榜信息，并通过占位符 {{VCPDailyHot}} 提供。
+- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- invocationCommands: 无（静态插件）
+
+三、占位符与注入点
+- systemPromptPlaceholders: `{{VCPDailyHot}}`
+  - 描述：包含所有主流平台（微博、知乎、B站等）实时热榜的综合信息。此占位符会周期性更新。
+
+五、覆盖平台
+- 微博、知乎、B站等主流社交平台热榜
+- 综合聚合后通过 {{VCPDailyHot}} 占位符统一注入
+
+六、排障建议
+- 占位符未注入：确认插件已启用（移除.block后缀）。
+- 热榜为空：检查网络连接，确认各平台API可访问。
+- 热榜不更新：检查cron是否正常执行（每4小时刷新一次）。
+- 超时：默认超时120秒，网络不佳时可能需要调整。
+
+五、调用示例
+触发示例：在系统提示词中引用该插件占位符，等待周期刷新后自动注入。
+
+覆盖微博、知乎、B站等主流社交平台
+聚合后的热榜信息以文本形式注入占位符
+缓存文件为dailyhot_cache.md
+
+Tag: DailyHot, static, 静态注入, VCPDailyHot, 每日热榜, refreshIntervalCron, plugin-manifest.json.block, TagMemo V9.1

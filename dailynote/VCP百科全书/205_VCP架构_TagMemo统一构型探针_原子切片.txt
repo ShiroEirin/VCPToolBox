@@ -1,0 +1,138 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] TagMemo 统一构型离线探针 - 原子切片
+
+一、模块基本信息
+1. 模块名称：tagmemo_unified_geometry_probe.js
+2. 模块类型：离线分析脚本
+3. 版本号：V3.1 (探针版本)
+4. 所属项目：VCPToolBox
+5. 源码路径：D:\github\VCP\VCPToolBox\scripts\tagmemo_unified_geometry_probe.js (1654行)
+6. 配套脚本：D:\github\VCP\VCPToolBox\TagMemo统一构型一键测试.bat (119行)
+7. 功能一句话总结：TagMemo 统一几何构型离线探针，从 SQLite 重建 V9.1 风格有向传播核，比较脉冲场、Resolvent 和曲线几何一致性
+
+二、功能定位
+
+tagmemo_unified_geometry_probe.js 是一个只读离线分析脚本，用于验证 TagMemo V9.1 统一几何构型的数学一致性。它直接从 SQLite 事实层重建传播核，不初始化 KnowledgeBaseManager，不写任何数据。
+
+源码注释 (tagmemo_unified_geometry_probe.js 行3-19)：
+```
+/**
+ * TagMemo 统一几何构型离线探针
+ *
+ * 目标：
+ * 1. 从现有 SQLite 事实层重建 V9.1 风格有向传播核；
+ * 2. 比较有限跳软非回溯脉冲场、节点 Resolvent、边状态非回溯 Resolvent；
+ * 3. 检验场诱导软域与候选 Tag 曲线几何是否给出一致读出；
+ * 4. 使用拓扑-only 与随机场消融，避免仅凭"都用了同一张图"得出循环结论。
+ *
+ * 本脚本只以 readonly + query_only 打开数据库，不初始化 KnowledgeBaseManager，
+ * 不写 SQLite、WAL、配置或派生资产。
+ *
+ * 用法：
+ *   node scripts/tagmemo_unified_geometry_probe.js
+ *   node scripts/tagmemo_unified_geometry_probe.js --seeds "TagA,TagB" --probes 12
+ *   node scripts/tagmemo_unified_geometry_probe.js --db /data/VectorStore/knowledge_base.sqlite --json report.json
+ */
+```
+
+三、核心参数 (parseArgs 函数 行31-91)
+
+默认配置：
+- db: VectorStore/knowledge_base.sqlite (或 KNOWLEDGEBASE_STORE_PATH 环境变量)
+- config: rag_params.json
+- probes: 12 — 探针数量
+- maxFiles: 20000 — 最大文件数
+- maxNodes: 6000 — 最大节点数
+- maxTagsPerFile: 100
+- maxNeighbors: 20
+- maxCurveFiles: 1500
+- hops: 4 — 跳数
+- resolventSteps: 80 — Resolvent 迭代步数
+- tolerance: 1e-9 — 收敛容差
+- domainMass: 0.80 — 域质量阈值
+- alphaScales: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.55, 0.70, 0.85, 1.00] — alpha 尺度族
+- hopScales: [1, 2, 4] — 跳尺度族
+- randomizations: 100 — 随机消融次数
+- seed: 7331 — 随机种子
+
+命令行参数：
+- --db <path> — 指定数据库路径
+- --config <path> — 指定配置文件
+- --json <path> — 输出 JSON 报告
+- --md <path> — 输出 Markdown 报告
+- --seeds "TagA,TagB" — 指定种子 Tag
+- --probes <n> — 探针数量
+- --max-files / --max-nodes / --max-neighbors / --curve-files — 限制参数
+- --steps <n> — Resolvent 步数
+- --tolerance <f> — 收敛容差
+- --domain-mass <f> — 域质量 (0.5~0.99)
+- --alpha-scales <list> — alpha 尺度列表
+- --hop-scales <list> — 跳尺度列表
+- --randomizations <n> — 随机消融次数
+- --random-seed <n> — 随机种子
+
+四、一键测试脚本 (TagMemo统一构型一键测试.bat)
+
+脚本标题：TagMemo Unified Geometry Probe V3.1 (行4)
+
+关键配置 (行77-90)：
+```
+node "%PROBE%" ^
+  --db "%DB%" ^
+  --config "%CONFIG%" ^
+  --probes 12 ^
+  --max-files 20000 ^
+  --max-nodes 6000 ^
+  --curve-files 1500 ^
+  --steps 80 ^
+  --domain-mass 0.80 ^
+  --alpha-scales 0.05,0.10,0.15,0.20,0.25,0.30,0.40,0.55,0.70,0.85,1.00 ^
+  --hop-scales 1,2,4 ^
+  --randomizations 100 ^
+  --md "%MD_REPORT%" ^
+  --json "%JSON_REPORT%"
+```
+
+输出报告：
+- Markdown: 开发日志/tagmemo_unified_geometry_v3_1_<timestamp>.md
+- JSON: 开发日志/tagmemo_unified_geometry_v3_1_<timestamp>.json
+
+安全声明 (bat 行29-31)：
+```
+echo  本脚本只读访问 SQLite，不会初始化 KnowledgeBaseManager，
+echo  不会修改数据库、WAL、配置或 TagMemo 派生资产。
+```
+
+性能提示 (bat 行74)：
+- V3.1 计算量高于 V2，大型知识库可能需要数分钟
+
+五、分析目标
+
+1. 有向传播核重建：从 SQLite file_tags 事实层重建 V9.1 风格有向传播核
+2. 脉冲场比较：有限跳软非回溯脉冲场
+3. Resolvent 比较：节点 Resolvent vs 边状态非回溯 Resolvent
+4. 几何一致性检验：场诱导软域与候选 Tag 曲线几何是否给出一致读出
+5. 消融实验：拓扑-only 与随机场消融，避免循环结论
+
+六、V3.1 特性 (bat 行70-73)
+
+- [动力学] 严格去源场、等长核心域、尾部质量与支持扩张
+- [尺度] alpha=0.05 至 1.00 低尺度加密；hops=1,2,4
+- [几何] 软域有界路径质量、不可定义样本过滤及每查询 100 次随机消融
+
+七、依赖
+
+- better-sqlite3 — 数据库访问 (readonly + query_only)
+- fs — 文件读写
+- path — 路径处理
+- crypto — 哈希
+
+八、与生产系统的关系
+
+本脚本完全是只读离线工具：
+- 不初始化 KnowledgeBaseManager
+- 不写 SQLite、WAL、配置或派生资产
+- 不影响生产搜索链路
+- 输出仅为分析报告文件
+
+Tag: tagmemo_unified_geometry_probe, 统一构型, V9.1, V3.1, SQLite, 有向传播核, 离线探针, 脉冲场, Resolvent, 随机消融, TagMemo V9.1

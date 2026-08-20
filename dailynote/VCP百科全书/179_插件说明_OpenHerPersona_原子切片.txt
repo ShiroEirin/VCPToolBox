@@ -1,0 +1,75 @@
+[2026-07-22] - 哈雷酱
+# OpenHerPersona｜OpenHerPersona｜纯异步人格观察与测量插件
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/OpenHerPersona/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/OpenHerPersona/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+OpenHerPersona（v0.6.0-observer）是一个 hybridservice 类型插件，提供纯异步的人格观察与测量功能。它绝不注入提示词文本、绝不发出 brk/HTML 提示、绝不请求 persona_delta JSON，也不使用墙钟情感衰减或关键词启发式。通过主题锚定次级向量轴观察每个 Agent 的消息，计算认知/情感/驱动/心理性别测量值，应用软耦合，通过每 Agent 队列串行化并发观察，并将 `openher_axis_*` SQLite 状态持久化供仪表盘和后续实验使用。
+
+## 工作机制
+- 入口脚本：`OpenHerPersona.js`（Node.js，direct 协议，timeout 30000ms）
+- 要求 ContextBridge：`requiresContextBridge: true`
+- 观察方式：通过主题锚定次级向量轴观察每条 Agent 消息
+- 测量维度：认知、情感、驱动、心理性别
+- 耦合策略：软耦合
+- 并发处理：通过每 Agent 队列串行化并发观察
+- 状态持久化：`openher_axis_*` SQLite 表
+- 异步观察：`OpenHerPersonaAsyncObservation` 控制是否异步执行
+- 嵌入超时：`OpenHerPersonaEmbeddingTimeoutMs` 控制向量嵌入超时
+
+## 使用/排障边界
+- 这是观察者架构，不修改提示词，不注入文本
+- 必须启用 ContextBridge 才能工作（`requiresContextBridge: true`）
+- 异步观察模式下，队列最大大小由 `OpenHerPersonaQueueMaxSize` 控制
+- `OpenHerPersonaDropLegacyState` 可用于清除旧版本状态数据
+- EMA 平滑系数由 `OpenHerPersonaStateEma` 控制
+- 耦合强度由 `OpenHerPersonaCouplingStrength` 控制
+- 锚点温度由 `OpenHerPersonaAnchorTemperature` 控制
+
+## 命令与参数
+| 命令 | 说明 | 必需参数 | 可选参数 |
+|------|------|----------|----------|
+| status | 返回当前异步观察器配置、队列状态、已知 Agent 列表和选中 Agent 的轴快照 | command（固定为 status） | agent / agentKey / agentLabel |
+| snapshot | status 的别名，适用于只需最新测量轴的仪表盘 | command（固定为 snapshot） | agent / agentKey / agentLabel |
+| reset | 重置某个 Agent 的观察器状态和主题锚定向量，不影响长期 VCP 记忆 | command（固定为 reset） | agent / agentKey / agentLabel |
+| explain | 解释观察者架构边界和已移除的提示词注入行为 | command（固定为 explain） | 无 |
+
+## 配置参数（configSchema）
+| 参数名 | 类型 | 说明 |
+|--------|------|------|
+| DebugMode | boolean | 调试模式开关 |
+| OpenHerPersonaEnabled | boolean | 是否启用插件 |
+| OpenHerPersonaAsyncObservation | boolean | 是否异步观察 |
+| OpenHerPersonaQueueMaxSize | integer | 每 Agent 队列最大大小 |
+| OpenHerPersonaEmbeddingTimeoutMs | integer | 向量嵌入超时（毫秒） |
+| OpenHerPersonaAnchorTemperature | string | 锚点温度 |
+| OpenHerPersonaStateEma | string | 状态 EMA 平滑系数 |
+| OpenHerPersonaCouplingStrength | string | 耦合强度 |
+| OpenHerPersonaDropLegacyState | boolean | 是否清除旧版本状态数据 |
+
+## 调用示例
+查询 Agent 状态：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name: 「始」OpenHerPersona「末」,
+command: 「始」status「末」,
+agent: 「始」Nova「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+重置 Agent 观察：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name: 「始」OpenHerPersona「末」,
+command: 「始」reset「末」,
+agent: 「始」Nova「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+关联节点：ContextBridge（必需依赖）、AgentAssistant
+Tag: OpenHerPersona, 人格观察, 向量轴, 异步, SQLite, hybridservice, 0.6.0-observer

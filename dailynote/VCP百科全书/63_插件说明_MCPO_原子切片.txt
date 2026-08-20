@@ -1,0 +1,65 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——MCPO（原子切片）
+版本：1.0.0 | pluginType: synchronous | 入口: python main.py
+
+一、插件身份
+- name: `MCPO`
+- displayName: `MCPO 工具桥接器`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- author: `VCP Team`
+- runtime: `python`
+- 入口: `main.py`（Python）
+- enabled: true
+
+二、命令与参数
+提供以下命令（共7个）：
+- `list_tools`：列出所有可用工具
+- `call_tool`：调用指定工具。参数：tool_name_param(工具名), params(JSON参数)
+- `get_tool_info`：获取工具详细信息
+- `manage_server`：管理MCP服务器。参数：server_action(start/stop/restart等)
+- `discover_tools`：自动发现工具
+- `list_configs`：列出配置
+- `health_check`：健康检查
+
+三、核心能力
+- 基于 mcpo 的 MCP 工具桥接插件，能够自动发现、缓存和调用 MCP 工具，支持多种 MCP 服务器类型。
+- 提供可调用命令：list_tools、call_tool、get_tool_info、manage_server、discover_tools、list_configs、health_check。
+
+四、配置参数
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| cacheExpiry | integer | 3600 | 缓存过期时间（秒） |
+| timeout | integer | 30 | 请求超时（秒） |
+
+五、占位符与注入点
+- systemPromptPlaceholders: 无
+
+六、使用/排障边界
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+- 注意：manifest 使用非标准格式（commands 数组而非 invocationCommands）
+
+七、调用示例
+1. list_tools - 列出所有可用工具
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」MCPO「末」,
+action:「始」list_tools「末」
+<<<[END_TOOL_REQUEST]>>>
+
+2. call_tool - 调用指定工具
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」MCPO「末」,
+action:「始」call_tool「末」,
+tool_name_param:「始」example_tool「末」,
+params:「始」{"key": "value"}「末」
+<<<[END_TOOL_REQUEST]>>>
+
+3. manage_server - 管理MCP服务器
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」MCPO「末」,
+action:「始」manage_server「末」,
+server_action:「始」start「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: MCPO, synchronous, 同步调用, list_tools, call_tool, get_tool_info, manage_server, discover_tools, list_configs, health_check, multi-command, MCP桥接, 1.0.0, cacheExpiry, TagMemo V9.1

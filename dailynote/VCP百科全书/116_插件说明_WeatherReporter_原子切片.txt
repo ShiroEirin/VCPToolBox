@@ -1,0 +1,40 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——WeatherReporter（原子切片）
+
+一、插件身份
+- name: `WeatherReporter`
+- displayName: `天气预报员`
+- version: `1.0.0`
+- pluginType: `static`
+- author: `System`
+- entryPoint: `node weather-reporter.js`（nodejs）
+- protocol: `stdio`
+- refreshIntervalCron: `0 */6 * * *`（每6小时刷新）
+- 占位符：`{{VCPWeatherInfo}}`
+
+二、核心能力
+- 获取实时空气质量、天气预警、逐小时与多日预报等数据。
+- 输出静态占位符内容，为Agent提供环境上下文。
+- 支持缓存，API失败时可回退到本地缓存文本。
+- invocationCommands: 无（静态插件，通过占位符自动注入）
+
+三、配置参数（configSchema）
+- `VarCity` (string): 城市名称
+- `WeatherKey` (string): 天气API密钥
+- `WeatherUrl` (string): 天气API端点URL
+- `forecastDays` (integer, default=7): 获取未来天气预报的天数（范围1-30）
+- `hourlyForecastInterval` (number, default=2): 24小时天气预报的显示间隔（小时），min=1
+- `hourlyForecastCount` (number, default=12): 24小时天气预报总共显示的条目数，min=1
+
+四、工程注意
+- 城市缓存与天气缓存要保持同步，避免脏数据回放。
+- 预报粒度要与Token预算平衡，避免占用过多上下文。
+- cron默认每6小时刷新一次，可根据需求调整。
+
+五、触发示例
+占位符注入示例（静态插件）：
+`{{VCPWeatherInfo}}`
+
+说明：该插件依赖定时刷新与占位符替换，通常不需要单独 TOOL_REQUEST。
+
+Tag: WeatherReporter, VCPWeatherInfo, static插件, 天气预报, 空气质量, 天气预警, forecastDays, hourlyForecastInterval, hourlyForecastCount, 天气缓存, 环境上下文注入, TagMemo V9.1

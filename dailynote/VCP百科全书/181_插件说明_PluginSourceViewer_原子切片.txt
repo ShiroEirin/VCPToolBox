@@ -1,0 +1,49 @@
+[2026-07-22] - 哈雷酱
+# ServerPluginSourceViewer｜PluginSourceViewer｜查询指定 VCP 插件在本地的源码与目录结构
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/PluginSourceViewer/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/PluginSourceViewer/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+ServerPluginSourceViewer（v1.0.0）是一个 synchronous 类型插件，通过 `node PluginSourceViewer.js` 执行。输入指定 targettool 后，在本地 Plugin 目录的启用 manifest 中查找对应插件，解析 entryPoint.command 或 entryPoint.script，返回主入口源码、manifest 内容和插件目录树。找不到本地插件时提示该工具可能是分布式插件或不存在。
+
+## 工作机制
+- 入口：`node PluginSourceViewer.js`（Node.js，stdio 协议，timeout 60000ms）
+- 扫描 Plugin 目录下所有启用的 `plugin-manifest.json`
+- 按 manifest.name 匹配 targettool
+- 根据 entryPoint.command 或 entryPoint.script 推断主入口文件
+- 文本源码（node/python/shell 等）：返回主代码文件内容
+- 二进制入口（exe/node 原生模块/压缩包）：说明其为二进制/非文本对象
+- 返回插件目录树，自动忽略 node_modules、target、dist、build、__pycache__ 等依赖/构建缓存目录
+- 兼容性要求：Node.js >= 14.0.0
+
+## 使用/排障边界
+- targettool 必须对应 manifest.name，不是目录名或 displayName
+- 找不到时返回提示并列出本地可见工具名
+- 二进制入口只说明类型，不返回内容
+- 目录树会过滤依赖和构建缓存目录
+- 无 npm 或 system 依赖要求
+
+## 命令与参数
+| 命令 | 说明 | 参数 |
+|------|------|------|
+| ViewPluginSource | 查询指定 VCP 工具插件在本地的源码 | targettool（必需，字符串，对应 manifest.name） |
+
+## 配置参数（configSchema）
+manifest 中未定义 configSchema。
+
+## 调用示例
+查询插件源码：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PluginSourceViewer「末」,
+targettool:「始」AnySearch「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+关联节点：所有本地 VCP 插件（查询对象）
+Tag: PluginSourceViewer, 源码查询, 目录树, synchronous, 1.0.0

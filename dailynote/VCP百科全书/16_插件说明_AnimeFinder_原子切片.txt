@@ -1,0 +1,43 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——AnimeFinder（原子切片）
+
+一、插件身份
+- name: `AnimeFinder`
+- displayName: `以图找番`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- author: `v0`
+- entryPoint: `node AnimeFinder.js`（nodejs）
+- protocol: `stdio`
+- timeout: `30000`
+- command: `findAnimeByUrl`
+- 当前状态：`plugin-manifest.json.block`（禁用态清单）
+
+二、核心能力
+- 一个通过图片URL或本地文件路径查找对应动漫信息的插件。
+- 提供可调用命令：findAnimeByUrl。
+
+三、命令与参数
+- `findAnimeByUrl`：通过图片URL或file://路径查找动漫信息
+  - imageUrl (字符串, 必需): 需要识别的图片URL（支持http, https, file协议）
+
+四、配置参数
+- configSchema: 无（空对象）
+
+五、排障建议
+- 插件无响应：确认插件已启用（移除.block后缀），检查 AnimeFinder.js 入口。
+- 识别失败：检查图片URL是否可访问，网络连接是否正常。
+- 超时：默认超时30秒，大图可能需要更长时间。
+- 配置为空：configSchema为空对象，无需额外配置参数。
+
+六、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AnimeFinder「末」,
+imageUrl:「始」https://images.plurk.com/32B15UXxymfSMwKGTObY5e.jpg「末」
+<<<[END_TOOL_REQUEST]>>>
+
+支持http、https和file协议的图片URL
+识别结果包含动漫名称、集数和时间戳
+图片清晰度影响识别准确率
+
+Tag: AnimeFinder, synchronous, findAnimeByUrl, 以图找番, imageUrl, plugin-manifest.json.block, TagMemo V9.1

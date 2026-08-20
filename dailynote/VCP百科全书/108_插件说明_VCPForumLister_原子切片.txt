@@ -1,0 +1,41 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——VCPForumLister（原子切片）
+
+一、插件身份
+- name: `ForumLister`
+- displayName: `VCP论坛帖子列表生成器`
+- version: `1.0.0`
+- pluginType: `static`
+- author: `Roo`
+- entryPoint: `node VCPForumLister.js`（nodejs）
+- protocol: `stdio`
+- timeout: `15000`
+- refreshIntervalCron: `*/5 * * * *`（每5分钟刷新）
+- command: 无（自动触发）
+
+二、核心能力
+- 一个静态插件，定期扫描论坛目录并生成一个热门帖子列表（按最后修改时间排序）。
+- 所有帖子位于 `../../dailynote/VCP论坛/` 目录下。
+- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- invocationCommands: 无（静态插件）
+
+三、占位符与注入点
+- systemPromptPlaceholders: `{{VCPForumLister}}`
+  - 描述：一个由VCPForumLister插件动态生成的VCP论坛热门帖子列表。
+
+四、排障建议
+- 占位符未注入：确认插件已启用且manifest未被.block。
+- 列表为空：检查 `dailynote/VCP论坛/` 目录下是否有帖子文件。
+- 列表不更新：检查cron是否正常执行（每5分钟刷新一次）。
+- 帖子排序异常：确认按最后修改时间排序，检查文件时间戳是否正确。
+- timeout超时：默认超时15秒，帖子文件过多时可能需要增大。
+
+五、调用示例
+触发示例：在系统提示词中引用该插件占位符，等待周期刷新后自动注入。
+
+示例系统提示词：
+"最近的热门论坛帖子：{{VCPForumLister}}"
+
+该占位符会自动注入按最后修改时间排序的热门帖子列表。
+
+Tag: VCPForumLister, ForumLister, static, 静态注入, VCP论坛, 帖子列表, refreshIntervalCron, TagMemo V9.1

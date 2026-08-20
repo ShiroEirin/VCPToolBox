@@ -1,0 +1,39 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] VCP 变量占位符、TVStxt 与 DetectorN（现行切片）
+
+状态：CURRENT_VERIFIED / PARTIALLY_STALE（源码确认；旧四级优先级已替代）
+最后核验：2026-07-22
+适用范围：VCPToolBox main 分支 modules/messageProcessor.js、modules/tvsManager.js、server.js
+证据等级：SOURCE_BODY
+
+一、现行解析顺序
+- messageProcessor.js:601-812 的 replaceOtherVariables 实际顺序为：
+  1. SarPrompt（:606-678）
+  2. Tar/Var 同级按名匹配（:680-700）
+  3. VCP* 占位符（:702-812）
+- 旧"Tar > Var > Sar > VCP"四级覆盖优先级在现行源码中不存在；嵌套解析仍有顺序影响，但不应按旧覆盖规则使用。
+- messageProcessor.js 前50行确认：引入 agentManager、tvsManager、toolboxManager、dynamicToolRegistry、sarPromptManager 等模块。
+
+二、TVStxt
+- TVSTXT_DIR_PATH 与默认 TVStxt 目录解析见 messageProcessor.js:24-34（resolveTvsDir 函数）。
+- AGENT_DIR_PATH 解析见 messageProcessor.js:13-22（resolveAgentDir 函数）。
+- 变量值以 .txt 结尾时触发外部文件读取（:686-694），tvsManager.getContent 见 modules/tvsManager.js:64-89。
+- tvsManager.js:4、:24-62 使用 chokidar 监听并使缓存失效；文件内容可递归解析占位符。
+- 默认目录：TVStxt（项目根目录下），可通过 TVSTXT_DIR_PATH 环境变量覆盖。
+
+三、Detector 规则与折叠协议
+- DetectorX/SuperDetectorX 名称已演进为 DetectorN/SuperDetectorN 环境变量规则（server.js:519-543）。
+- 执行逻辑见 messageProcessor.js:552-599。
+- detectors 仅作用 system 角色，superDetectors 作用全部角色。
+- 由 chatCompletionHandler 后置调用。
+- vcp_dynamic_fold 协议由 messageProcessor.js:234、:313、:325 处理，并通过 messagePreprocessors 获取 RAGDiaryPlugin。
+
+四、其他模块引用
+- messageProcessor.js 同时引入 chinese-lunar-calendar（农历支持）、escapeRegExp（正则转义工具）。
+- replaceFirstAliasPlaceholder（:41-50）处理带前缀的别名占位符替换。
+
+历史来源：153_VCP文档_变量占位符体系.txt。
+待验证边界：具体部署环境变量集合、递归深度上限、热更新时序与生产失败表现。
+未写入内容清单：未保留四级优先级表；未将旧 DetectorX 名称写成现行 API；未扩展未读插件变量。
+关联节点：SarPrompt、Tar/Var、TVStxt、DetectorN、SuperDetectorN、vcp_dynamic_fold、RAGDiaryPlugin、chokidar。
+Tag: 占位符, SarPrompt, Tar, Var, VCP, TVStxt, chokidar, DetectorN, SuperDetectorN, vcp_dynamic_fold, 现行规则

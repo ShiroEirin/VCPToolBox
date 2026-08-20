@@ -1,0 +1,42 @@
+[2026-07-22] - 哈雷酱
+# 规格工作流｜TimelineGenerator｜Spec Workflow MCP Server
+
+状态：LOW_RISK_UNVERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/TimelineGenerator` 当前源码；⚠️ 当前未找到 plugin-manifest.json，以下信息基于源码扫描
+事实来源：
+- Manifest：无（无 plugin-manifest.json，也无 .block 文件）
+- 源码：无（目录下仅有 `.spec-workflow/` 子目录）
+- 配置：`Plugin/TimelineGenerator/.spec-workflow/config.example.toml`
+- 模板：`Plugin/TimelineGenerator/.spec-workflow/templates/`（design-template.md, product-template.md, requirements-template.md, structure-template.md, tasks-template.md, tech-template.md）
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- ⚠️ 当前未找到 plugin-manifest.json，以下信息基于源码扫描。
+- 目录下无任何 JavaScript/Python 源码文件，仅有 `.spec-workflow/` 子目录。
+- `.spec-workflow/` 包含 Spec Workflow MCP Server 的配置模板和文档模板。
+- 配置项：projectDir（项目目录）、port（仪表板端口）、autoStartDashboard（自动启动仪表板）、dashboardOnly（仅仪表板模式）、lang（界面语言）。
+- 提供六种文档模板：design、product、requirements、structure、tasks、tech。
+- 用户自定义模板目录 `user-templates/` 下仅有 README.md。
+- 该目录更像是 Spec Workflow MCP Server 的工作区配置，而非一个独立的 VCP 插件。
+
+## 工作机制
+MCP Server 读取 config.toml → 加载文档模板 → 提供 spec 文件管理和仪表板功能。具体运行机制不明，因为目录下没有可执行代码。
+
+## 使用/排障边界
+- 当前目录结构不完整，缺少入口脚本和 Manifest。
+- 可能是外部 Spec Workflow MCP Server 的项目工作区，而非 VCP 插件。
+- 配置优先级：命令行参数 > 配置文件 > 内置默认值。
+- 仪表板端口需在 1024-65535 之间。
+
+## 历史与兼容性
+- 无版本信息，无 Manifest。
+- 模板文件为标准 Spec Workflow 格式。
+
+## 待验证项
+- 该目录是否为一个完整的 VCP 插件，还是外部工具的工作区。
+- 是否有其他位置的入口脚本引用此目录。
+
+关联节点：Spec Workflow, MCP Server
+Tag: TimelineGenerator, spec-workflow, MCP Server, 文档模板, config.toml, 仪表板, TagMemo V9.1

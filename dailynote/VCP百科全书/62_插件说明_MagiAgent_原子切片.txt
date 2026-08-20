@@ -1,0 +1,61 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——MagiAgent（原子切片）
+版本：1.0.0 | pluginType: hybridservice | protocol: direct | timeout: 300000ms
+
+一、插件身份
+- name: `MagiAgent`
+- displayName: `Magi三贤者会议系统`
+- version: `1.0.0`
+- pluginType: `hybridservice`
+- protocol: `direct`
+- timeout: `300000`
+- author: `Ryan`
+- 入口: `MagiAgent.js`（Node.js）
+- command: `start_meeting`, `query_meeting`
+
+二、命令与参数
+命令 `start_meeting`，参数如下：
+- `topic`（必需，字符串）：会议需要讨论的主题
+- `rounds`（可选，数字，默认5）：会议的讨论轮次
+- `wait_for_result`（可选，布尔，默认false）：是否同步等待会议结束并返回完整结果。为 false 时立即返回会议ID供后续查询
+
+命令 `query_meeting`，参数如下：
+- `meeting_id`（必需，字符串）：需要查询的会议ID
+- `summary_only`（可选，布尔，默认false）：为 true 时只返回会议最终总结，省略详细讨论过程
+
+三、核心能力
+- 一个模拟EVA三贤人系统的混合插件，可以召开Magi会议讨论复杂问题，并支持异步查询
+- 提供可调用命令：start_meeting、query_meeting
+
+四、配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| MAIDNAME | string | 调用此插件的AI女仆的署名 |
+
+五、占位符与注入点
+- systemPromptPlaceholders: 无
+
+六、使用/排障边界
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+- 异步模式下需用 query_meeting 轮询会议结果
+
+七、调用示例
+启动会议:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」MagiAgent「末」,
+command:「始」start_meeting「末」,
+topic:「始」如何帮助用户学习量子物理学？「末」,
+rounds:「始」7「末」,
+wait_for_result:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+查询会议结果:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」MagiAgent「末」,
+command:「始」query_meeting「末」,
+meeting_id:「始」magi-session-1722084673267「末」,
+summary_only:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: MagiAgent, hybridservice, 混合服务, start_meeting, query_meeting, 异步查询, MAIDNAME, EVA三贤人, 1.0.0, TagMemo V9.1

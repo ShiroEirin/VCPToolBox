@@ -1,0 +1,59 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——DeepWikiVCP（原子切片）
+
+一、插件身份
+- name: `DeepWikiVCP`
+- displayName: `DeepWiki仓库文档检索`
+- version: `2.1.0`
+- pluginType: `synchronous`
+- author: `infinite-vector`
+- entryPoint: `node DeepWikiVCP.js`（nodejs）
+- protocol: `stdio`
+- timeout: `180000`（3分钟）
+- command: `wiki_structure`, `wiki_content`, `wiki_ask`
+
+二、核心能力
+- 通过 DeepWiki 官方 MCP API 获取任意 GitHub 公开仓库的 AI 生成文档。
+- 支持文档结构获取、完整内容读取、AI 智能问答、Deep Research 深度研究和多仓库联合查询。
+
+三、命令与参数
+1. `wiki_structure`：获取 GitHub仓库在 DeepWiki 上的文档目录结构
+   - url (字符串, 必需): 仓库标识，支持 owner/repo 格式、GitHub URL 或 DeepWiki URL
+2. `wiki_content`：读取 DeepWiki 上指定仓库的完整文档内容
+   - url (字符串, 必需): 仓库标识 (owner/repo 格式)
+3. `wiki_ask`：向 DeepWiki AI 提出关于 GitHub 仓库的问题
+   - url (字符串, 必需): 仓库标识。多仓库用逗号分隔（最多10个）
+   - question (字符串, 必需): 你想问的问题
+   - deep_research (布尔, 可选): 设为 true 启用深度研究模式（最多5轮迭代检索）
+
+四、配置参数（configSchema）
+- `DEEPWIKI_PROXY` (string, optional): HTTP 代理地址，留空则继承系统代理
+- `DEEPWIKI_GITHUB_TOKEN` (string, optional): GitHub PAT，用于查询私有仓库（预留）
+- `DEEPWIKI_GITLAB_TOKEN` (string, optional): GitLab PAT，用于查询私有仓库（预留）
+
+五、调用示例
+获取文档结构：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DeepWikiVCP「末」,
+command:「始」wiki_structure「末」,
+url:「始」lioensky/VCPToolBox「末」
+<<<[END_TOOL_REQUEST]>>>
+
+AI问答：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DeepWikiVCP「末」,
+command:「始」wiki_ask「末」,
+url:「始」lioensky/VCPToolBox「末」,
+question:「始」插件系统是如何工作的？「末」
+<<<[END_TOOL_REQUEST]>>>
+
+深度研究模式：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DeepWikiVCP「末」,
+command:「始」wiki_ask「末」,
+url:「始」lioensky/VCPToolBox「末」,
+question:「始」详细分析 RAG 记忆系统的完整架构「末」,
+deep_research:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: DeepWikiVCP, synchronous, wiki_structure, wiki_content, wiki_ask, deep_research, DeepWiki, GitHub仓库文档, MCP API, 多仓库联合查询, TagMemo V9.1

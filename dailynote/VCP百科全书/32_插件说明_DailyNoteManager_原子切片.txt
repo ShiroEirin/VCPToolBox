@@ -1,0 +1,100 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件原子切片——DailyNoteManager（日记整理器）
+
+一、插件定位
+`DailyNoteManager` 是日记管理与整理混合插件，提供列出(list)、整理(organize)和联想(associate)三个功能。list 可按日期范围查看指定文件夹内的所有日记及其URL；organize 可将多篇旧日记归档到「已整理」文件夹并创建一篇新的合并日记；associate 可基于一篇或多篇日记通过向量语义搜索发现关联日记。
+
+二、manifest关键信息
+- name: `DailyNoteManager`
+- displayName: `日记整理器`
+- version: `2.0.0`
+- pluginType: `hybridservice`
+- protocol: `direct`
+- timeout: `30000`
+- entryPoint: `daily-note-manager.js`
+- configSchema: `DebugMode`（boolean）
+
+三、调用参数（三个子命令）
+
+1. list（列出日记）
+功能：按日期范围读取指定文件夹内的所有日记文件，返回每篇日记的URL和完整内容。
+参数：
+- `folder`（必需，字符串）：日记文件夹名称（如 Nova、VCP开发 等，对应 dailynote/ 下的子文件夹）
+- `startDate`（必需，字符串）：起始日期，格式 YYYY-MM-DD
+- `endDate`（必需，字符串）：结束日期，格式 YYYY-MM-DD
+
+调用示例：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DailyNoteManager「末」,
+command:「始」list「末」,
+folder:「始」VCP开发「末」,
+startDate:「始」2026-07-01「末」,
+endDate:「始」2026-07-22「末」
+<<<[END_TOOL_REQUEST]>>>
+
+2. organize（整理归档）
+功能：将多篇日记整合为一篇新日记，并将原始文件归档到「已整理」文件夹。新日记的写入格式与 DailyNote 插件完全一致。
+参数：
+- `urls`（必需，字符串）：待归档的日记文件URL列表，多个URL用换行分隔（来自 list 命令输出）
+- `maid`（必需，字符串）：作者署名，支持 `[文件夹]` 格式
+- `folder`（可选，字符串）：新日记的存储目录，提供后优先使用此字段
+- `Date`（必需，字符串）：新日记的日期，格式 YYYY-MM-DD
+- `Content`（必需，字符串）：新的整理后日记内容
+- `Tag`（可选，字符串）：标签字段，若提供则覆盖 Content 中的 Tag 行
+- `fileName`（可选，字符串）：文件名后缀
+
+调用示例：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DailyNoteManager「末」,
+command:「始」organize「末」,
+urls:「始」VCP开发/2026-07-15-10_30_00.txt
+VCP开发/2026-07-18-14_22_31.txt「末」,
+folder:「始」VCP百科全书「末」,
+maid:「始」哈雷酱「末」,
+Date:「始」2026-07-22「末」,
+fileName:「始」日记整理「末」,
+Content:「始」[10:30] 更新了DailyNoteManager插件说明，command从单一文本改为三子命令架构。
+[14:22] 确认list/organize/associate三个命令的参数与返回格式。
+Tag: DailyNoteManager, 三子命令, organize, associate, list, 修正版「末」
+<<<[END_TOOL_REQUEST]>>>
+
+3. associate（向量语义搜索关联日记）
+功能：输入一篇或多篇日记的URL，通过向量语义搜索在指定文件夹范围内发现关联日记。支持 k 值、最低相似度阈值和 TagMemo 增强因子。多URL输入时自动去重合并。
+参数：
+- `url`（必需，字符串）：源日记文件相对路径，支持多个URL换行分隔
+- `range`（可选，字符串）：搜索范围，文件夹名称列表，逗号分隔，为空则全局搜索
+- `k`（可选，数字，默认10）：返回的关联日记数量
+- `minScore`（可选，数字，默认0）：最低相似度阈值（0~1），低于此分数的结果直接丢弃
+- `tagBoost`（可选，数字，默认0.15）：TagMemo 标签增强因子（0~1）
+
+调用示例：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DailyNoteManager「末」,
+command:「始」associate「末」,
+url:「始」VCP百科全书/2026-07-22-07_09_00.txt「末」,
+range:「始」VCP开发, VCP百科全书「末」,
+k:「始」5「末」,
+minScore:「始」0.3「末」,
+tagBoost:「始」0.15「末」
+<<<[END_TOOL_REQUEST]>>>
+
+四、返回结构
+- 成功：`{ "status": "success", "result": "..." }`
+- 失败：`{ "status": "error", "error": "..." }`
+
+五、常见报错与修复
+- `folder is required`（list）：未传 folder 参数
+- `startDate is required` / `endDate is required`（list）：未传日期参数
+- `urls is required`（organize）：未传待归档URL列表
+- `maid is required`（organize）：未传作者署名
+- `Date is required` / `Content is required`（organize）：未传新日记日期或内容
+- `url is required`（associate）：未传源日记URL
+- 超时：输入过大或URL列表过长 → 分批提交
+
+六、RAG友好Tag建议
+Tag建议覆盖三层词元：
+1) 主体词元：`DailyNoteManager`, `日记整理`, `日记联想`
+2) 行为词元：`list`, `organize`, `associate`, `向量语义搜索`, `归档`
+3) 故障词元：`参数缺失`, `URL格式`, `超时`
+
+Tag: DailyNoteManager, 日记整理器, list, organize, associate, 向量语义搜索, hybridservice, direct协议, 三子命令, tagBoost, TagMemo V9.1, 原子切片

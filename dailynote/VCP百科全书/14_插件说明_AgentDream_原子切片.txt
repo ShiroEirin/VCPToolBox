@@ -1,0 +1,40 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——AgentDream（原子切片）
+
+一、插件身份
+- name: `AgentDream`
+- displayName: `梦系统插件`
+- version: `1.0.0`
+- pluginType: `hybridservice`
+- author: `VCP Team`
+- enabled: true
+- entry: `main.py`（runtime: python）
+- command: `DiaryMerge`, `DiaryDelete`, `DreamInsight`
+
+二、核心能力
+- Agent梦境系统。让AI回顾记忆、进行联想式沉浸梦境、整理记忆。
+- 梦中的所有操作（日记合并、删除、梦感悟）会被记录为可审核的JSON索引，供管理员在后台面板审批。
+- 支持串语法批量操作。
+- 提供可调用命令：DiaryMerge、DiaryDelete、DreamInsight。
+
+三、命令与参数
+1. `DiaryMerge`：合并多条日记
+2. `DiaryDelete`：删除日记
+3. `DreamInsight`：生成梦感悟
+
+四、配置参数（config）
+- `maxDiarySize` (default=10000): 单条日记最大字符数
+- `enableAudit` (default=true): 是否启用审计模式
+
+五、排障建议
+- 插件无响应：检查 Python 运行时依赖、main.py 入口是否可用。
+- 梦境操作未记录：检查 enableAudit 是否为 true，dream_logs 目录是否有写入权限。
+- 日记合并失败：检查日记格式是否符合规范，maxDiarySize 是否过小。
+
+六、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentDream「末」,
+command:「始」DiaryMerge「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: AgentDream, hybridservice, 混合服务, 记忆管理, DiaryMerge, DiaryDelete, DreamInsight, maxDiarySize, enableAudit, 梦系统, v1.0.0, TagMemo V9.1

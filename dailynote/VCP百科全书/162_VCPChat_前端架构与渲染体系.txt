@@ -1,0 +1,48 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] VCPChat——前端架构与渲染体系
+
+一、定位
+VCPChat是VCP官方前端，负责把后端“工具结果、记忆注入、流式输出、多模态资产”可视化呈现为可交互聊天界面。
+
+二、核心能力
+- Markdown与富文本渲染
+- 工具调用过程可视化
+- WebSocket实时推送接收（日志、通知、异步结果）
+- 多模态展示（图片/音频/视频/链接资源）
+- 主题系统（多主题皮肤与渲染样式）
+- 子应用生态（管理器、HumanToolBox、WorkflowEditor等）
+
+三、渲染层要点
+1. 消息渲染器：支持普通文本+结构化返回混排
+2. 流式渲染：边到边渲染，保留可回溯编辑空间
+3. 工具结果区：可折叠展示插件调用与回调状态
+4. 主题层：样式模块化，支持快速切换视觉主题
+
+四、与VCP后端协作
+- API入口：`/v1/chat/completions`
+- 认证：使用VCP Key
+- 变量注入后的最终提示词由后端生成，前端保持轻逻辑
+- 异步任务通过WebSocket或占位符替换回显
+
+五、工程实践建议
+- 前端少做协议逻辑，复杂编排留在VCP中间层
+- 渲染器优先稳定与可读性，再做视觉增强
+- 主题与功能模块分层，避免样式耦合业务
+- 大规模会话启用虚拟列表和分段渲染优化
+
+六、架构演进（2026-07核验状态）
+- VCPChat模块生态扩展：新增Agenttaskmodules、Desktopmodules、Logmodules、PluginManagerModules、Tavernmodules共5个模块目录
+  - Agenttaskmodules（3个文件）：Agent任务系统前端，可视化任务管理
+  - Desktopmodules（7个文件）：桌面小组件系统，提供桌面快捷操作能力
+  - Logmodules（3个文件）：日志查看模块，前端日志可视化
+  - PluginManagerModules：插件管理器前端组件，可视化插件管理
+  - Tavernmodules：VCPTavern注入器前端
+- Groupmodules（4个文件）：群组聊天系统
+- TagMemo已从V5演进到V9.1生产版，RAG检索质量提升
+- rust-vexus-lite接管向量检索底层，RAGmodules的响应延迟降低
+- 管理面板从AdminPanel迁移到AdminPanel-Vue
+- VCPBridgeServer插件支持独立端口拦截CLI工具请求（Codex、Claude Code、Cursor等），扩展了前端可连接的后端类型
+- messageRenderer.js（92KB）支持AA插件分块渲染，RAG_Observer界面元素持续优化
+
+关联节点：VCPChat, WebSocketServer, 消息渲染器, WorkflowEditor, Agenttaskmodules, Desktopmodules, Logmodules, PluginManagerModules, Tavernmodules, Groupmodules, AdminPanel-Vue, VCPBridgeServer
+Tag: VCPChat, 前端架构, 渲染体系, 流式输出, WebSocket推送, 多模态渲染, 主题系统, 子应用生态, 消息可视化, 前后端协作, Agenttaskmodules, Desktopmodules, Logmodules, PluginManagerModules, Tavernmodules, Groupmodules, TagMemo V9.1, rust-vexus-lite, AdminPanel-Vue, VCPBridgeServer

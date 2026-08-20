@@ -1,0 +1,69 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] AdminPanel-Vue 管理面板 - 原子切片
+
+一、模块基本信息
+1. 模块名称：AdminPanel-Vue
+2. 模块类型：前端管理面板 (Vue 3 SPA)
+3. 版本号：1.0.0
+4. 所属项目：VCPToolBox
+5. 源码路径：D:\github\VCP\VCPToolBox\AdminPanel-Vue\
+6. 功能一句话总结：Vue 3 重写的管理面板，提供 RAG 调参、Agent 管理、插件配置等可视化操作
+
+二、功能定位
+
+AdminPanel-Vue 是 VCPToolBox 的新一代管理面板，替代了旧的纯 HTML/JS AdminPanel。采用 Vue 3 + Vite + TypeScript 构建，通过 Pinia 管理状态，vue-router 处理路由。面板提供完整的可视化管理能力，包括 RAG 参数调节、Agent 助手配置、插件启停管理等。
+
+三、技术栈 (package.json 行1-47)
+
+1. 框架与构建：
+   - Vue 3.5.31+
+   - Vite 8.0.3+ (构建工具)
+   - Vue Router 5.0.4+
+   - Pinia 3.0.4+ (状态管理)
+   - TypeScript 5.9.2+
+   - vue-tsc 3.2.6+ (类型检查)
+
+2. 构建脚本 (行6-16)：
+   - dev: vite (开发服务器)
+   - build: vue-tsc && vite build (类型检查 + 构建)
+   - build:no-type-check: vite build (跳过类型检查)
+   - test: vitest run (测试)
+   - lint: npm run lint:typography && eslint . --ext .vue,.ts
+   - lint:typography: node scripts/check-typography-guard.mjs (排版守卫)
+
+3. 关键依赖 (行17-30)：
+   - marked 12.0.2 + marked-highlight 2.2.4 — Markdown 渲染
+   - dompurify 3.3.3 — XSS 防护
+   - easymde 2.20.0 — Markdown 编辑器
+   - highlight.js 11.11.1 — 代码高亮
+   - font-awesome 4.7.0 — 图标库
+   - @fontsource-variable/noto-sans-sc — 中文字体
+   - @fontsource/material-symbols-outlined — Material 图标
+
+4. 开发依赖 (行31-45)：
+   - @vitejs/plugin-vue 6.0.5+
+   - eslint 9.22.0 + eslint-plugin-vue 10.0.0+
+   - @vue/eslint-config-prettier / @vue/eslint-config-typescript
+   - rollup-plugin-visualizer 7.0.1 — 打包体积分析
+   - vitest 3.2.4+ — 测试框架
+
+四、核心功能模块
+
+1. RAG 调参面板：可视化调整 TagMemo 浪潮算法参数、测地线权重、EPA 配置等
+2. Agent 管理：Agent Assistant 配置、积分排行榜 (agent-scores)、委托任务管理
+3. 插件配置：插件启停、参数编辑、Manifest 可视化
+4. 知识库监控：向量索引状态、WAL 健康、索引内存占用
+5. 系统状态：服务器运行状态、API 健康检查、日志查看
+
+五、与旧 AdminPanel 的关系
+
+管理面板已从旧 AdminPanel (纯 HTML/JS) 迁移到 AdminPanel-Vue (Vue 3 SPA)。旧面板的相关功能正在逐步迁移，新功能直接在 Vue 版本中开发。
+
+参考：166_更新 切片中提到 Agent 干活排行榜的 agent-scores.js 即位于 AdminPanel-Vue 中。
+
+六、项目类型
+
+package.json 中 "type": "module" (行5)，表明项目使用 ES Module 标准。
+"private": true (行4)，不发布到 npm。
+
+Tag: AdminPanel-Vue, Vue3, Vite, Pinia, vue-router, TypeScript, 管理面板, RAG调参, Agent管理, 插件配置, Markdown渲染, DOMPurify

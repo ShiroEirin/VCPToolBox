@@ -1,0 +1,45 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] LightMemo：Manifest 现行接口（切片）
+
+状态：CURRENT_MANIFEST_VERIFIED（Manifest 现行声明；运行时效果未验证）
+最后核验：2026-07-22
+适用范围：VCPToolBox main 分支 Plugin/LightMemo
+证据等级：MANIFEST_SCHEMA
+
+一、协议与身份
+- Plugin/LightMemo/plugin-manifest.json:4-8：version=1.0.0、pluginType=hybridservice、protocol=direct。
+- 入口脚本：LightMemo.js（entryPoint.script）。
+- description：一个允许AI主动搜索其RAG知识库（日记、知识库）的插件，作为DeepMemo（上下文搜索）的补充。
+
+二、配置参数（configSchema）
+- EXCLUDED_FOLDERS（string）：需要屏蔽的日记文件夹名称，逗号分隔。默认：已整理,夜伽,MusicDiary。
+- RerankUrl（string）：Rerank服务URL。默认：空。
+- RerankApi（string）：Rerank服务API密钥。默认：空。
+- RerankModel（string）：Rerank服务模型名称。默认：空。
+
+三、命令详情（Manifest 声明）
+
+1. SearchRAG
+- 功能：在RAG知识库（日记）中进行轻量级搜索，支持检索TDB冷知识库。
+- 参数：query（必需）、maid（可选, 支持[文件夹]署名作用域语法）、folder（可选, 逗号/|分隔）、k（可选, 默认5）、rerank（可选, 默认false, 支持"rrf"/"rrf0.7"/数字）、aimemo（可选, 默认false）、aimemo_preset（可选）、BM25/bm25/use_bm25（可选, 默认true）、search_all_knowledge_bases（可选, 默认false）、tag_boost（可选, 默认0.5, 支持"+"后缀启用V9.1势能场重排）、core_tags（可选）、core_boost_factor（可选, 默认1.33）、knowledge_base（可选, 逗号分隔）。
+- 冷知识库触发：query中使用[知识库]语法，或显式提供knowledge_base参数。
+- 时间范围约束：query中支持[YYYY-MM-DD~YYYY-MM-DD]或[YYYY-MM-DD]语法。
+
+2. MapDistance
+- 功能：开发测绘指令，比较起点A到目标B/C/D在原始KNN与V9.1拓扑空间中的距离差异。
+- 参数：command（必需, 固定map_distance）、start/origin/a（必需, string）、targets/target/b（必需, string或数组, 支持多种分隔符）、tag_boost（可选, 默认0.6）、alpha/geo_alpha（可选, 默认读取geodesicRerank.alpha或0.35）、core_tags（可选）、core_boost_factor（可选, 默认1.33）。
+- 输出列：纯KNN距离/相似度、V9.1 TagMemo距离/相似度、V9.1势能场加权距离/相似度、Tag能量场相似度。
+
+3. TagMemoAB
+- 功能：TagMemo V9.1单轨记忆寻址对照测试。
+- 参数：command（必需, 固定tagmemo_ab）、ab_mode（可选, 默认A: A/kernel/mode_a为对称候选超集对照, B/product/mode_b为端到端Top-K对照）、query（必需）、maid/folder/search_all_knowledge_bases（与普通搜索相同）、k（可选, 默认5）、top_l/topL（可选, 默认max(20,k×4)）、tag_boost（可选, 默认0.6）、potential_field/use_potential_field（可选, 默认true）、BM25（可选, 默认true）、compare_rerank（可选, 默认false）、core_tags、core_boost_factor。
+
+四、待验证边界
+- 所有 V9.1、BM25、AIMemo、TDB 知识库、势能场重排等内容均属于 [Manifest 声明]。
+- 实际效果、参数兼容性、组合语义尚未经过源码或运行时验证。
+- Manifest 无 systemPromptPlaceholders 配置。
+
+历史来源：59_插件说明_LightMemo_原子切片.txt。
+未写入内容清单：未把 V9.1 或参数名当作运行时保证；未补写不存在的 systemPromptPlaceholders。
+关联节点：LightMemo、RAGDiaryPlugin、TagMemo、BM25、知识库检索、TDB冷知识库。
+Tag: LightMemo, SearchRAG, MapDistance, TagMemoAB, aimemo, BM25, core_tags, knowledge_base, rrf, V9.1, Manifest声明

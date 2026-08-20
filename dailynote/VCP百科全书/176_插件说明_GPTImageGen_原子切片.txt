@@ -1,0 +1,73 @@
+[2026-07-22] - 哈雷酱
+# GPT Image 2 图像生成器｜GPTImageGen｜通过 OpenAI 兼容 API 调用 gpt-image-2 模型进行高质量图像生成和图片编辑
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/GPTImageGen/` 当前源码
+事实来源：
+- 源码：`Plugin/GPTImageGen/GPTImageGen.js`
+- 配置/Manifest：`Plugin/GPTImageGen/plugin-manifest.json`
+- 运行验证：无
+- 文档：`Plugin/GPTImageGen/README.md`
+
+## 核心结论
+- 版本：1.1.0，类型：synchronous，协议：stdio，超时：300000ms（5分钟）
+- 入口：`node GPTImageGen.js`（Node.js）
+- 通过 OpenAI 兼容 API 调用 gpt-image-2 模型进行高质量图像生成（generate 文生图）和图片编辑（edit 图生图/垫图）
+- 支持版本快照锁定（如 gpt-image-2-2026-04-21）
+- 内置 429/503 自动重试机制（指数退避）
+- 支持 Chat Completions 模式回退（部分兼容渠道不支持 /v1/images/generations）
+
+## 工作机制
+VCP AI 发起 GPTGenerateImage 或 GPTEditImage 命令 → GPTImageGen.js 解析参数 → 构造 OpenAI Images API 请求 → 调用 /v1/images/generations（或 chat/completions + image_generation tool） → 返回 b64_json 或 url → 保存到本地并返回可访问 URL
+
+文生图（generate）：只需 prompt，模型生成新图片
+图生图（edit）：需提供 image（原图 URL/base64/本地路径/数组），模型基于原图编辑生成新图，无需手动遮罩，通过文本指令引导
+
+## 使用/排障边界
+- prompt 建议用英文以获得最佳效果
+- 模型不支持负面提示词参数，可在 prompt 中用 "Avoid: ..." 模拟
+- 生成高质量图片可能需要 30-120 秒
+- 4K 分辨率（3840px）目前为 Beta 特性，生产环境建议使用 2K
+- 图生图单张输入图片不超过 4MB，支持 PNG/JPEG/WebP/GIF
+- 图生图可同时传入多张图片作为参考（最多16张）
+- gpt-image-2 官方不支持 transparent 背景，部分反代可能兼容
+- 常见错误：OPENAI_API_KEY 未配置、API 地址不正确、图片超过 4MB 限制
+
+## 命令与参数
+| command | 说明 |
+|---------|------|
+| GPTGenerateImage | 文生图，只需 prompt 生成新图片 |
+| GPTEditImage | 图生图/垫图，基于已有图片编辑或生成新图 |
+
+GPTGenerateImage 参数：prompt（必需）、size（可选，默认 1024x1024）、quality（可选，low/medium/high/auto，默认 auto）、background（可选，opaque/auto，默认 auto）、n（可选，1-4，默认 1）
+GPTEditImage 参数：prompt（必需）、image（必需，URL/base64/本地路径/数组）、size（可选）、quality（可选）
+
+支持尺寸：1024x1024（1K正方形）、1536x1024（横版）、1024x1536（竖版）、2048x2048（2K）、3840x2160（4K横版 Beta）、2160x3840（4K竖版 Beta）
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| OPENAI_API_KEY | string | (必需) | OpenAI 兼容 API 密钥 |
+| OPENAI_BASE_URL | string | https://api.openai.com | API 基础地址（官方或兼容反代） |
+| GPT_IMAGE_MODEL | string | gpt-image-2 | 模型名称，支持版本快照 |
+| DEFAULT_SIZE | string | 1024x1024 | 默认图片尺寸（最短边≥256，最长边≤3840） |
+| DEFAULT_QUALITY | string | auto | 默认质量：low/medium/high/auto |
+| DEFAULT_RESPONSE_FORMAT | string | b64_json | 返回格式：b64_json（推荐）或 url（60分钟有效） |
+| DEFAULT_BACKGROUND | string | auto | 默认背景：opaque/auto（不支持 transparent） |
+| MAX_RETRIES | string | 2 | API 失败（429/503）最大重试次数 |
+| RETRY_BASE_DELAY_MS | string | 2000 | 重试基础延迟（毫秒），指数退避递增 |
+| USE_CHAT_COMPLETIONS_MODE | boolean | false | Chat Completions 模式，检测到错误时自动回退 |
+| DebugMode | boolean | false | 调试模式，stderr 输出详细日志 |
+
+## 调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GPTImageGen「末」,
+command:「始」GPTGenerateImage「末」,
+prompt:「始」A cute cat wearing a tiny astronaut helmet, floating in space with stars and nebula in the background, digital art style「末」,
+size:「始」1024x1024「末」,
+quality:「始」high「末」
+<<<[END_TOOL_REQUEST]>>>
+
+关联节点：AgnesGen, ComfyUIGen, FluxGen, DoubaoGen, GeminiImageGen, QwenImageGen, ZImageGen, ZImageGen2, NanoBananaGen2, NanoBananaGenOR, DMXDoubaoGen
+Tag: GPTImageGen, 文生图, 图生图, gpt-image-2, OpenAI, synchronous, stdio, 1.1.0

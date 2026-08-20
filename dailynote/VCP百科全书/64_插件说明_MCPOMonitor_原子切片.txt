@@ -1,0 +1,42 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——MCPOMonitor（原子切片）
+
+一、插件身份
+- name: MCPOMonitor
+- displayName: MCPO 服务状态监控器
+- version: 1.0.0
+- pluginType: static
+- enabled: true
+- entry: main.py（runtime: python）
+- author: VCP Team
+- command: 无（自动触发）
+
+二、核心能力
+- 监控 MCPO 服务器状态并提供所有可用 MCP 工具的详细信息。
+- description（manifest）："监控MCPO服务器状态并提供所有可用MCP工具的详细信息"。
+- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+
+三、占位符与注入点
+- systemPromptPlaceholders: {{MCPOServiceStatus}}
+- 占位符在系统提示词中引用，等待周期刷新后自动注入。
+
+四、配置参数
+- config.refreshInterval: 60（秒，刷新间隔）
+- config.timeout: 30（秒，超时时间）
+
+五、调用示例
+触发示例：在系统提示词中引用 {{MCPOServiceStatus}} 占位符，等待周期刷新后自动注入。
+
+六、排障建议
+- 插件无响应：先检查 manifest 启用状态（enabled: true）、入口脚本 main.py、Python 运行时依赖。
+- 结果异常：核对占位符名称与 config 中 refreshInterval/timeout 配置。
+
+七、manifest路径
+- Plugin/MCPOMonitor/plugin-manifest.json（存在且已启用）
+
+
+- MCPO (MCP-to-OpenAPI) 是将 MCP Server 转为 OpenAPI 接口的中间层
+- 本插件监控 MCPO 服务运行状态，将可用工具信息注入到系统提示词
+- Python运行时需确保 main.py 可执行且 MCPO 服务已启动
+
+Tag: MCPOMonitor, static, 静态注入, 系统工具, MCPOServiceStatus, v1.0.0, python, TagMemo V9.1

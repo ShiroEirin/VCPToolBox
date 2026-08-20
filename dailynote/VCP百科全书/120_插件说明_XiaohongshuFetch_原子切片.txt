@@ -1,0 +1,52 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——XiaohongshuFetch（原子切片）
+⚠️ 当前未找到plugin-manifest.json，插件目录存在但仅含 config.env
+
+一、插件身份
+- name: XiaohongshuFetch
+- displayName: 小红书爬虫
+- pluginType: synchronous
+- command: fetch
+
+二、核心能力
+- 用于抓取小红书图文/视频笔记内容的专属爬虫。
+- 提供可调用命令：fetch。
+
+三、占位符与注入点
+- systemPromptPlaceholders: 无
+
+四、配置参数（config.env）
+| 参数 | 说明 |
+|------|------|
+| XHS_COOKIE_A1 | 必填，设备指纹 Cookie，约 52 位字符 |
+| XHS_COOKIE_WEB_SESSION | 必填，登录态 Cookie，以 040069 开头 |
+| XHS_COOKIE_WEB_ID | 推荐填写，与 a1 配套的设备 ID |
+| XHS_COOKIE_FULL | 可选，完整 Cookie 字符串（会覆盖上面三项） |
+| REQUEST_TIMEOUT | 请求超时（秒），默认 20 |
+
+五、配置重点
+- 从浏览器 F12 -> Application -> Cookies -> xiaohongshu.com 中获取 Cookie
+- XHS_COOKIE_A1 和 XHS_COOKIE_WEB_SESSION 为必填项
+- 优先核对插件目录内的 plugin-manifest.json(.block) 与 config.env.example 必填项
+
+六、排障建议
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+- Cookie 过期会导致抓取失败，需重新获取
+
+七、调用示例
+按 URL 抓取:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」XiaohongshuFetch「末」,
+command:「始」fetch「末」,
+url:「始」https://www.xiaohongshu.com/explore/xxx「末」
+<<<[END_TOOL_REQUEST]>>>
+
+按笔记 ID 抓取:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」XiaohongshuFetch「末」,
+command:「始」fetch「末」,
+note_id:「始」7xxx「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: XiaohongshuFetch, synchronous, 同步调用, 检索, 信息获取, 多媒体, fetch, XHS_COOKIE_A1, XHS_COOKIE_WEB_SESSION, 小红书爬虫, TagMemo V9.1

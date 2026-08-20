@@ -1,0 +1,45 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——KEGGSearch（原子切片）
+
+⚠️ 当前未找到plugin-manifest.json，Plugin目录中无KEGGSearch文件夹
+
+一、插件身份
+- name: `KEGGSearch`
+- displayName: `KEGG 数据库查询`
+- pluginType: `synchronous`（历史记录，当前未找到manifest确认）
+- command: get_database_info, search_pathways, get_pathway_info, get_pathway_genes, search_genes, get_gene_info, search_compounds, get_compound_info, search_reactions, get_reaction_info, search_enzymes, get_enzyme_info, search_diseases, get_disease_info, search_drugs, get_drug_info, get_drug_interactions, search_modules, get_module_info, search_ko_entries, get_ko_info, search_glycans, get_glycan_info, search_brite, get_brite_info, get_pathway_compounds, get_pathway_reactions, get_compound_reactions, get_gene_orthologs, convert_identifiers, find_related_entries, batch_entry_lookup
+
+二、核心能力
+- 一个用于查询 KEGG 数据库的 VCP 插件，提供通路、基因、化合物等多维度的数据检索与分析功能。
+- 覆盖 KEGG 数据库的主要数据类型：通路(pathway)、基因(gene)、化合物(compound)、反应(reaction)、酶(enzyme)、疾病(disease)、药物(drug)、模块(module)、KO条目、聚糖(glycan)、Brite层级分类等。
+
+三、占位符与注入点
+- systemPromptPlaceholders: 无
+
+四、命令分类说明
+- 数据库信息: get_database_info
+- 通路(pathway): search_pathways, get_pathway_info, get_pathway_genes, get_pathway_compounds, get_pathway_reactions
+- 基因(gene): search_genes, get_gene_info, get_gene_orthologs
+- 化合物(compound): search_compounds, get_compound_info, get_compound_reactions
+- 反应(reaction): search_reactions, get_reaction_info
+- 酶(enzyme): search_enzymes, get_enzyme_info
+- 疾病(disease): search_diseases, get_disease_info
+- 药物(drug): search_drugs, get_drug_info, get_drug_interactions
+- 模块(module): search_modules, get_module_info
+- KO条目: search_ko_entries, get_ko_info
+- 聚糖(glycan): search_glycans, get_glycan_info
+- Brite层级: search_brite, get_brite_info
+- 跨库工具: convert_identifiers, find_related_entries, batch_entry_lookup
+
+五、排障建议
+- 插件无响应：确认Plugin目录中是否存在KEGGSearch文件夹及入口脚本。
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 若插件已迁移或重命名，请更新本切片。
+
+五、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」KEGGSearch「末」,
+command:「始」get_database_info「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: KEGGSearch, synchronous, 同步调用, 检索, 信息获取, get_database_info, search_pathways, get_pathway_info, get_pathway_genes, search_genes, multi-command, 生信检索, KEGG数据库, TagMemo V9.1

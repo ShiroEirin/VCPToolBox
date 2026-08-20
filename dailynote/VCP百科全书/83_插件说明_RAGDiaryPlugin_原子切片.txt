@@ -1,0 +1,77 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——RAGDiaryPlugin（原子切片）修正版
+
+一、插件身份
+- manifest 名称：`RAGDiaryPlugin`
+- 显示名：`RAG日记本检索器`
+- 类型：`hybridservice`
+- 协议：`direct`
+- 入口：`RAGDiaryPlugin.js`
+- 版本：`1.0.0`（manifest版本号未更新，实际能力已演进至 V9.1/V10 Alpha）
+
+二、核心能力
+- 通过向量检索动态地将日记内容注入到系统提示词中，实现高效、低消耗的长期记忆。
+- 与 `DailyNote`、`DailyNoteEditor`、`DailyNoteManager` 协同形成"写入-编辑-批处理-检索"链路。
+  - 旧名 `DailyNoteWrite` 已更名为 `DailyNote`（manifest v3.0.0，hybridservice/direct）
+  - 旧名 `DailyNoteEdit` 已拆分为独立的 `DailyNoteEditor`
+- 支持日记内容增量向量化与大规模变化下全量重建策略。
+- 向量索引底层从 HNSW 演进为 SQLite + rust-vexus-lite，通过 SQLite WAL 模式实现增量更新。
+- 结合 BM25 混合检索、多阶段重排（含 RRF 融合），提升长周期记忆召回稳定性。
+- 新增能力：
+  - BM25 关键词初筛与 BM25-向量混合打分（BM25QueryOptimizer）
+  - AIMemo 总结：检索完成后将候选结果交由 AI 生成摘要式记忆（AIMemoHandler，与 LightMemo 共享）
+  - TDB 冷知识库：支持 knowledge/ 目录下由 TriviumDB 建立的大规模百科/手册/私有资料库的混合检索
+  - 元思考检索：检索链路中注入元思考链增强推理深度（MetaThinkingManager）
+  - 语义分组：管理日记内容的语义分组，提升长文档场景下的召回精度（SemanticGroupManager）
+  - TagMemo V9.1 增强因子：通过标签网络拓扑增强搜索语义相关性，支持查询级势能场重排
+
+三、配置参数（configSchema）
+- `RerankUrl`（字符串）：Rerank服务的URL
+- `RerankApi`（字符串）：Rerank服务的API密钥
+- `RerankModel`（字符串）：Rerank使用的模型
+- `RerankMultiplier`（数字）：Rerank前K值的放大倍率，默认 2.0
+- `RerankMaxTokensPerBatch`（数字）：单次Rerank请求的最大Token数，默认 30000
+
+四、系统实现关键词
+- SQLite + rust-vexus-lite 向量引擎（替代旧版 HNSW 索引）
+- SQLite WAL 模式增量向量化（替代旧版文件变更监控）
+- 哈希/时间戳驱动的原子级更新
+- BM25 关键词初筛与混合打分（BM25QueryOptimizer）
+- AIMemo AI总结增强（AIMemoHandler）
+- TDB 冷知识库混合检索（TDBPlaceholderProcessor，BM25稀疏召回+向量稠密召回+图扩散）
+- 元思考链注入（MetaThinkingManager）
+- 语义分组管理（SemanticGroupManager）
+- 折叠存储（FoldingStore，SQLite WAL）
+- TagMemo V9.1 势能场重排
+- RRF 双排名融合重排
+- Worker线程执行向量化与检索任务（避免阻塞主线程）
+
+五、实务注意
+- RAG质量高度依赖日记Tag规范与切片粒度。
+- 批处理类操作建议由高能力Agent执行，避免语义污染。
+- 召回异常时优先排查：索引更新、哈希一致性、检索参数。
+- 配置 Rerank 服务可显著提升召回精度；未配置时仍有内置 BM25 + 向量混合打分兜底。
+- AIMemo 总结依赖外部 AI 接口配置，未配置或调用失败时自动返回原始记忆片段。
+- TDB 冷知识库检索不经过日记/TagMemo 流程，参数行为与日记检索不同。
+
+六、触发方式
+`RAGDiaryPlugin` 通常不直接暴露单独 `TOOL_REQUEST`，常通过日记写入/检索链路间接触发。
+manifest 中 invocationCommands 为空，插件通过系统提示词中的占位符自动触发。
+
+可在系统提示词中保留记忆检索意图，例如：
+`请先检索相关历史日记再回答，优先匹配同主题Tag。`
+
+直接调用示例（高级用法）：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」RAGDiaryPlugin「末」,
+command:「始」search「末」,
+query:「始」VCP插件开发最佳实践「末」,
+topK:「始」5「末」,
+tags:「始」VCP开发, 插件系统「末」
+<<<[END_TOOL_REQUEST]>>>
+
+返回格式：
+- 成功：`{"status":"success","results":[{"date":"2026-07-22","content":"...","score":0.95}]}`
+- 失败：`{"status":"error","error":"..."}`
+
+Tag: RAGDiaryPlugin, 日记检索器, 向量索引, SQLite, rust-vexus-lite, 增量向量化, BM25混合检索, AIMemo, TDB冷知识库, 元思考检索, 语义分组, TagMemo V9.1, V10 Alpha, RRF重排, Rerank, 配置参数, DailyNote, DailyNoteEditor, DailyNoteManager, 记忆召回, 修正版, 原子切片

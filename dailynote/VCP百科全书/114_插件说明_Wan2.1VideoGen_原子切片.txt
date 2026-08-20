@@ -1,0 +1,77 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——Wan2.1VideoGen（原子切片）
+版本：0.1.0 | pluginType: asynchronous | protocol: stdio | timeout: 1800000ms
+⚠️ Manifest 位于 Plugin/VideoGenerator/plugin-manifest.json（插件目录名为 VideoGenerator，注册名为 Wan2.1VideoGen）
+
+一、插件身份
+- name: `Wan2.1VideoGen`
+- displayName: `视频生成器 (Wan2.1)`
+- version: `0.1.0`
+- pluginType: `asynchronous`
+- protocol: `stdio`
+- timeout: `1800000`
+- 入口: `python video_handler.py`
+
+二、核心命令
+- `submit`：提交生成任务（t2v/i2v）
+- `query`：根据 `request_id` 查询任务状态与结果URL
+
+三、submit 命令参数
+通用参数：
+- `mode`（必需，字符串）：`t2v`（文生视频）或 `i2v`（图生视频）
+
+t2v 模式参数：
+- `prompt`（必需，字符串）：视频描述文本
+- `resolution`（必需，字符串）：分辨率，仅支持 `1280x720`、`720x1280`、`960x960`
+- `negative_prompt`（可选，字符串）：负面提示词
+
+i2v 模式参数：
+- `image_url`（必需，字符串）：图片链接
+- `prompt`（可选，字符串）：指导性提示词
+- `negative_prompt`（可选，字符串）：负面提示词
+
+四、query 命令参数
+- `request_id`（必需，字符串）：提交任务时返回的ID
+- 返回状态：InProgress / Succeed / Failed
+
+五、配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| SILICONFLOW_API_KEY | string | SiliconFlow API密钥 |
+| Text2VideoModelName | string | 文生视频模型名称 |
+| Image2VideoModelName | string | 图生视频模型名称 |
+| DebugMode | boolean | 调试模式 |
+| CALLBACK_BASE_URL | string | 回调基础URL |
+
+六、工作流
+- 先提交，再轮询查询；不可一次调用期待最终视频
+- i2v会处理输入图像（下载/裁剪/编码）后再请求API
+- 返回 `messageForAI` 引导Agent对用户解释当前状态
+- 支持 WebSocket 推送：messageType=video_generation_status，targetClientType=VCPLog
+
+七、使用/排障边界
+- 视频生成耗时长（几分钟到几十分钟甚至更长），submit 成功后需告知用户耐心等待
+- t2v 分辨率仅支持三种固定值，不支持自定义
+- i2v 模式下分辨率由插件自动处理
+- 随机种子由插件自动处理
+- 任务长时间无结果先查query状态和日志文件
+- 失败重点看模型名、配额、输入图像可用性
+
+八、调用示例
+提交任务：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Wan2.1VideoGen「末」,
+command:「始」submit「末」,
+mode:「始」t2v「末」,
+prompt:「始」a cyberpunk street in rainy night, cinematic motion「末」,
+resolution:「始」1280x720「末」
+<<<[END_TOOL_REQUEST]>>>
+
+查询任务：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Wan2.1VideoGen「末」,
+command:「始」query「末」,
+request_id:「始」req_xxxxxxxx「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: Wan2.1VideoGen, VideoGenerator, 视频生成, submit, query, request_id, t2v, i2v, 异步任务, SiliconFlow, messageForAI, webSocketPush, 0.1.0, TagMemo V9.1

@@ -1,0 +1,113 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] VCP记忆系统——SQLite重构与Rust底层数据抽象层
+
+一、核心变更
+VCP记忆系统从JSON文件存储迁移到SQLite数据库，保持100%向后兼容。整个底层数据抽象层完全使用Rust重写，性能巨幅提升数个数量级，彻底消除跨库通讯瓶颈和文件竞态风险。
+
+二、六张核心表
+1. diaries：日记条目元信息（id, folder, filename, content_hash, created_at, updated_at）
+2. files：文件信息表
+3. chunks：知识块表（切片后的文本块+向量索引）
+4. diary_name_vectors：日记名称向量索引
+5. usage_stats：使用统计表（查询50x性能提升）
+6. failed_rebuilds：失败重建记录表
+
+三、性能提升数据
+- 批量写入：10x提升
+- 索引查询：20x提升
+- 统计查询：50x提升
+- WAL模式并发：3x提升
+
+四、SQLite技术特性
+- 零配置部署：无需独立数据库服务器
+- ACID事务保证：所有日记操作在严格事务保护下
+- WAL(Write-Ahead Logging)模式：实现读写并发
+- 持久化缓存与自动重算：SVD基底持久化存储
+- WAL文件确认存在：folding_store.db-wal
+
+五、USearch高性能向量索引
+- 纯Rust实现：业界最快向量搜索引擎之一
+- HNSW算法：分层可导航小世界图索引
+- Cargo.toml确认：usearch = "2.8"
+- SIMD加速：利用CPU向量指令集加速计算
+- 内存效率极致优化：支持mmap磁盘映射模式
+- 多种距离度量：余弦相似度、欧氏距离、内积等
+- 增量索引更新：支持在线添加/删除向量
+- 性能指标：10万Tag+1万Chunk召回0.7ms
+
+六、内存缓存架构（完全保留）
+- indices：向量索引缓存
+- chunkMaps：知识块映射缓存
+- lruCache：LRU最近最少使用缓存
+- searchCache：搜索结果缓存
+- CacheManager.js（4843字节）管理缓存生命周期
+所有插件公共API不变，迁移对上层完全透明。
+
+七、Rust底层数据抽象层
+三大核心数据库的统一管理：
+- MemoChunk（记忆碎片）
+- Tag（标签向量）
+- KnowledgeChunk（知识块）
+
+Rust重写带来的优势：
+- 告别竞态：彻底消除跨库通讯瓶颈
+- 零GC暂停：Rust所有权模型保证内存安全
+- 原生并发：无需JavaScript事件循环限制
+- FFI桥接：通过Node.js原生模块(napi-rs)与JavaScript层通信
+
+八、rust-vexus-lite模块
+位于VCPToolBox/rust-vexus-lite/目录，是VCP的Rust核心引擎。核验确认：
+- src/lib.rs存在（3192行），使用napi 2.16 + napi-derive 2.16
+- rusqlite 0.29（bundled模式），usearch 2.8
+- nalgebra用于矩阵运算（SVD基底计算）
+- sha2用于内容哈希校验
+- 核心数据结构：SearchResult, SvdResult, OrthogonalProjectionResult, HandshakeResult, ProjectResult, IntrinsicResidualResult, EpaBasisResult, PairwiseSimResult, VexusStats, VexusIndex
+- 包含：向量索引管理（USearch封装）、SQLite数据库操作、文本切片(TextChunker)引擎、Tag权重计算与管理、搜索缓存与LRU管理
+
+九、RAGDiaryPlugin模块化扩展
+RAGDiaryPlugin目录已从最初的4个核心模块扩展到约19个JS文件+若干数据/配置文件：
+
+核心JS模块（18个）：
+- RAGDiaryPlugin.js（245266字节，主插件逻辑）
+- DirectDiaryTextProcessor.js（47536字节）
+- AIMemoHandler.js（43406字节）
+- TDBPlaceholderProcessor.js（24477字节）
+- SemanticGroupManager.js（20098字节）
+- ContextVectorManager.js（19429字节）
+- MetaThinkingManager.js（18296字节）
+- FoldingStore.js（12202字节）
+- BM25QueryOptimizer.js（12056字节）
+- TextSanitizer.js（10911字节）
+- TimeExpressionParser.js（9104字节）
+- RAGResultFormatter.js（8484字节）
+- VectorMathUtils.js（4448字节）
+- CacheManager.js（4843字节）
+- AttachmentMemoUtils.js（2278字节）
+- MessageContentUtils.js（2467字节）
+- timeExpressions.config.js（2747字节）
+- test_reranker.js（3214字节）
+
+新增关键模块说明：
+- BM25QueryOptimizer：BM25查询优化器，提升关键词召回质量
+- AIMemoHandler：AIMemo终极模式处理器，支持并发遍历亿Token级记忆库
+- FoldingStore：V2折叠迷你数据库（SQLite），热重载安全
+- MetaThinkingManager：元思考链加载与执行引擎
+- TDBPlaceholderProcessor：冷知识库占位符适配层
+- ContextVectorManager：上下文向量管理器
+- TimeExpressionParser：时间表达式解析器
+
+十、三大自学习机制
+1. RAG寻道自学习：根据检索效果动态调整搜索参数
+2. Tag权重自学习：根据标签使用频率和效果动态调权
+3. 词元组捕网自学习：根据语义匹配结果优化词元组网络
+
+十一、流内RAG
+AI输出过程中实时刷新知识库，知识从静态快照变为活系统。AI在生成回复的同时，新的上下文信息实时索引，后续检索可以包含最新产生的知识。
+
+十二、TagMemo版本演进
+- TagMemo V5 → V9.1（生产版）→ V10 Alpha（实验）
+- rust-vexus-lite中已出现V8.2成对语义距离预计算（PairwiseSimResult）
+- EPA基底重算（EpaBasisResult）持续优化向量空间结构
+
+关联节点：SQLite, USearch, Rust, HNSW, WAL模式, rust-vexus-lite, TextChunker, FoldingStore, BM25QueryOptimizer, AIMemoHandler
+Tag: SQLite重构, Rust数据层, USearch向量索引, HNSW算法, WAL并发, 性能提升, 内存缓存, rust-vexus-lite, 自学习机制, 流内RAG, SIMD加速, 零配置部署, ACID事务, FoldingStore, BM25QueryOptimizer, AIMemoHandler, TagMemo V9.1, 模块化扩展

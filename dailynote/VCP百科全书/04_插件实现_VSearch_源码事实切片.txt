@@ -1,0 +1,56 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件实现——VSearch（源码事实切片）
+
+一、源码锚点
+- manifest: Plugin/VSearch/plugin-manifest.json
+- entry: Plugin/VSearch/VSearch.js（35141字节，703行）
+- pluginType: synchronous
+- version: 1.1.0
+- 关键函数: main(request), callSearchModel(topic, keyword, showURL)
+- 目录文件: VSearch.js, plugin-manifest.json, config.env, config.env.example, package.json, testgrouding/
+
+二、行为事实（代码级）
+- 必填参数是 SearchTopic 与 Keywords，缺失即返回错误。
+- Keywords 支持分隔符：英文逗号、中文逗号、换行。
+- ShowURL 支持布尔 true 或字符串 'true' 两种打开方式。
+- 执行模型为分批并发：按 CONCURRENCY 切块，逐块 Promise.all 并发检索。
+- v1.1.0 新增 SearchMode 参数，支持多种搜索后端：
+  - grounding (Google搜索)
+  - grok (Grok内置搜索)
+  - tavily (Tavily外部搜索)
+  - kimisearch (Kimi Search 外部搜索，默认模式)
+- kimisearch 模式支持 KimiSearchMaxResults 和 KimiSearchIncludeContent 配置。
+- tavily/kimisearch 模式支持二阶总结（SummaryKey/SummaryUrl/SummaryModel）。
+
+三、输出结构
+- 统一输出标题"VSearch 检索报告"。
+- 每个关键词单独成段，结构为"### 关键词: ... + 搜索结果"。
+
+四、配置项（configSchema）
+- VSearchKey: API Key
+- VSearchUrl: API 端点 URL
+- VSearchModel: Grounding 模式模型名
+- GrokModel: Grok 模式模型名
+- TavilyKey / TavilyModel: Tavily 模式配置
+- MaxConcurrent: 并发队列上限
+- KimiSearchUrl / KimiSearchKey / KimiSearchMaxResults / KimiSearchIncludeContent: KimiSearch 模式配置
+- SummaryKey / SummaryUrl / SummaryModel: 二阶总结专用配置
+
+五、调用示例（源码对齐）
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VSearch「末」,
+SearchTopic:「始」TagMemo 浪潮RAG工程实践「末」,
+Keywords:「始」TagMemo V9.1, 语义分段, 相控阵去重「末」,
+SearchMode:「始」kimisearch「末」,
+ShowURL:「始」false「末」
+<<<[END_TOOL_REQUEST]>>>
+
+六、版本变更记录
+- v1.0 (2026-03-03): 初始版本
+- v1.1.0 (2026-07-22):
+  - 新增 SearchMode 参数，支持 grounding/grok/tavily/kimisearch 四种搜索后端
+  - 新增 KimiSearch 模式配置项
+  - 新增二阶总结配置（SummaryKey/SummaryUrl/SummaryModel）
+  - VSearch.js 增长至 35141 字节 / 703 行
+
+Tag: VSearch, VSearch.js, SearchTopic, Keywords, ShowURL, SearchMode, grounding, grok, tavily, kimisearch, 分批并发, Promise.all, 检索报告, 同步调用, 信息获取, TagMemo V9.1, 源码事实切片

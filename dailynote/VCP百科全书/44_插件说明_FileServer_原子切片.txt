@@ -1,0 +1,40 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——FileServer（原子切片）
+
+⚠️ 当前未找到plugin-manifest.json
+⚠️ 插件目录存在但仅包含 CLAUDE.md，无源码或 manifest 文件
+
+一、插件身份
+- name: FileServer
+- displayName: 文件服务
+- pluginType: service（历史声明，基于 CLAUDE.md）
+- entryPoint: file-server.js（历史声明，文件不存在）
+- communication.protocol: HTTP（通过Express路由）
+- command: 无（自动触发）
+
+二、核验状态
+- Plugin/FileServer/ 目录存在，但仅包含 CLAUDE.md 文件。
+- 无 plugin-manifest.json、无 file-server.js、无 config.env.example。
+- 根据 CLAUDE.md 记录，该插件曾提供文件上传、下载和管理功能。
+- 当前状态：源码和 manifest 均缺失，可能已废弃或迁移。
+
+三、历史能力描述（基于 CLAUDE.md，无法从源码验证）
+- 提供受密码保护的静态文件服务。
+- HTTP 路由：POST /file-upload、GET /files、DELETE /files/:filename、GET /files/:filename。
+- 插件命令：uploadFile、listFiles、deleteFile、getFileUrl。
+- 配置项：File_Key（访问权限验证密钥）、CALLBACK_BASE_URL。
+- 文件存储目录：默认使用项目的 file/ 目录。
+
+四、配置重点
+- 无法提供当前配置信息，manifest 和源码均不存在。
+- CLAUDE.md 中记录的历史配置：File_Key、CALLBACK_BASE_URL。
+
+五、排障建议
+- 插件无响应：源码和 manifest 均缺失，插件无法运行。
+- 检查 git 历史了解源码何时被删除。
+- 如需文件服务功能，建议检查 FileListGenerator 或其他文件相关插件。
+
+六、调用示例
+无可用调用示例，源码和 manifest 均不存在。
+
+Tag: FileServer, service, 已废弃, 系统工具, TagMemo V9.1

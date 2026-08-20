@@ -1,0 +1,42 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——IMAPSearch（原子切片）
+
+一、插件身份
+- name: `IMAPSearch`
+- displayName: `IMAP 邮件本地搜索`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- author: `VCP Team`
+- entry: `main.py`（runtime: python）
+- enabled: true
+- command: `IMAPSearch`
+
+二、核心能力
+- 在本地邮件存储中执行全文搜索。
+- 支持分页和可配置的索引目录。
+
+三、命令与参数
+- command: `IMAPSearch`
+- 搜索参数通过 stdio JSON 传入，支持分页查询
+
+四、配置参数（config）
+- `indexDir` (default: `./mail_index`): 本地邮件索引目录路径
+- `pageSize` (default: 50): 分页大小
+
+五、排障建议
+- 插件无响应：检查 manifest 启用状态、Python运行时依赖、main.py入口。
+- 结果异常：确认邮件索引已生成，检查 indexDir 路径是否正确。
+- 无搜索结果：确认邮件索引已生成且包含目标内容。
+- 分页异常：检查 pageSize 配置是否合理（默认50）。
+
+六、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」IMAPSearch「末」,
+command:「始」IMAPSearch「末」
+<<<[END_TOOL_REQUEST]>>>
+
+依赖预先生成的邮件索引
+Python运行时需确保 main.py 可执行
+搜索结果以JSON格式返回，包含邮件标题、发件人和摘要
+
+Tag: IMAPSearch, synchronous, 同步调用, 邮件搜索, 全文搜索, indexDir, pageSize, Python插件, TagMemo V9.1

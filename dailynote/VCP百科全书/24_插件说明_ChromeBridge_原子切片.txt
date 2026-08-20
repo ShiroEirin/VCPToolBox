@@ -134,4 +134,12 @@ command:「始」capture_screenshot「末」
 - `Element not clickable`：元素被遮挡或不可交互，等待页面完全加载
 - `ACTION_VERIFICATION_FAILED`：事件已发送但读回不一致，检查页面是否被动态更新
 
-Tag: ChromeBridge, hybridservice, direct, open_url, click, type, wait, screenshot, 浏览器桥接, 页面监控, 自动化交互, VCPChrome扩展, 动态网页操作, selector, timeout, 参数说明, CDP, vcp-button, vcp-searchbox, 类型分组ID, v2.3.0, PageGraph, GroundedMarkdown, interactionTree, snapshotDiff, 敏感DOM脱敏, 动作验证, vcpweb, webcore, vcp-checkbox, actionBackend, browserTarget
+Tag: ChromeBridge, hybridservice, direct, open_url, click, type, wait, screenshot, 浏览器桥接, 页面监控, 自动化交互, VCPChrome扩展, 动态网页操作, selector, timeout, 参数说明, CDP, vcp-button, vcp-searchbox, 类型分组ID, v2.3.0, PageGraph, GroundedMarkdown, interactionTree, snapshotDiff, 敏感DOM脱敏, 动作验证, vcpweb, webcore, vcp-checkbox, actionBackend, browserTarget, UrlFetchCookie同步, 第12次上游合并
+
+十、2026-08-20 上游新增（commit 3985268d，ChromeBridge.js +338）
+**VCPChrome 一键配置 UrlFetch Cookie**：VCPChrome 浏览器扩展可将当前浏览器 Cookie 一键同步给 UrlFetch 插件（用于需要登录态的网页抓取）。
+- 新增 `urlfetchConfigWriteQueue`（Promise 队列串行写入）
+- `URLFETCH_COOKIE_SYNC_LIMITS` 限制：maxCookies=5000、maxCookieNameLength=256、maxCookieValueLength=8192、maxCookieBytes=1.5MB
+- siteKey 规范化与校验（isUuid / normalizeSiteKey / isValidSiteKey）
+- `FETCH_COOKIES_RAW_MULTI` JSON 对象严格解析（拒绝重复键、格式校验）
+- VCPChrome/background.js 同步 +145（扩展侧 Cookie 抓取与回传）

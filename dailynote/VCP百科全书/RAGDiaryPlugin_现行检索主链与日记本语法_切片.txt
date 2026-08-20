@@ -1,0 +1,48 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] RAGDiaryPlugin：现行检索主链与四类日记本语法
+
+状态：CURRENT_VERIFIED / PARTIALLY_STALE（源码骨架确认；参数与运行效果仍有限定）
+最后核验：2026-07-22
+适用范围：VCPToolBox main 分支 Plugin/RAGDiaryPlugin 及其引擎依赖
+证据等级：SOURCE_BODY + MANIFEST_SCHEMA
+
+一、身份与协议
+- Manifest：Plugin/RAGDiaryPlugin/plugin-manifest.json:2-7，name=RAGDiaryPlugin，version=1.0.0，pluginType=hybridservice，protocol=direct。
+- displayName：RAG日记本检索器。
+- description：通过向量检索动态地将日记内容注入到系统提示词中，以实现高效、低消耗的长期记忆。
+- author: Ryan & Gemini。
+- 入口脚本：RAGDiaryPlugin.js（entryPoint.script）。
+- webSocketPush.enabled: false。
+
+二、配置参数（configSchema）
+- RerankUrl（string）：Rerank服务URL。默认：空。
+- RerankApi（string）：Rerank服务API密钥。默认：空。
+- RerankModel（string）：Rerank使用的模型。默认：空。
+- RerankMultiplier（number）：Rerank前K值的放大倍率。默认：2.0。
+- RerankMaxTokensPerBatch（number）：单次Rerank请求的最大Token数。默认：30000。
+
+三、主链
+- RAGDiaryPlugin.js:1134 processMessages 接收消息；:1145 先走 DirectDiaryTextProcessor 纯文本快速路径。
+- :1377/:1483 进行系统消息分发；:2543 进入 _processRAGPlaceholder。
+- :2774 语义路径调用 vectorDBManager.search；:2822-2843 支持 historySegments 的 Shotgun 多向量路径。
+- :2860 调用 deduplicateResults；:2866-2868 在截断前执行 TimeDecay；随后进行 rerank/truncate 与上下文注入。
+- vectorDBManager 为 KnowledgeBaseManager 单例注入（:530-532）；applyTagBoost 调用见 :3423，实现下沉至 KnowledgeBaseManager.js:668-671 → TagMemoEngine.js:680-685。
+
+四、四种日记本语法
+| 语法 | 当前定位 | 证据 |
+| {{日记本}} | DirectDiary 全文直引/快速路径 | RAGDiaryPlugin.js:1492；DirectDiaryTextProcessor.js:68 |
+| [[日记本]] | RAG 检索 | RAGDiaryPlugin.js:1492 |
+| <<日记本>> | 门控式全文/相似度路径，复用直接管线 | RAGDiaryPlugin.js:1493、1776-1780 |
+| 《《日记本》》 | 门控式混合 RAG | RAGDiaryPlugin.js:1494、1801 |
+
+处理已从旧 messageProcessor 日记本逻辑迁移至插件族；另有知识库语法（:1502-1505）。
+
+五、Manifest 声明
+- 无 invocationCommands（hybridservice 自动触发，不提供直接命令调用）。
+- 无 systemPromptPlaceholders。
+
+历史来源：03_插件实现_RAGDiaryPlugin_源码事实切片.txt；83_插件说明_RAGDiaryPlugin_原子切片.txt。
+待验证边界：具体阈值、修饰符组合、外部 rerank 与生产运行时召回质量；不以旧文档补全未定位参数。
+未写入内容清单：未声称所有 V4/V5 模块仍以旧文件名存在；未把无运行验证的效果写成保证。
+关联节点：DirectDiaryTextProcessor、KnowledgeBaseManager、TagMemoEngine、CacheManager、TimeDecay。
+Tag: RAGDiaryPlugin, processMessages, DirectDiaryTextProcessor, _processRAGPlaceholder, vectorDBManager.search, Shotgun, historySegments, deduplicateResults, TimeDecay, 日记本语法, v1.0.0, hybridservice

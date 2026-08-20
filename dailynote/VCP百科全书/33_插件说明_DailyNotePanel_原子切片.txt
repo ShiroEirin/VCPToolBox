@@ -1,0 +1,42 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——DailyNotePanel（原子切片）
+
+一、插件身份
+- name: `DailyNotePanelRouter`
+- displayName: `DailyNotePanel 路由胶水插件`
+- version: `1.0.1`
+- manifestVersion: `1.0.2`
+- pluginType: `service`
+- author: `B3000Kcn & DBL1F7E5`
+- entryPoint: `index.js`
+- protocol: `direct`
+- command: 无（自动触发）
+- 当前状态：`plugin-manifest.json.block`（禁用态清单）
+
+二、核心能力
+- 通过 PluginManager 在主服务上注册 DailyNotePanel 的静态页面端点和 dailynote API 端点。
+- 第一阶段使用测试前缀 /DailyNotePanel2 与 /dailynote_api2，验证通过后可切换为正式前缀。
+- invocationCommands: 无（service类型插件）
+
+三、配置参数（configSchema）
+- `DebugMode` (boolean, default=false): 是否启用路由胶水插件的调试日志输出
+- `PanelPathPrefix` (string, default=`/AdminPanel/DailyNotePanel`): DailyNotePanel 页面前缀
+- `ApiPathPrefix` (string, default=`/AdminPanel/dailynote_api`): DailyNotePanel 所使用的 dailynote API 前缀
+
+五、排障建议
+- 插件无响应：确认插件已启用（移除.block后缀），检查 PluginManager 是否正确加载。
+- 页面不可访问：检查 PanelPathPrefix 和 ApiPathPrefix 配置是否正确。
+- API端点404：确认路由注册成功，检查日志中的 DebugMode 输出。
+- 测试前缀问题：第一阶段使用 /DailyNotePanel2 和 /dailynote_api2，验证通过后切换正式前缀。
+
+六、调用示例
+触发示例：启动服务后由路由或事件系统被动触发，无需手动命令。
+
+frontend目录包含DailyNotePanel的前端页面资源
+该插件为service类型，通过direct协议与宿主通信
+页面和API路由由PluginManager在主服务上注册
+
+
+启用后可通过管理面板访问DailyNotePanel界面
+
+Tag: DailyNotePanel, DailyNotePanelRouter, service, 路由胶水插件, DebugMode, PanelPathPrefix, ApiPathPrefix, plugin-manifest.json.block, TagMemo V9.1

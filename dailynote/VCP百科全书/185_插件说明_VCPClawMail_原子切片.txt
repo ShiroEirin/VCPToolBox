@@ -1,0 +1,125 @@
+[2026-07-22] - 哈雷酱
+# VCPClawMail｜VCPClawMail｜常驻轮询 ClawEmail 邮箱并提供邮件占位符，支持列出/读取/发送/回复邮件
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/VCPClawMail/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/VCPClawMail/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+VCPClawMail（v0.1.0）是一个 hybridservice 类型插件，常驻轮询 claw.163.com 邮箱并提供最近邮件占位符，同时允许 AI 列出、读取、发送和回复 ClawEmail 邮件。附件可由 URL/file:// 传入，读取到的图片/附件会尽量以可继续解析的 URL 或本地缓存路径返回。支持 mail1-mail4 子邮箱实时即达监听和自动 Agent 投递。
+
+## 工作机制
+- 入口脚本：`VCPClawMail.js`（Node.js，direct 协议，timeout 120000ms）
+- 常驻服务：ClawMailPolling —— 轮询 ClawEmail 最近邮件并更新占位符
+- 子邮箱实时分发：ClawMailSubMailboxRealtimeAgentDispatch —— 对 mail1-mail4 启动 WebSocket 即达监听，收到新邮件后读取正文/图片/文档附件，通过 AgentAssistant 投递给绑定 Agent
+- 占位符：`{{VCPClawMailInbox}}`（公共邮箱）和 `{{VCPClawMailInboxMail1}}` ~ `{{VCPClawMailInboxMail4}}`（子邮箱），均为动态占位符
+- 附件处理：图片附件转为 OpenAI 多模态 image_url，文档附件尽量解析为文本
+
+## 使用/排障边界
+- `ClawMailKey` 为必需配置（ClawEmail API Key），注意不是 npx claw-setup 的临时 auth-url
+- `ClawMailUsers` 逗号分隔邮箱列表，第一个为默认发件/读取邮箱
+- 子邮箱 mail1-mail4 各有独立的用户地址和绑定 Agent 配置
+- `move_to_trash` 为高风险操作，需要 `confirm: true`
+- SDK 不支持原生 reply 时会返回错误并提示改用 send_mail
+- 轮询间隔建议 30000-300000ms
+- 子邮箱自动投递时附件数量上限由 `ClawMailSubMailAutoMaxAttachments` 控制（默认 8）
+
+## 命令与参数
+| 命令 | 说明 | 必需参数 | 可选参数 |
+|------|------|----------|----------|
+| list_recent | 列出 ClawEmail 最近邮件摘要 | command | mailbox, user, limit, unreadOnly |
+| read_mail | 读取单封邮件详情，返回正文/HTML转Markdown/图片URL/附件元数据 | command, mailId | mailbox, user, markRead, includeAttachmentContent |
+| send_mail | 发送 ClawEmail 邮件 | command, to, subject, body | mailbox, user, cc, bcc, html, attachments |
+| reply_mail | 回复邮件，SDK 不支持时提示改用 send_mail | command, mailId, body | mailbox, user, html, attachments |
+| download_attachment | 下载附件到本地缓存目录，返回 file:// 路径 | command, mailId, attachmentId/partId/url | mailbox, user |
+| list_folders | 列出邮箱文件夹 | command | mailbox, user |
+| move_to_trash | 将邮件移入垃圾箱（软删除） | command, mailId, confirm(true) | mailbox, user, sourceFolderId, targetFolderId |
+
+### mailbox 参数说明
+- 可选值：mail1 / mail2 / mail3 / mail4
+- 不填则使用公共默认邮箱
+- 与 `user` 参数二选一，`mailbox` 优先
+
+## 配置参数（configSchema）
+| 参数名 | 类型 | 说明 |
+|--------|------|------|
+| ClawMailKey | string | ClawEmail API Key（必需） |
+| ClawMailUsers | string | 逗号分隔的 ClawEmail 邮箱列表；第一个为默认发件/读取邮箱 |
+| ClawMailDefaultUser | string | 默认 ClawEmail 邮箱 |
+| ClawMailPollIntervalMs | integer | 邮件轮询间隔（毫秒），默认 60000 |
+| ClawMailPollLimit | integer | 每次轮询缓存邮件数量，默认 20 |
+| ClawMailAutoMarkRead | boolean | 读取邮件详情时默认是否标记已读，默认 false |
+| ClawMailSubMail1User | string | 子邮箱 mail1 的真实 ClawEmail 地址 |
+| ClawMailSubMail1Agent | string | 子邮箱 mail1 绑定的 AgentAssistant Agent 名称 |
+| ClawMailSubMail2User | string | 子邮箱 mail2 的真实 ClawEmail 地址 |
+| ClawMailSubMail2Agent | string | 子邮箱 mail2 绑定的 AgentAssistant Agent 名称 |
+| ClawMailSubMail3User | string | 子邮箱 mail3 的真实 ClawEmail 地址 |
+| ClawMailSubMail3Agent | string | 子邮箱 mail3 绑定的 AgentAssistant Agent 名称 |
+| ClawMailSubMail4User | string | 子邮箱 mail4 的真实 ClawEmail 地址 |
+| ClawMailSubMail4Agent | string | 子邮箱 mail4 绑定的 AgentAssistant Agent 名称 |
+| ClawMailSubMailProcessedKeep | integer | 每个子邮箱保留的已自动处理 mailId 数量，默认 500 |
+| ClawMailSubMailAutoMaxAttachments | integer | 子邮箱自动投递时附件数量上限，默认 8 |
+| DebugMode | boolean | 调试模式开关 |
+
+## 调用示例
+列出最近邮件：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VCPClawMail「末」,
+command:「始」list_recent「末」,
+limit:「始」10「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+读取邮件详情：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VCPClawMail「末」,
+command:「始」read_mail「末」,
+mailId:「始」abc123「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+发送邮件：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VCPClawMail「末」,
+command:「始」send_mail「末」,
+to:「始」someone@example.com「末」,
+subject:「始」测试邮件「末」,
+body:「始」你好，这是一封来自 VCP 的邮件。「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+回复邮件带附件：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VCPClawMail「末」,
+command:「始」reply_mail「末」,
+mailId:「始」abc123「末」,
+body:「始」已收到，我会尽快处理。「末」,
+attachments:「始」https://example.com/sticker.png「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+移入垃圾箱：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」VCPClawMail「末」,
+command:「始」move_to_trash「末」,
+mailbox:「始」mail1「末」,
+mailId:「始」abc123「末」,
+confirm:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+关联节点：AgentAssistant（子邮箱自动投递）
+Tag: VCPClawMail, 邮件, ClawEmail, 轮询, 子邮箱, WebSocket, 占位符, hybridservice, 0.1.0, admin接口, 第12次上游合并
+
+十、2026-08-20 上游增强（commits 14291ad5 + 7c89ade9）
+1. **readMail 的 detail 仅 admin 路径挂载**（14291ad5）：AI 工具链路调用 readMail 不再携带 html/text/markdown 完整副本（避免上下文膨胀）；仅 admin API 调用（includeDetail=true）才挂归一化详情。
+2. **补全 admin HTTP 出口（V1.1/V2 SDK）**（7c89ade9）：SDK 能力现成仅缺封装，本次补齐 admin HTTP 路由（routes/admin/clawMail.js 新增 118 行）。
+3. 新增 admin/移动端专用命令：`mark_mail`（标记已读/未读）、`search_mail`（fts 全文搜索）、`move_mail`（移动邮件）、附件原始字节获取（供 admin API 流式回传，与 download_attachment 写磁盘不同）。

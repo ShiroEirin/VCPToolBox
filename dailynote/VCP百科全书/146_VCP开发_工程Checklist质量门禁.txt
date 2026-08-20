@@ -1,0 +1,51 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] VCP开发——工程Checklist质量门禁
+
+一、文档来源
+- `dailynote/VCP开发/` 下 CHECKLIST 系列文档（架构、测试、注释、防御式编程、重构等）。
+- `docs/` 目录下相关文档：ARCHITECTURE.md、PLUGIN_ECOSYSTEM.md、VCP同步异步插件开发手册.md、Agent_Development_Guide.md、CONFIGURATION.md、OPERATIONS.md 等。
+
+二、Checklist族用途
+- 不是“写完再看”的装饰文档，而是开发前中后的门禁清单。
+- 目标：降低回归风险、减少风格漂移、保证多人/多Agent协作一致性。
+
+三、建议执行顺序
+1) 需求与架构类（Requirements / Architecture / UpstreamPrerequisites）
+   - 参考 docs/ARCHITECTURE.md 了解整体架构。
+   - 参考 docs/PLUGIN_ECOSYSTEM.md 了解插件生态。
+2) 实现与结构类（DesignInConstruction / High-QualityRoutines / Naming）
+   - 参考 docs/VCP同步异步插件开发手册.md 了解插件开发规范。
+   - 参考 docs/Agent_Development_Guide.md 了解 Agent 开发。
+3) 质量与测试类（AQuality-AssurancePlan / TestCases / Integration / Debugging）
+   - 参考 docs/CONFIGURATION.md 了解配置项。
+   - 参考 docs/OPERATIONS.md 了解运维。
+4) 维护与重构类（ReasonsToRefactor / RefactoringSafely / SummaryofRefactorings）
+   - 参考 docs/ChangeLog.md 了解变更历史。
+
+四、在VCP项目中的落地
+- 插件新增：先过manifest契约和参数语义检查，再写执行逻辑。
+- 高风险插件：优先防御式编程、错误处理、权限边界检查。
+- PR前自检：命名一致、异常路径可复现、日志可追踪、文档可召回。
+- manifest 契约检查需覆盖所有 pluginType：synchronous、asynchronous、static、service、hybridservice、messagePreprocessor、placeholder。
+
+五、RAG切片建议
+- 每个Checklist切片保留：适用阶段、必做项、失败后果、对照文件。
+- tag要同时覆盖“问题词元”和“修复词元”，提升反向召回能力。
+
+六、架构演进（2026-07核验状态）
+- 管理面板已从AdminPanel迁移到AdminPanel-Vue，质量门禁的配置界面随之更新。
+- 插件开发新增 placeholder 类型（如DailyNoteEditor），manifest契约检查需覆盖该类型。
+- rust-vexus-lite作为Rust核心引擎，引入了额外的Rust代码质量要求（clippy::all deny模式）。
+- docs/ 目录现有 53 个文档文件，涵盖架构、插件、配置、运维、记忆系统、向量引擎等。
+
+七、相关文档索引
+- docs/ARCHITECTURE.md：整体架构
+- docs/PLUGIN_ECOSYSTEM.md：插件生态
+- docs/VCP同步异步插件开发手册.md：插件开发手册
+- docs/Agent_Development_Guide.md：Agent开发指南
+- docs/MEMORY_SYSTEM.md：记忆系统
+- docs/RUST_VECTOR_ENGINE.md：Rust向量引擎
+- docs/TAGMEMO_TUNING_GUIDE.md：TagMemo调优指南
+- docs/TDB_COLD_KNOWLEDGE_BASE.md：冷知识库
+
+Tag: Checklist, 工程质量, 质量门禁, 防御式编程, 测试用例, 架构检查, 命名规范, 重构安全, 调试清单, 开发流程, AdminPanel-Vue, rust-vexus-lite, placeholder类型, TagMemo V9.1

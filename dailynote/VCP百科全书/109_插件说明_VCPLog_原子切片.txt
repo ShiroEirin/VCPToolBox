@@ -1,0 +1,41 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——VCPLog（原子切片）
+
+版本：1.0.0 | pluginType: service
+
+一、插件身份
+- name: VCPLog
+- displayName: VCP 日志推送插件
+- version: 1.0.0
+- pluginType: service
+- entryPoint.script: VCPLog.js
+- communication.protocol: direct
+- command: 无（自动触发）
+
+二、核心能力
+- description（manifest）："通过 WebSocket 推送 VCP 调用信息，并记录日志。"
+- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- capabilities.systemPromptPlaceholders: []（空数组，无占位符）
+- capabilities.invocationCommands: []（空数组，无命令调用）
+
+三、配置参数
+- configSchema.VCP_Key: string（VCP密钥，用于身份验证）
+
+四、调用示例
+触发示例：启动服务后由路由或事件系统被动触发，无需手动命令。
+- 服务自动加载并注册 WebSocket 推送。
+- 通过 VCP_Key 进行身份验证后推送调用日志。
+
+五、排障建议
+- 插件无响应：检查 manifest 启用状态、VCPLog.js 入口脚本、VCP_Key 配置。
+- 结果异常：核对 VCP_Key 是否正确，WebSocket 连接是否正常。
+- 日志丢失：检查网络连接和 WebSocket 客户端状态。
+
+六、manifest路径
+- Plugin/VCPLog/plugin-manifest.json（存在且已启用）
+
+
+- webSocketPush.enabled: true（manifest声明，推送类型为 plugin_callback_notification）
+- VCPLog 作为 service 类型插件，由 PluginManager 加载但不暴露命令
+
+Tag: VCPLog, service, 后台服务, 记忆管理, WebSocket, VCP_Key, v1.0.0, TagMemo V9.1

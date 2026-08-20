@@ -1,0 +1,57 @@
+[2026-07-22] - 哈雷酱
+# TimedTaskQuery｜TimedTaskQuery｜查询或取消通用未来工具调用的待执行任务及持久化结果
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/TimedTaskQuery/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/TimedTaskQuery/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+TimedTaskQuery（v1.0.0）是一个 synchronous 类型插件，用于查询或取消通用未来工具调用（timely_contact）的待执行任务，并查询执行后的持久化结果。通过 `task_id` 定位任务，支持查询和取消两种操作。
+
+## 工作机制
+- 入口：`node TimedTaskQuery.js`（Node.js，stdio 协议，timeout 30000ms）
+- 查询任务：提供创建定时任务时返回的 task_id/taskId
+- 待执行或未完成的任务查询返回 pending 状态
+- 取消操作：仅对尚未执行的任务有效，已完成任务不可取消，只能查询结果
+- 权限：`read_from_file_system` 和 `write_to_file_system`
+
+## 使用/排障边界
+- 必须提供创建定时任务时返回的 task_id/taskId
+- 取消仅对尚未执行的任务有效
+- 已完成任务不可取消，只能查询结果
+- task_id 格式示例：`task-1779106560000-650e398d`
+- maid（署名）为必需参数
+
+## 命令与参数
+| 命令 | 说明 | 参数 |
+|------|------|------|
+| QueryTimedTaskResult | 查询或取消通用未来工具调用 | maid（必需）, task_id（必需）, action（可选，cancel 表示取消） |
+
+## 配置参数（configSchema）
+manifest 中未定义 configSchema。
+
+## 调用示例
+查询任务结果：
+```
+<<<[TOOL_REQUEST]>>>
+maid:「始」你的署名「末」,
+tool_name:「始」TimedTaskQuery「末」,
+task_id:「始」task-1779106560000-650e398d「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+取消任务：
+```
+<<<[TOOL_REQUEST]>>>
+maid:「始」Nova「末」,
+tool_name:「始」TimedTaskQuery「末」,
+task_id:「始」task-1779106560000-650e398d「末」,
+action:「始」cancel「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+关联节点：timely_contact（定时任务创建方）
+Tag: TimedTaskQuery, 定时任务, 任务查询, 任务取消, timely_contact, synchronous, 1.0.0

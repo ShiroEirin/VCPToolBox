@@ -1,0 +1,76 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——UrlFetch（原子切片）
+版本：0.2.0 | pluginType: synchronous | protocol: stdio | timeout: 60000ms
+
+一、插件身份
+- name: `UrlFetch`
+- displayName: `URL 内容获取插件`
+- version: `0.2.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `60000`
+- author: `Lionsky`
+- 入口: `node UrlFetch.js`（Node.js）
+- command: `UrlFetch`
+
+二、命令与参数
+命令 `UrlFetch`，参数如下：
+- `url`（必需，字符串）：要访问的URL，支持 http://、https:// 和 file:/// 三种协议
+- `mode`（可选，字符串）：模式：
+  - `text`（默认）：Puppeteer提取网页文本或链接列表
+  - `jina`：使用Jina Reader将网页转换为Markdown
+  - `download`：将网页下载为Markdown并保存到knowledge子文件夹
+  - `snapshot`：返回网页完整长截图（Base64）
+  - `image`：直接下载网络图片并返回Base64（URL为图片时自动启用）
+- `knowledgeFolder`（download模式必需，字符串）：knowledge根目录下的单层子文件夹名，不能包含 /、\、.. 或绝对路径
+- `fileName`（download模式可选，字符串）：保存的Markdown文件名，不填时根据网页标题和时间自动生成
+- `sourceMode`（download模式可选，字符串）：提取来源，'jina'（默认）或 'text'
+
+三、配置参数（configSchema）
+- manifest 中 configSchema 为空对象 {}，无独立配置项
+
+四、支持模式说明
+- `text`：使用Puppeteer路径，返回网页文本内容或链接列表
+- `jina`：使用Jina Reader快速将网页转换为Markdown，适合绕过部分网页验证
+- `download`：将网页正文保存到 knowledge/{knowledgeFolder}/{fileName}.md；默认先用Jina，失败回退text路径
+- `snapshot`：返回网页长截图的Base64图片数据
+- `image`：返回图片的Base64数据，当URL以图片扩展名结尾时自动启用
+- `file:///`：直接读取本地文件。图片返回Base64，文本(.txt/.md/.json等)返回文本内容
+
+五、常见用途
+- 网页内容抓取、长文预处理、图像拉取、受限页面访问
+- 可作为RAG前置"抓取-清洗-入库"工具（download模式直接写入knowledge子文件夹）
+
+六、排障提示
+- 404/403优先排查目标站点权限与访问限制
+- 连接失败看代理配置与证书链
+- 解析不全看模式选择和页面动态加载特性
+- download模式只需提供knowledge子文件夹名，不要提供完整路径
+
+七、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」https://example.com/news「末」,
+mode:「始」text「末」
+<<<[END_TOOL_REQUEST]>>>
+
+使用 Jina Reader 转 Markdown:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」https://example.com/article「末」,
+mode:「始」jina「末」
+<<<[END_TOOL_REQUEST]>>>
+
+下载网页为 Markdown 到 knowledge 子文件夹:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」UrlFetch「末」,
+url:「始」https://example.com/article「末」,
+mode:「始」download「末」,
+knowledgeFolder:「始」网页收藏「末」,
+fileName:「始」example-article.md「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: UrlFetch, 网页抓取, snapshot, image模式, file协议读取, download模式, jina模式, knowledgeFolder, Cookies配置, Base64图片, 内容抽取, RAG预处理, 0.2.0, TagMemo V9.1, VCPChromeCookie同步, 第12次上游合并
+
+十、2026-08-20 上游新增（commit 3985268d）
+**VCPChrome 一键配置 UrlFetch Cookie**：VCPChrome 浏览器扩展可将浏览器 Cookie 一键同步给 UrlFetch（用于需要登录态的网页抓取）。配合 ChromeBridge 切片 24 的 urlfetchConfigWriteQueue + URLFETCH_COOKIE_SYNC_LIMITS 限制（maxCookies=5000、maxCookieBytes=1.5MB）+ siteKey 规范化。

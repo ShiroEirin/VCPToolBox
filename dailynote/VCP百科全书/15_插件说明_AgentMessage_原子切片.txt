@@ -1,0 +1,47 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——AgentMessage（原子切片）
+
+一、插件身份
+- name: `AgentMessage`
+- displayName: `代理消息推送插件`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- author: `Roo`
+- entryPoint: `node AgentMessage.js`（nodejs）
+- protocol: `stdio`
+- timeout: `10000`
+- command: `AgentMessage`
+
+二、核心能力
+- 允许AI通过WebSocket向用户前端发送格式化消息。
+- 提供可调用命令：AgentMessage。
+- webSocketPush: enabled=true, usePluginResultAsMessage=true, targetClientType=UserNotification
+
+三、命令与参数
+- `AgentMessage`：向用户前端发送一条消息
+  - Maid (字符串, 可选): 消息发送者的名称，省略则为匿名消息
+  - message (字符串, 必需): 要发送的消息内容
+
+四、配置参数
+- configSchema: 无（空对象）
+
+五、排障建议
+- 插件无响应：检查 WebSocket 连接状态，确认前端客户端在线。
+- 消息未送达：检查 targetClientType 配置，确认用户前端已连接。
+- 超时：默认超时10秒，网络不佳时可能需要调整。
+
+六、调用示例
+发送署名消息：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentMessage「末」,
+Maid:「始」小克「末」,
+message:「始」主人，您的咖啡已经准备好了，请到餐厅享用哦～ ❤️「末」
+<<<[END_TOOL_REQUEST]>>>
+
+发送匿名消息：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentMessage「末」,
+message:「始」一条重要的匿名通知。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: AgentMessage, synchronous, WebSocket推送, 消息推送, UserNotification, v1.0.0, TagMemo V9.1

@@ -1,0 +1,49 @@
+[2026-07-22] - 哈雷酱
+# 动态工具清单桥接器｜DynamicToolBridge｜为 VCPDynamicTools 动态插件工具清单提供插件中心可见的配置入口
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/DynamicToolBridge/` 当前源码
+事实来源：
+- 源码：`Plugin/DynamicToolBridge/noop.js`
+- 配置/Manifest：`Plugin/DynamicToolBridge/plugin-manifest.json`
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- 版本：1.0.0，类型：synchronous，协议：stdio，超时：1000ms
+- 入口：`node noop.js`（Node.js，空操作脚本）
+- 为 `{{VCPDynamicTools}}` 动态插件工具清单提供插件中心可见的配置入口
+- 该插件本身不作为 LLM 可调用工具暴露，只负责小模型分类器等私有配置的管理
+- invocationCommands 为空数组，不提供任何命令
+
+## 工作机制
+该插件入口为 noop.js（空操作），不执行任何实际逻辑。其存在目的是让 VCP 插件管理面板能够显示和管理 DynamicToolBridge 的配置项（主要是小模型分类器配置），这些配置由 VCP 核心框架在构建动态工具清单时读取使用。
+
+小模型分类器工作流程（当 SmallModel_Enabled=true 时）：
+VCP 新增插件或插件说明变化时 → 调用小模型对插件进行分类 → 分类结果用于动态工具清单的智能筛选 → 手动重建分类时也会触发
+
+## 使用/排障边界
+- 该插件不会出现在 LLM 可调用工具列表中
+- SmallModel_Use_Main_Config=true 时复用主 config.env 的 API_URL 和 API_Key，只需填 SmallModel_Model
+- SmallModel_Use_Main_Config=false 时需单独配置 SmallModel_Endpoint 和 SmallModel_API_Key
+- 小模型分类器仅在插件变化时触发，不进入普通请求主路径，对性能无影响
+- 常见错误：SmallModel_Model 未填写、独立端点地址格式错误
+
+## 命令与参数
+无 invocationCommands（空数组）。该插件不作为 LLM 可调用工具暴露，只负责配置管理。配置项由 VCP 核心框架在构建动态工具清单时读取。
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| SmallModel_Enabled | boolean | 否 | false | 是否启用小模型分类器 |
+| SmallModel_Use_Main_Config | boolean | 否 | true | 是否复用主配置的上游 API |
+| SmallModel_Model | string | 否 | (空) | 小模型名称，复用主配置时只需填此项 |
+| SmallModel_Endpoint | string | 否 | (空) | 独立 OpenAI 兼容端点，仅 Use_Main_Config=false 时填写 |
+| SmallModel_API_Key | string | 否 | (空) | 独立端点的 API Key，仅 Use_Main_Config=false 时填写 |
+
+## 调用示例
+该插件不通过 TOOL_REQUEST 调用。它是一个配置入口插件，不暴露任何命令给 LLM。配置项在 VCP 插件管理面板中设置，由核心框架在构建动态工具清单时读取。
+
+关联节点：VCPDynamicTools, PluginManager
+Tag: DynamicToolBridge, 动态工具清单, 小模型分类器, 配置入口, synchronous, stdio, noop, 1.0.0, TagMemo V9.1

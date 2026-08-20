@@ -78,4 +78,8 @@ params:「始」type=stock,symbol=AAPL「末」
 <<<[END_TOOL_REQUEST]>>>
 
 关联节点：GoogleSearch, TavilySearch, SerpSearch, UrlFetch
-Tag: AnySearch, 实时搜索, 垂直搜索, 批量搜索, 自由路线编排, 网页正文提取, resultFormatter, synchronous, stdio, v3.0.1, 2026-07-28
+Tag: AnySearch, 实时搜索, 垂直搜索, 批量搜索, 自由路线编排, 网页正文提取, resultFormatter, synchronous, stdio, v3.0.1, 2026-07-28, zone参数, 第12次上游合并
+
+十、2026-08-20 上游新增 zone 参数（commits 63a6605e + 80ac8157）
+- 新增 `zone` 参数（值：`cn` / `intl`）：控制搜索区域，用于区分国内/国际搜索源。
+- `parseZone` 函数支持 `zone`/`Zone` 双键名、大小写不敏感、校验合法值。

@@ -1,0 +1,185 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书-20260722] Agent干活排行榜与日月同辉V6更新总览
+
+一、更新概览
+
+本次更新代号"日月同辉V6"，是莱恩哥在2026年3月推送的重大版本更新。
+涵盖VCPToolBox和VCPChat两大项目，共包含10+个commits。
+
+更新亮点：
+1. Agent干活排行榜系统（积分版）
+2. 任务委托积分版增强
+3. RAG时间衰减重排功能
+4. 上下文智能滑块优化
+5. AA插件可视化适配
+
+二、核心功能详解
+
+1. Agent干活排行榜系统
+
+文件位置：AdminPanel-Vue中的agent-scores.js（管理面板已从AdminPanel迁移到AdminPanel-Vue）
+
+功能定位：
+为管理面板提供Agent工作量可视化排行榜，量化展示各Agent的贡献度。
+
+核心特性：
+- 金银铜排名徽章（rank-gold/silver/bronze）
+- 积分历史追踪（history数组记录每次得分）
+- 实时更新机制（支持手动刷新+自动更新）
+- 美观的表格展示（包含排名、Agent名称、总分、最近动态、时间）
+
+API端点：
+GET /admin_api/agent-assistant/scores
+
+数据结构：
+```javascript
+{
+  "AgentName": {
+    "name": "显示名称",
+    "baseName": "基础名称",
+    "totalPoints": 100,
+    "history": [
+      { "time": "ISO时间", "pointsDelta": 10, "reason": "完成任务A" }
+    ]
+  }
+}
+```
+
+2. 任务委托积分版
+
+文件位置：Plugin/AgentAssistant/AgentAssistant.js
+插件核验状态：pluginType: hybridservice，任务委托积分版增强
+
+增强功能：
+- 委托任务完成自动计分
+- 支持配置化积分规则
+- 与排行榜系统联动
+
+配置参数：
+```env
+DELEGATION_MAX_ROUNDS=15
+DELEGATION_TIMEOUT=300000
+DELEGATION_SYSTEM_PROMPT=xxx
+DELEGATION_HEARTBEAT_PROMPT=xxx
+```
+
+3. RAG时间衰减重排功能（日月同辉V6核心）
+
+文件位置：Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js
+
+Commit: 64b7726 feat(rag): 新增基于时间衰减的RAG结果重排功能
+
+技术原理：
+在RAG检索结果排序时，不仅考虑语义相似度，还引入时间衰减因子，
+使得较新的记忆片段获得更高权重。
+
+算法公式：
+```
+最终得分 = 语义相似度 × 时间衰减系数
+时间衰减系数 = e^(-λ × Δt)
+```
+其中λ为衰减系数，Δt为时间差。
+
+配置参数：
+```env
+RAG_TIME_DECAY_ENABLED=true
+RAG_TIME_DECAY_LAMBDA=0.001
+```
+
+演进状态（2026-07核验）：
+- TagMemo已从V5演进到V9.1生产版，时间衰减重排功能已集成到新版本算法中
+- rust-vexus-lite接管向量检索底层，时间衰减计算的延迟降低
+- RAGDiaryPlugin目录已扩展到约19个JS模块，TimeExpressionParser.js（9104字节）负责时间表达式解析
+- BM25QueryOptimizer.js（12056字节）提供查询优化，与时间衰减协同工作
+
+4. 上下文智能滑块边界优化
+
+文件位置：TextChunker.js（rust-vexus-lite中集成）
+
+优化内容：
+- 改进滑块边界检测算法
+- 优化边界处的语义连贯性
+- 减少不必要的文本截断
+
+5. AA插件可视化适配
+
+文件位置：VCPChat/modules/messageRenderer.js（92KB）
+
+适配内容：
+- 支持AA插件的可视化渲染
+- 优化分块渲染器性能
+- 新增RAG_Observer.html界面元素
+
+三、Bug修复
+
+1. 极端微妙情况下的向量化崩溃bug
+
+修复文件：RAGDiaryPlugin.js
+问题描述：在特定向量维度不匹配情况下会导致崩溃
+解决方案：增加边界检查和容错处理
+
+四、配置文件更新
+
+config.env.example 新增配置项：
+```env
+# Agent积分系统配置
+AGENT_SCORE_ENABLED=true
+AGENT_SCORE_DEFAULT_POINTS=10
+
+# RAG时间衰减配置
+RAG_TIME_DECAY_ENABLED=true
+RAG_TIME_DECAY_LAMBDA=0.001
+```
+
+五、使用指南
+
+1. 启用Agent排行榜
+
+在AdminPanel-Vue界面中，点击"Agent积分"标签页即可查看排行榜。
+支持手动刷新和自动更新（每5分钟）。
+
+2. 配置积分规则
+
+编辑Plugin/AgentAssistant/config.env：
+```env
+DELEGATION_POINTS_COMPLETE=20
+DELEGATION_POINTS_PARTIAL=10
+```
+
+3. 调整RAG时间衰减
+
+编辑Plugin/RAGDiaryPlugin/config.env：
+```env
+# 值越大，旧记忆衰减越快
+RAG_TIME_DECAY_LAMBDA=0.001
+```
+
+六、技术亮点
+
+1. 模块化设计
+Agent积分系统完全模块化，可独立启用/禁用。
+
+2. 配置驱动
+所有功能都支持配置化，无需修改代码即可调整行为。
+
+3. 向后兼容
+新增功能默认启用但不影响旧版本配置。
+
+4. 性能优化
+RAG时间衰减计算采用缓存机制，避免重复计算。
+
+七、架构演进（2026-07核验状态）
+- 管理面板已从AdminPanel迁移到AdminPanel-Vue，Agent排行榜界面随之更新
+- TagMemo已从V5演进到V9.1生产版（+ V10 Alpha实验），RAG时间衰减重排功能已集成到新版本
+- rust-vexus-lite接管向量检索底层，时间衰减计算和向量化崩溃bug修复已由Rust层保障
+- RAGDiaryPlugin目录已扩展到约19个JS模块，TimeExpressionParser.js负责时间表达式解析
+- VCPChat新增Agenttaskmodules前端模块，Agent任务管理可视化能力增强
+- VCPBridgeServer插件支持独立端口拦截CLI工具请求
+
+八、关联文档
+
+- 13_插件说明_AgentAssistant_原子切片.txt
+- 163_插件说明_AgentAssistant_V2_原子切片.txt
+- 03_插件实现_RAGDiaryPlugin_源码事实切片.txt
+
+Tag: VCP百科全书, Agent积分, 日月同辉V6, RAG时间衰减, 任务委托, AdminPanel-Vue, 莱恩哥更新, 2026-03-11, agent-scores.js, AgentAssistant, RAGDiaryPlugin, TextChunker, messageRenderer, 时间衰减系数, 指数衰减, 语义重排, 记忆权重, 智能滑块, AA插件, 分块渲染, 配置驱动, 模块化设计, 向后兼容, 性能优化, TagMemo V9.1, rust-vexus-lite, TimeExpressionParser, BM25QueryOptimizer, Agenttaskmodules, VCPBridgeServer

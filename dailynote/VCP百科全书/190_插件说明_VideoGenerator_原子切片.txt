@@ -1,0 +1,88 @@
+[2026-07-22] - 哈雷酱
+# 视频生成｜VideoGenerator｜Wan2.1 文生视频/图生视频
+
+状态：已验证
+最后核验：2026-07-22
+适用范围：`Plugin/VideoGenerator` 当前源码；Manifest 版本 0.1.0
+事实来源：
+- Manifest：`Plugin/VideoGenerator/plugin-manifest.json`
+- 源码：`Plugin/VideoGenerator/video_handler.py`
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- Manifest 声明 name=Wan2.1VideoGen、版本 0.1.0、pluginType=asynchronous、protocol=stdio。
+- 入口命令 `python video_handler.py`，通信超时 1800000ms（30分钟）。
+- 使用 Wan2.1 API 进行文本到视频（t2v）或图像到视频（i2v）的生成。
+- 支持 WebSocket 推送，messageType=video_generation_status，targetClientType=VCPLog。
+- 命令 submit 提交视频生成任务，命令 query 查询任务状态。
+- t2v 模式参数：prompt（必需）、resolution（1280x720/720x1280/960x960）、negative_prompt（可选）。
+- i2v 模式参数：image_url（必需）、prompt（可选）、negative_prompt（可选）。
+
+## 命令与参数
+命令 `submit`，参数如下：
+- `mode`（必需，字符串）：`t2v`（文生视频）或 `i2v`（图生视频）
+- `prompt`（t2v必需/i2v可选，字符串）：视频描述文本或指导性提示词
+- `resolution`（t2v必需，字符串）：分辨率，仅支持 `1280x720`、`720x1280`、`960x960`
+- `negative_prompt`（可选，字符串）：负面提示词
+- `image_url`（i2v必需，字符串）：图片链接
+
+命令 `query`，参数如下：
+- `request_id`（必需，字符串）：提交任务时返回的ID
+- 返回状态：InProgress / Succeed / Failed
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| SILICONFLOW_API_KEY | string | SiliconFlow API密钥 |
+| Text2VideoModelName | string | 文生视频模型名称 |
+| Image2VideoModelName | string | 图生视频模型名称 |
+| DebugMode | boolean | 调试模式 |
+| CALLBACK_BASE_URL | string | 回调基础URL |
+
+## 工作机制
+PluginManager 加载 → stdio 通信 → submit 命令提交任务到 SiliconFlow API → 返回 requestId → 异步生成 → WebSocket 推送状态 → query 命令查询结果。
+
+## 使用/排障边界
+- 视频生成耗时长（几分钟到几十分钟甚至更长），submit 成功后需告知用户耐心等待。
+- t2v 分辨率仅支持 1280x720、720x1280、960x960 三种。
+- i2v 模式下分辨率由插件自动处理，不支持手动指定。
+- 随机种子由插件自动处理，不需要手动传入。
+- query 返回状态为 InProgress/Succeed/Failed。
+
+## 调用示例
+提交文生视频:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Wan2.1VideoGen「末」,
+command:「始」submit「末」,
+mode:「始」t2v「末」,
+prompt:「始」一只猫在太空漫步「末」,
+resolution:「始」1280x720「末」
+<<<[END_TOOL_REQUEST]>>>
+
+提交图生视频:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Wan2.1VideoGen「末」,
+command:「始」submit「末」,
+mode:「始」i2v「末」,
+image_url:「始」http://example.com/cat.jpg「末」,
+prompt:「始」这只猫的眼睛发出激光「末」
+<<<[END_TOOL_REQUEST]>>>
+
+查询任务:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」Wan2.1VideoGen「末」,
+command:「始」query「末」,
+request_id:「始」your_request_id_here「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 历史与兼容性
+- 当前版本 0.1.0，为早期开发版本。
+- 依赖 SiliconFlow API 和 Wan2.1 模型。
+
+## 待验证项
+- API 调用和异步回调端到端流程。
+- WebSocket 推送到 VCPLog 客户端的可靠性。
+
+关联节点：SiliconFlow, Wan2.1, VCPLog
+Tag: VideoGenerator, Wan2.1VideoGen, video_handler.py, asynchronous, 文生视频, 图生视频, t2v, i2v, SiliconFlow, WebSocket推送, SILICONFLOW_API_KEY, 0.1.0, TagMemo V9.1

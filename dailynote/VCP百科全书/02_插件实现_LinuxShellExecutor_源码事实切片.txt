@@ -1,0 +1,192 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件实现——LinuxShellExecutor（源码事实切片）
+
+一、源码锚点
+- manifest: Plugin/LinuxShellExecutor/plugin-manifest.json
+- entry: Plugin/LinuxShellExecutor/LinuxShellExecutor.js（121553字节，2838行）
+- pluginType: hybridservice（v1.2.0 从 synchronous 升级）
+- version: 1.2.0
+- 通信协议: direct（非旧版 stdio）
+- 核心类: LinuxShellExecutor
+- 安全层架构: 8层防护（v1.2.0 从7层扩展至8层，名单驱动 + AST 语义基线）
+- 目录文件: LinuxShellExecutor.js, plugin-manifest.json, config.env, graylist.json, whitelist.json, securityLevels.json, presets.json, hosts.json, README.md, examples/, logs/, ssh/
+
+二、八层安全防护架构（v1.2.0 更新）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1: BlacklistFilter      黑名单过滤 - 快速拦截已知危险命令    │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 2: WhitelistValidator   白名单验证 - 允许列表校验           │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 2.5: GraylistValidator  灰名单验证 - 需管理员确认           │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 2.6: SecurityLevelValidator 安全分级                      │
+│            read/safe/write/danger 四级分类 + 管道链验证          │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 3: ASTAnalyzer          AST语义分析 - 检测复杂攻击模式       │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 4: SandboxManager       沙箱隔离 - Docker/Firejail/Bwrap   │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 5: RlimitManager        资源限制 - CPU/内存/文件/进程数      │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 6: AuditLogger          审计日志 - 记录所有操作             │
+├─────────────────────────────────────────────────────────────┤
+│ Layer 7: OutputFormatter      输出格式化 - table/json/raw       │
+│            (v1.2.0 收敛至 execute() 单一顺序管线)                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+三、v1.2.0 关键变更
+- 安全层从7层整合为8层统一管线，所有校验收敛至 execute() 内的单一顺序管线。
+- 硬护栏：分号(;)、后台&、子shell $() 被禁止且不可绕过。
+- 普通命令的 && / || / 重定向受白名单 forbiddenCharacters 限制。
+- 预设(preset:)模板内可使用 &&。
+- 管道(|)正常支持。
+- 全局输出截断防护。
+- requiresAdmin: true（manifest 标注）
+
+四、核心组件
+
+### GraylistValidator（第2.5层：灰名单验证器）
+```javascript
+class GraylistValidator {
+    constructor(graylist) {
+        this.commands = graylist.commands || {};
+        this.globalRestrictions = graylist.globalRestrictions || {};
+        this.riskLevels = graylist.riskLevels || {};
+    }
+    
+    check(command) {
+        const parsed = this.parseCommand(command);
+        const cmdConfig = this.commands[parsed.command];
+        if (!cmdConfig) return { inGraylist: false };
+        return {
+            inGraylist: true,
+            cmdConfig,
+            riskLevel: cmdConfig.riskLevel || 'medium',
+            parsedCommand: parsed
+        };
+    }
+}
+```
+
+### SecurityLevelValidator（第2.6层：安全分级验证器）
+```javascript
+class SecurityLevelValidator {
+    constructor(config) {
+        this.levels = config.securityLevels || {};
+        this.pipeRules = config.pipeRules || {};
+        this.redirectRules = config.redirectRules || {};
+        this.specialOperators = config.specialOperators || {};
+    }
+    
+    getCommandLevel(command) {
+        const parsed = this.parseCommand(command);
+        for (const levelName of ['danger', 'write', 'safe', 'read']) {
+            // 匹配逻辑...
+        }
+    }
+    
+    validate(command) {
+        // 验证特殊操作符(; & $()等)
+        // 验证管道链安全性
+        // 验证重定向目标
+    }
+}
+```
+
+### PresetExecutor（预设命令执行器）
+```javascript
+class PresetExecutor {
+    constructor(config) {
+        this.presets = config.presets || {};
+        this.categories = config.categories || {};
+    }
+    
+    isPresetCommand(command) { return command.startsWith('preset:'); }
+    
+    parsePresetCommand(command) {
+        const match = command.match(/^preset:(\w+)(?:\?(.+))?$/);
+        // 返回解析结果...
+    }
+    
+    expandPreset(presetName, params = {}) {
+        // Shell参数转义，防止注入
+        // 替换占位符 ${key} 和 ${key:-default}
+    }
+}
+```
+
+### OutputFormatter（输出格式化器）
+```javascript
+class OutputFormatter {
+    constructor(options = {}) {
+        this.maxOutputLines = options.maxOutputLines || 100;
+        this.maxOutputSize = options.maxOutputSize || 1048576;
+        this.tableCommands = ['ps', 'df', 'docker', 'ls', 'netstat', 'ss', 'lsof'];
+    }
+    
+    async format(output, options = {}) {
+        // outputFormat: 'raw' | 'formatted' | 'json'
+        // 自动截断超长输出
+        // 美化表格输出（对齐列）
+        // JSON格式化特定命令(df等)
+    }
+}
+```
+
+五、行为事实（代码级）
+- execute() 中 hostId 为必填；缺失时返回 discovery 资产列表引导。
+- hostId 不存在时不抛硬错，返回 status=discovery + 可用资产。
+- isLongRunning=true 时转后台任务：启动 monitorManager，返回 taskId/pid/logPath。
+- 对 tail -f / journalctl -f 提示改用 LinuxLogMonitor 进行流式监控。
+- 支持 preset:xxx 格式预设命令，自动展开为多条命令序列。
+- 输出自动格式化，支持 table/json/raw 三种格式。
+- 授权码逃逸：管理员验证码 (requireAdmin) 可授权执行灰名单命令及未知命令；黑名单/特殊操作符/AST/白名单路径限制不可绕过。
+- doubleConfirm: 灰名单 critical 风险(reboot/shutdown/init)与 danger 预设必需。
+
+六、权限模型（四级分级）
+- read: 只读命令，自动放行，允许管道
+- safe: 低风险命令，自动放行
+- write: 写操作，需要确认（requireAdmin验证码）
+- danger: 高危命令，二次确认（doubleConfirm=true）
+- authCode: 授权码逃逸层，允许执行未知命令（需AST扫描通过）
+
+七、调用示例（源码对齐）
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」apt update「末」,
+hostId:「始」local「末」,
+isLongRunning:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+# 预设命令示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」preset:systemCheck?host=localhost「末」,
+hostId:「始」local「末」
+<<<[END_TOOL_REQUEST]>>>
+
+# 授权码执行示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」unknown-tool --args「末」,
+requireAdmin:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+
+八、版本变更记录
+- v1.0 (2026-03-03): 初始版本（5层安全架构）
+- v1.1 (2026-03-06):
+  - 安全层从5层扩展到7层（新增灰名单、安全分级）
+  - 补充 PresetExecutor、OutputFormatter 组件
+  - 权限模型为四级分级（read/safe/write/danger）
+- v1.2.0 (2026-07-22):
+  - pluginType 从 synchronous 升级为 hybridservice
+  - 安全层统一为8层单一顺序管线（名单驱动 + AST 语义基线）
+  - 硬护栏：禁止 ; & $() 且不可绕过
+  - 授权码逃逸机制（requireAdmin 验证码）
+  - doubleConfirm 二次确认机制
+  - LinuxShellExecutor.js 增长至 121553 字节 / 2838 行
+
+Tag: LinuxShellExecutor, LinuxShellExecutor.js, 8层安全架构, GraylistValidator, SecurityLevelValidator, PresetExecutor, OutputFormatter, hostId必填, discovery, isLongRunning, taskId, whitelist, ASTAnalyzer, sandbox, hybridservice, 授权码逃逸, doubleConfirm, TagMemo V9.1, 源码事实切片

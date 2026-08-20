@@ -1,0 +1,40 @@
+[2026-07-22] - 哈雷酱
+# SkillBridge｜SkillBridge｜启动时扫描技能 SKILL.md 生成可折叠技能目录索引
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/SkillBridge/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/SkillBridge/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+SkillBridge（v1.0.0）是一个 static 类型插件，启动时扫描 SkillBridge 下全部技能的 SKILL.md 前置描述，生成可折叠的技能目录索引，供系统提示词按需感知。通过 `{{VCPSkillBridge}}` 占位符将技能目录总览注入系统提示词。
+
+## 工作机制
+- 入口：`node SkillBridge.js`（Node.js，process_stdio 协议，timeout 30000ms）
+- 启动时扫描 SkillBridge 目录下所有技能的 SKILL.md 文件
+- 提取前置描述，生成可折叠的技能目录索引
+- 通过 `{{VCPSkillBridge}}` 系统提示词占位符注入
+- static 类型：启动时执行一次，结果持久化在系统提示词中
+
+## 使用/排障边界
+- 技能文件必须为 SKILL.md 格式
+- 插件仅在启动时扫描，运行期间新增技能需要重载插件
+- 占位符 `{{VCPSkillBridge}}` 需在系统提示词模板中引用
+- 无 configSchema 配置参数
+
+## 命令与参数
+本插件为 static 类型，不提供 invocationCommands 工具调用命令。
+
+## 配置参数（configSchema）
+manifest 中未定义 configSchema。
+
+## 调用示例
+系统提示词占位符：
+```
+{{VCPSkillBridge}}
+```
+
+关联节点：系统提示词模板（占位符消费者）
+Tag: SkillBridge, 技能目录, SKILL.md, 占位符, static, 1.0.0, TagMemo V9.1

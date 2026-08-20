@@ -1,0 +1,89 @@
+[2026-07-22] - 哈雷酱
+# 多智能体协作｜AgentAssistant 2.0｜即时通讯与异步委托协议
+
+状态：现行
+最后核验：2026-07-22
+适用范围：VCPToolBox 当前 `Plugin/AgentAssistant`，Manifest 2.0.0
+事实来源：
+- 源码：`Plugin/AgentAssistant/AgentAssistant.js:629-778`、`:974-1073`、`:1130-1179`
+- 配置/Manifest：`Plugin/AgentAssistant/plugin-manifest.json`
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- AgentAssistant 当前是 `hybridservice/direct` 插件，version 2.0.0，timeout 358000ms。
+- 唯一公开命令为 `AskMaidAgent`（commandIdentifier）。
+- 命令支持即时通讯、`timely_contact` 定时联络、`task_delegation` 异步委托、`query_delegation` 进度查询和单次 `inject_tools` 临时工具注入。
+- 异步委托通过 `[[TaskComplete]]`、`[[TaskFailed]]` 和 `[[NextHeartbeat::秒数]]` 控制完成、失败和下一次心跳。
+- 完成结果可写入归档文件，并向 `/plugin-callback/AgentAssistant/{delegationId}` 回调。
+- webSocketPush 已启用，messageType=plugin_callback_notification。
+
+## 命令与参数
+命令 `AskMaidAgent`，参数如下：
+- `agent_name`（必需，字符串）：要调用的 Agent 的准确名称
+- `prompt`（必需，字符串）：对该 Agent 提出的任务、问题或指令
+- `timely_contact`（可选，字符串）：设置未来时间点发送此通讯，格式 YYYY-MM-DD-HH:mm
+- `temporary_contact`（可选，布尔）：设为 true 时通讯不带历史上下文
+- `task_delegation`（可选，布尔）：设为 true 时启用异步委托模式
+- `query_delegation`（可选，字符串）：传入正在执行的 delegationId 查询进度
+- `inject_tools`（可选，字符串）：传入逗号分隔的工具名列表（如 VCPForum,ComfyUIGen），仅对本次联络/委托生效
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| AGENT_ASSISTANT_MAX_HISTORY_ROUNDS | integer | 最大历史对话轮次 |
+| AGENT_ASSISTANT_CONTEXT_TTL_HOURS | integer | 上下文存活时间（小时） |
+
+## 工作机制
+`AskMaidAgent` 参数 → 校验 Agent 与通讯模式 → 即时请求、定时任务或后台委托循环 → 解析完成/失败/延迟标记 → 返回文本结果、动态占位符或归档路径。
+
+异步模式会立即返回 `{{VCP_ASYNC_RESULT::AgentAssistant::{delegationId}}}` 占位符；运行中的任务保存在内存状态中，完成记录还可从 `VCPAsyncResults` 与 AgentTask 归档查询。
+
+## 调用示例
+即时通讯:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentAssistant「末」,
+agent_name:「始」小娜「末」,
+prompt:「始」小娜你好，我是主控AI小爱。莱恩先生希望了解近半年量子计算的关键突破。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+异步委托模式:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentAssistant「末」,
+agent_name:「始」小绝「末」,
+prompt:「始」请全面评估最新的开源大模型安全防护机制并写一篇1000字的评测。「末」,
+task_delegation:「始」true「末」,
+inject_tools:「始」VCPForum,ComfyUIGen「末」
+<<<[END_TOOL_REQUEST]>>>
+
+查询异步委托进度:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgentAssistant「末」,
+query_delegation:「始」aa-delegation-1718901234567-a1b2c3d4「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 使用/排障边界
+- 适合把明确任务交给已配置的 Agent，或查询异步委托进度。
+- 不适合把 `inject_tools` 当作永久修改 Agent 能力；它只对本次通讯有效。
+- 临时工具组会在 system 中明确标注，方便 Agent 区分长期能力与临时能力。
+- 若某工具缺少详细命令描述，将回退到该插件 manifest 的基础描述。
+- 常见错误包括 Agent 名称不存在、delegationId 无效、委托没有输出终态标记、配置的回调地址不可达。
+- 与 AgentMessage 的区别：AgentAssistant 管理 Agent 对话上下文与委托生命周期，不只是发送单条消息。
+
+## 历史与兼容性
+- Manifest 当前版本为 2.0.0；旧切片若只描述同步问答，未覆盖异步委托、查询和临时工具注入。
+- 标题中的 V2 是 Manifest 版本事实，不代表所有外部调用方已经迁移。
+
+## 待验证项
+- 尚未执行端到端委托、定时联络、回调和进程重启后的恢复测试。
+
+关联节点：AgentAssistant, AskMaidAgent, VCPAsyncResults, plugin-callback, webSocketPush
+Tag: AgentAssistant, AskMaidAgent, task_delegation, query_delegation, inject_tools, timely_contact, temporary_contact, TaskComplete, TaskFailed, NextHeartbeat, VCPAsyncResults, plugin-callback, hybridservice, 2.0.0, TagMemo V9.1, flowlockProtocol, 心流锁, 第12次上游合并
+
+十、2026-08-20 上游新增 flowlock 协议（commit 6c24fa4b）
+新增 `flowlockProtocol.js`（190 行）：AgentAssistant 直接调用心流锁（Flowlock）内核。
+- **Flowlock 标记解析**：`[[Flowlock::Start]]` / `[[Flowlock::Complete]]` / `[[Flowlock::Fail]]` / `[[Flowlock::Stop]]` / `[[Flowlock::NextHeartbeat::N]]` / `[[Flowlock::NextPrompt]]...[[/Flowlock::NextPrompt]]`
+- **保护区识别**：`<<<[TOOL_REQUEST]>>>...<<<[END_TOOL_REQUEST]>>>` 与 `[[VCP调用结果信息汇总...]]` 内的内容不被心流锁误判
+- **Legacy 兼容**：兼容 `[[TaskComplete]]` / `[[TaskFailed]]` / `[[NextHeartbeat::N]]` 旧标记
+- 默认心跳间隔 2 秒（DEFAULT_HEARTBEAT_DELAY_SECONDS）
+- 配套测试：tests/agentAssistantFlowlockProtocol.test.js（232 行）

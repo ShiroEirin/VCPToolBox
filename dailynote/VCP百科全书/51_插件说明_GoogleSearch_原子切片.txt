@@ -1,0 +1,42 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——GoogleSearch（原子切片）
+
+⚠️ 当前未找到plugin-manifest.json，Plugin目录中无GoogleSearch文件夹
+
+一、插件身份
+- name: `GoogleSearch`
+- displayName: `谷歌搜索 (API版)`
+- pluginType: `synchronous`（历史记录，当前未找到manifest确认）
+- command: `GoogleSearch`
+
+二、核心能力
+- 一个使用Google Custom Search API进行搜索的同步插件。
+- 提供可调用命令：GoogleSearch。
+
+三、命令与参数
+- `GoogleSearch`：执行Google搜索
+  - 搜索关键词通过 stdio JSON 传入
+  - 返回搜索结果列表，包含标题、URL和摘要
+
+四、占位符与注入点
+- systemPromptPlaceholders: 无
+
+五、排障建议
+- 插件无响应：确认Plugin目录中是否存在GoogleSearch文件夹及入口脚本。
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 若插件已迁移或重命名，请更新本切片。
+
+五、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」GoogleSearch「末」,
+command:「始」GoogleSearch「末」
+<<<[END_TOOL_REQUEST]>>>
+
+依赖Google Custom Search API的API Key和搜索引擎ID
+搜索结果包含标题、URL和内容摘要
+建议配合UrlFetch插件对搜索结果进行深入抓取
+
+
+搜索结果数量可通过参数控制，默认返回前10条
+
+Tag: GoogleSearch, synchronous, 同步调用, 检索, 信息获取, Google Custom Search, TagMemo V9.1

@@ -1,0 +1,90 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] Agenttaskmodules Agent任务系统 - 原子切片
+
+一、模块基本信息
+1. 模块名称：Agenttaskmodules
+2. 模块类型：VCPChat 前端功能模块
+3. 版本号：1.0.0
+4. 所属项目：VCPChat
+5. 源码路径：D:\github\VCP\VCPChat\Agenttaskmodules\
+6. 功能一句话总结：Agent 任务系统的前端模块，提供任务委托、Agent 配置、状态监控等可视化管理界面
+
+二、功能定位
+
+Agenttaskmodules 是 VCPChat 中 Agent 任务系统的独立窗口模块。它为用户提供 Agent Assistant 的可视化管理界面，包括 Agent 列表、全局设置、任务委托、状态监控等功能。通过 Electron IPC 与主进程通信，通过 VCP API 与后端交互。
+
+三、文件结构
+
+```
+Agenttaskmodules/
+├── task.html    (201行)  UI布局
+├── task.js      (1291行) 核心逻辑
+└── task.css     (1152行) 样式定义
+```
+
+四、核心逻辑 (task.js)
+
+1. API 通信 (行3)
+   - const api = window.utilityAPI || window.electronAPI
+   - 通过 Electron IPC 与主进程通信
+
+2. 全局状态 (行5-18)
+   - apiAuthHeader — API 认证头
+   - serverBaseUrl — 服务器地址
+   - agentsList — 本地 Agent 列表（用于头像）
+   - avatarCache / avatarPendingCache — 头像缓存
+   - currentAAConfig — 当前 AgentAssistant 配置
+   - currentFAConfig — 当前 FileAssistant 配置
+   - currentStatus — 完整状态对象
+   - currentDelegations — 委托任务 { active: [], recent: [] }
+   - delegationPollingTimer — 委托轮询定时器
+   - currentViewingDelegationId — 当前查看的委托 ID
+
+3. AgentAssistant 默认配置 (行20-29)
+   ```
+   AA_DEFAULT_CONFIG = {
+       maxHistoryRounds: 7,
+       contextTtlHours: 24,
+       delegationMaxRounds: 15,
+       delegationTimeout: 300000,
+       delegationSystemPrompt: '',
+       delegationHeartbeatPrompt: '',
+       globalSystemPrompt: '',
+       agents: []
+   }
+   ```
+
+五、UI 布局 (task.html)
+
+1. 窗口结构：
+   - 标题栏：VCP Task Assistant + 窗口控制按钮（设置/最小化/最大化/关闭）
+   - CSP 安全策略：default-src 'self'; 允许 img-src * data: file:; connect-src *
+
+2. 关键 DOM 元素（从 HTML 导出列表）：
+   - connection-status — 连接状态
+   - agent-view — Agent 视图
+   - aa-global-settings — AgentAssistant 全局设置
+   - agent-list-container — Agent 列表容器
+   - task-view — 任务视图
+   - fa-status-dashboard — FileAssistant 状态仪表板
+   - delegation-summary — 委托摘要
+   - active-delegations-container — 活跃委托容器
+   - recent-delegations-container — 最近委托容器
+   - task-list-container — 任务列表容器
+
+六、样式系统 (task.css)
+
+1. 主题变量：
+   - 暗色主题：--glass-bg, --glass-border, --glass-shine, --text-primary, --text-secondary, --accent-color, --danger-color
+   - 亮色主题：body.light-theme 覆盖
+   - 引用 themes.css 中的全局变量作为 fallback
+
+2. 全局过渡：* { transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
+
+七、与后端的关系
+
+- 通过 VCP API 调用后端 AgentAssistant 插件
+- 委托任务通过 /admin_api/agent-assistant/ 系列端点交互
+- 积分排行榜参考 AdminPanel-Vue 中的 agent-scores
+
+Tag: Agenttaskmodules, Agent任务系统, task.js, AgentAssistant, 委托任务, VCPChat, Electron IPC, 积分排行榜

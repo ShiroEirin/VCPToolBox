@@ -1,0 +1,42 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——PyScreenshot（原子切片）
+
+⚠️ 当前未找到plugin-manifest.json，Plugin目录中无PyScreenshot文件夹
+
+一、插件身份
+- name: `PyScreenshot`
+- displayName: `Python截图插件`
+- pluginType: `synchronous`（历史记录，当前未找到manifest确认）
+- command: `TakeScreenshot`
+
+二、三种模式
+- `full_analysis`：截图 + 视觉模型分析 + 回传
+- `direct_to_ai`：截图直接交给对话模型
+- `capture_only`：仅截图本地保存，不上传AI（隐私优先）
+
+三、核心价值
+- 让Agent具备"看屏幕"能力，并可把结果变成结构化可读信息。
+- 支持保存本地路径与可分享URL，减少巨量Base64回传压力。
+- 三种模式灵活适配不同场景：分析、直传、隐私。
+
+四、安全重点
+- 默认需强提醒：截图可能含敏感信息。
+- 高隐私场景必须使用 `capture_only`。
+- 外部视觉API配置错误会导致分析失败，但截图功能可独立工作。
+
+五、排障建议
+- 插件无响应：确认Plugin目录中是否存在PyScreenshot文件夹及入口脚本。
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件。
+- 若插件已迁移或重命名，请更新本切片。
+
+六、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PyScreenshot「末」,
+command:「始」TakeScreenshot「末」
+<<<[END_TOOL_REQUEST]>>>
+
+截图保存路径可配置，支持本地与分布式服务器URL两种回传方式
+direct_to_ai 模式下截图直接作为多模态输入传给对话模型
+隐私场景推荐 capture_only，截图不上传任何外部API
+
+Tag: PyScreenshot, TakeScreenshot, full_analysis, direct_to_ai, capture_only, 屏幕截图, 视觉分析, 隐私模式, 本地保存, 多模态输入, TagMemo V9.1

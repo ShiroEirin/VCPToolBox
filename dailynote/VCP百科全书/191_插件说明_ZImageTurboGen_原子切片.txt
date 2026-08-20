@@ -1,0 +1,78 @@
+[2026-07-22] - 哈雷酱
+# AI绘图｜ZImageTurboGen｜Gitee 接口文生图/修图/多图合成
+
+状态：已验证
+最后核验：2026-07-22
+适用范围：`Plugin/ZImageTurboGen` 当前源码；Manifest 版本 1.0.0
+事实来源：
+- Manifest：`Plugin/ZImageTurboGen/plugin-manifest.json`
+- 源码：`Plugin/ZImageTurboGen/ZImageTurboGen.mjs`
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- Manifest 声明版本 1.0.0、pluginType=synchronous、protocol=stdio。
+- 入口命令 `node ZImageTurboGen.mjs`，通信超时 180000ms（3分钟）。
+- 调用 Gitee 图像接口进行文生图、修图和多图合成，每日免费 100 点算力额度。
+- 命令 GenerateImage（统一生图/修图/多图合成），支持 command 参数为 generate/edit/compose。
+- 无图片时文生图；提供 image/image_url 等字段时自动进入修图或多图合成。
+- 支持中文和英文自然语言提示词。
+
+## 命令与参数
+命令 `GenerateImage`，参数如下：
+- `command`（必需，字符串）：`generate`（文生图）、`edit`（修图）、`compose`（多图合成）
+- `prompt`（必需，字符串）：用于图片生成、修改或合成的详细提示词，支持中文或英文
+- `size`（可选，字符串）：文生图支持 1k/2k 常见宽高，系统自动匹配最接近的支持比例；修图/合成可写 2K 或 2048x2048
+- `image`（修图/合成时必需）：单图 URL/base64/data URI，或图片数组
+- `negative_prompt`（可选，字符串）：负面提示词
+- `num_inference_steps`（可选，整数）：推理步数；文生图范围 4-25，默认 9；修图/合成默认 4
+- `seed`（可选，整数）：随机种子，默认 0
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| ZIMAGE_API_KEY | string | 可选，留空则使用内置体验密钥 |
+| HTTP_PROXY | string | 可选，网络代理地址，如 http://127.0.0.1:7890 |
+| USE_PUBLIC_URL | string | 可选，是否使用公网地址返回图片URL。true 使用 VarHttpsUrl，false 使用 VarHttpUrl（局域网），默认 false |
+
+## 工作机制
+PluginManager 加载 → stdio 通信 → 解析 command 参数（generate/edit/compose）→ 调用 Gitee 图像 API → 返回图片 URL → 以 Markdown 或 HTML img 标签展示。
+
+## 使用/排障边界
+- 文生图支持 1k/2k 常见宽高，系统自动匹配最接近的支持比例。
+- 修图/合成可写 2K 或 2048x2048。
+- 推理步数：文生图范围 4-25，默认 9；修图/合成默认 4。
+- 局域网图床 URL 会先由服务器本机下载并转成文件字段提交。
+- 每日免费 100 点算力额度，超额需自备 API Key。
+
+## 调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ZImageTurboGen「末」,
+command:「始」generate「末」,
+prompt:「始」一张虚构的电影海报，温暖柔和的灯光「末」,
+size:「始」2048x2048「末」,
+negative_prompt:「始」模糊, 低质量, 变形「末」,
+num_inference_steps:「始」9「末」,
+seed:「始」0「末」
+<<<[END_TOOL_REQUEST]>>>
+
+修图示例:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ZImageTurboGen「末」,
+command:「始」edit「末」,
+prompt:「始」把图片改成雨夜霓虹风格「末」,
+size:「始」2048x2048「末」,
+image:「始」https://example.com/input.png「末」,
+num_inference_steps:「始」4「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 历史与兼容性
+- 当前版本 1.0.0，为初始发布版本。
+- 依赖 Gitee 图像接口服务。
+
+## 待验证项
+- Gitee API 调用和图片返回端到端流程。
+- 修图和多图合成模式的实际效果。
+
+关联节点：Gitee, Z-Image-Turbo
+Tag: ZImageTurboGen, ZImageTurboGen.mjs, synchronous, 文生图, 修图, 多图合成, Gitee, GenerateImage, AI绘图, ZIMAGE_API_KEY, HTTP_PROXY, USE_PUBLIC_URL, 1.0.0, TagMemo V9.1

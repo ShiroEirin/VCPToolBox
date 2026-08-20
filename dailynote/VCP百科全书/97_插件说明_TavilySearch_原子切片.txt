@@ -1,0 +1,65 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——TavilySearch（原子切片）
+版本：0.1.0 | pluginType: synchronous | protocol: stdio | timeout: 30000ms
+
+一、插件身份
+- name: `TavilySearch`
+- displayName: `Tavily 搜索插件`
+- version: `0.1.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `30000`
+- author: `Roo`
+- 入口: `node TavilySearch.js`（Node.js）
+- command: `TavilySearch`
+
+二、核心能力
+- 使用 Tavily API 进行高级网络搜索。AI可以指定搜索查询、主题、最大结果数，并可选择包含原始内容、图片链接及描述，以及设定搜索时间范围。支持使用 || 分隔多个关键词进行并发搜索。
+- 提供可调用命令：TavilySearch。
+
+三、命令与参数
+命令 `TavilySearch`，参数如下：
+- `query`（必需，字符串）：搜索的关键词或问题，支持使用 || 分隔多个关键词进行并发搜索
+- `search_depth`（可选，字符串，默认 'basic'）：搜索深度。可选值：'ultra-fast'（不太准但最快）、'fast'（快速搜索）、'basic'（兼顾速度与准确度）、'advanced'（高精度查找）
+- `topic`（可选，字符串，默认 'general'）：搜索主题。可选值：'general'、'news'、'finance'
+- `max_results`（可选，数字，默认 10）：返回的最大结果数量，范围 0-20
+- `include_raw_content`（可选，字符串）：如需获取网页原始内容，设为 'markdown' 或 'text'
+- `country`（可选，字符串）：仅在 topic 为 'general' 时可用，使用小写英文名如 'china'
+- `time_range`（可选，字符串）：指定周期搜索最近结果，可选 day/week/month/year。与 start_date/end_date 互斥
+- `start_date`（可选，字符串）：搜索开始日期，格式 YYYY-MM-DD
+- `end_date`（可选，字符串）：搜索结束日期，格式 YYYY-MM-DD
+
+四、配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| TavilyKey | string | Tavily API Key |
+
+五、占位符与注入点
+- systemPromptPlaceholders: 无
+
+六、使用/排障边界
+- 优先使用中文词作为检索词，并带上即时信息（如当前年份、月份等）进行检索
+- time_range 与 start_date/end_date 互斥，设置了日期范围时 time_range 会被忽略
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+
+七、调用示例
+基础搜索:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」TavilySearch「末」,
+command:「始」TavilySearch「末」,
+query:「始」machine learning latest research「末」
+<<<[END_TOOL_REQUEST]>>>
+
+高级搜索（包含原始内容和图片）:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」TavilySearch「末」,
+command:「始」TavilySearch「末」,
+query:「始」artificial intelligence trends「末」,
+search_depth:「始」advanced「末」,
+topic:「始」general「末」,
+max_results:「始」10「末」,
+include_raw_content:「始」markdown「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: TavilySearch, synchronous, 同步调用, 检索, 信息获取, search_depth, topic, max_results, include_raw_content, time_range, start_date, end_date, TavilyKey, TagMemo V9.1

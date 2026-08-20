@@ -1,0 +1,44 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] DailyNote v3：常驻写入与索引协调（现行源码切片）
+
+状态：CURRENT_VERIFIED（静态源码/Manifest；无运行时验证）
+最后核验：2026-07-22
+适用范围：VCPToolBox main 分支当前 Plugin/DailyNote
+证据等级：SOURCE_BODY + MANIFEST_SCHEMA
+
+一、身份与协议
+- Manifest：Plugin/DailyNote/plugin-manifest.json:4-15，version=3.0.0，pluginType=hybridservice，protocol=direct，timeout=1800000ms（30 分钟）。
+- displayName：日记系统 (常驻队列服务)。
+- description：常驻内存的日记创建与更新服务。所有文件变更通过单一 FIFO 队列执行，并与 KnowledgeBaseManager 的 SQLite/Rust 索引队列协调，避免多 Agent 并发写入和回忆时产生数据库竞争。
+- 入口脚本：dailynote.js（entryPoint.type=nodejs）。
+- author: Roo。
+
+二、命令与参数（Manifest 声明）
+
+1. create（创建日记）
+- 参数：maid（必需, string, 支持[文件夹]署名格式）、folder（可选, string, 优先使用）、Date（必需, string, YYYY-MM-DD）、fileName（可选, string, 文件名后缀）、Content（必需, string, 最后一行须为Tag:行）、Tag（可选, string, 覆盖Content中的Tag行）。
+- 支持三种调用方式：folder指定目录、标签在Content末尾、独立Tag字段。
+
+2. update（更新日记）
+- 参数：maid（可选, string）、folder（可选, string, 优先搜索目录）、target（必需, string, 至少15个字符）、replace（必需, string）。
+- 安全性检查：target 字段长度不能少于15字符。
+
+三、写入与索引协调
+- dailynote.js:46 定义进程内 residentQueue Promise 链。
+- dailynote.js:1602-1611 在 KnowledgeBaseManager 提供 runExternalFileMutation 时委托外部文件变更，并传递 waitForIndex:false。
+- dailynote.js:1615-1621 通过 residentQueue.then(execute) 串行化 create/update；错误通过 catch 保持队列可继续。
+- waitForIndex:false 的当前返回语义：文件落盘后返回，索引状态可为 queued（dailynote.js:709-717、1468）。索引后台完成的完整 KBM/Rust 实现不在本条目内展开。
+
+四、返回结构
+- create 成功：{status:"success", result:{message, folder, fileName, indexStatus}}（dailynote.js:709-717）。
+- 失败：{status:"error", error}（dailynote.js:720）；部分错误可附 code/fuzzyDiff。
+- update 成功返回结构见 dailynote.js:1460-1470；CLI JSON.stringify 输出见 :1692-1693。
+
+五、配置
+- configSchema: DebugMode (boolean)
+
+历史来源：30_插件说明_DailyNote_原子切片.txt（旧版 synchronous/stdio、2.0.0 描述）。
+待验证边界：未运行插件；KBM SQLite/Rust 索引队列、生产可达性、并发故障表现需运行日志/受控调用验证。
+未写入内容清单：未把 DailyNoteWrite 当作现行实体；未断言索引已完成；未补写未读参数组合。
+关联节点：DailyNote、KnowledgeBaseManager、databaseCoordinator、DailyNoteWrite 技术债。
+Tag: DailyNote, v3.0.0, hybridservice, direct, residentQueue, Promise串行化, create, update, waitForIndex, indexStatus, KnowledgeBaseManager, 现行切片

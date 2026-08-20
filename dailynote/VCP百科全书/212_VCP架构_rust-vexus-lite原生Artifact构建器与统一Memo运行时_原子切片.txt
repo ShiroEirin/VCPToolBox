@@ -59,4 +59,10 @@ VexusIndex 不再只是向量索引，现在承载完整的 Memo 运行时：
 | Linux ARM64 | 不存在 | 3,754,240 | **新增** |
 
 关联节点：rust-vexus-lite记忆管线(209), RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), TagMemoEngine统一构型(198)
-Tag: memo_artifact_builder, VexusIndex, MemoRuntime, 统一运行时, NativeArtifact, CSR, provenance, gzip-json, sha2, rayon, N-API, ARM64, TagMemo V9.1, 2026-07-24
+Tag: memo_artifact_builder, VexusIndex, MemoRuntime, 统一运行时, NativeArtifact, CSR, provenance, gzip-json, sha2, rayon, N-API, ARM64, TagMemo V9.1, 2026-07-24, 第12次上游合并
+
+## 2026-08-20 上游修复（rust-vexus-lite/src/lib.rs +171/-26）
+- **Windows FlushFileBuffers 只读句柄修复**：Windows 的 FlushFileBuffers 要求句柄具备写权限，只读句柄即使文件可读也会返回 ERROR_ACCESS_DENIED；usearch 完成临时文件写入后，此处重新打开同一文件执行持久化屏障（不修改内容）。
+- **normalized_sqlite_path 路径规范化**：`std::fs::canonicalize` 规范化 SQLite 路径，失败时 fallback 原始路径，统一替换反斜杠为正斜杠。
+- 新增 `std::sync::{Arc, LazyLock, Mutex, RwLock}` 并发原语支持。
+- 本次未重新编译 .node 二进制（上游源码变更，发布版二进制由上游更新）。

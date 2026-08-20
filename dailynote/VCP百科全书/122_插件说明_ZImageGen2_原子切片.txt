@@ -1,0 +1,65 @@
+[2026-07-22] - 哈雷酱
+⚠️ 本文件编号与插件实现类文件冲突（同编号不同前缀），需注意区分
+[VCP百科全书] 插件说明——ZImageGen2（原子切片）
+⚠️ 当前以 plugin-manifest.json.block 禁用态存在，以下信息基于 .block manifest
+版本：1.1.0 | pluginType: synchronous | protocol: stdio | timeout: 45000ms
+
+一、插件身份
+- name: `ZImageGen2`
+- displayName: `Z-Image Base 文生图`
+- version: `1.1.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `45000`
+- author: `VCP Team`
+- 入口: `node ZImageGen.mjs`（Node.js）
+- command: `ZImageGenerate`
+
+二、核心能力
+- 通过 Hugging Face Spaces API 使用 Z-Image-Base 模型生成高质量图片。支持中英文提示词，28步推理，支持负向提示词和CFG调节。
+- 提供可调用命令：ZImageGenerate。
+
+三、命令与参数
+命令 `ZImageGenerate`，参数如下：
+- `prompt`（必需，字符串）：用于图片生成的详细提示词，支持中文或英文
+- `negative_prompt`（可选，字符串）：负向提示词，描述不希望在图片中出现的内容
+- `resolution`（可选，字符串，默认1024x1024）：图片分辨率。可选值：1024x1024、1280x720、720x1280、1152x864、864x1152等，或使用比例如16:9、9:16、square、landscape、portrait
+- `steps`（可选，数字，默认28）：推理步数
+- `cfg`（可选，数字，默认4）：引导比例(CFG)
+- `cfg_normalization`（可选，布尔，默认false）：是否开启CFG归一化
+- `showbase64`（可选，布尔，默认false）：是否在返回结果中包含base64图片数据供AI查看
+- `seed`（可选，整数）：随机种子，省略则使用随机种子
+
+四、配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| HF_TOKEN | string | 可选，用于私有Space或更高速率限制 |
+
+五、占位符与注入点
+- systemPromptPlaceholders: 无
+
+六、使用/排障边界
+- 当前为 .block 禁用态，不会被 PluginManager 加载
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+- 注意：manifest 注册名为 ZImageGen2，但 tool_name 在调用中使用 ZImageGen
+
+七、调用示例
+基础生成:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ZImageGen「末」,
+command:「始」ZImageGenerate「末」,
+prompt:「始」a beautiful landscape painting「末」
+<<<[END_TOOL_REQUEST]>>>
+
+高级参数（包含负向提示词和 CFG 调节）:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ZImageGen「末」,
+command:「始」ZImageGenerate「末」,
+prompt:「始」a beautiful landscape painting with mountains and rivers「末」,
+negative_prompt:「始」blurry, low quality「末」,
+cfg:「始」7.5「末」,
+steps:「始」28「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: ZImageGen2, ZImageGen, synchronous, 同步调用, 多媒体, ZImageGenerate, HuggingFace, Z-Image-Base, HF_TOKEN, resolution, cfg, cfg_normalization, 1.1.0, .block禁用态, TagMemo V9.1

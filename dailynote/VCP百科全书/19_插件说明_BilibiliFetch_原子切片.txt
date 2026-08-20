@@ -1,0 +1,71 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——BilibiliFetch（原子切片）
+版本：2.1.0 | pluginType: synchronous | protocol: stdio | timeout: 60000ms
+
+一、插件身份
+- name: `BilibiliFetch`
+- displayName: `Bilibili 内容获取插件`
+- version: `2.1.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `60000`
+- author: `Bocchi777`
+- 入口: `python BilibiliFetch.py`（Python）
+- 通讯协议: `stdio`
+
+二、命令与参数
+命令 `BilibiliFetch`，参数如下：
+- `url`（必需，字符串）：Bilibili视频URL，支持完整链接、BV号、b23.tv短链接。多P视频URL中的 ?p=N 自动识别
+- `lang`（可选，字符串）：字幕语言代码，如 'ai-zh'、'ai-en'、'zh-CN'
+- `danmaku_num`（可选，数字，默认0）：获取热门弹幕数量
+- `comment_num`（可选，数字，默认0）：获取热门评论数量（按点赞排序）
+- `snapshots`（可选，字符串）：截取快照时间点（秒），逗号分隔，如 '10,60,120'
+- `hd_snapshot`（可选，布尔，默认false）：是否启用HD高清截图模式
+- `need_subs`（可选，布尔，默认true）：是否获取字幕内容
+- `need_pbp`（可选，布尔，默认true）：是否获取高能进度条数据
+
+命令 `BilibiliSearch`，参数如下：
+- `action`（必需，字符串）：固定为 'search'
+- `keyword`（必需，字符串）：搜索关键词
+- `search_type`（可选，字符串，默认 'video'）：'video' 或 'bili_user'
+- `page`（可选，数字，默认1）：搜索结果页码
+
+命令 `GetUpVideos`，参数如下：
+- `action`（必需，字符串）：固定为 'get_up_videos'
+- `mid`（必需，字符串）：目标UP主的用户ID (MID)
+- `pn`（可选，数字，默认1）：页码
+- `ps`（可选，数字，默认30）：每页返回数量，最大50
+
+三、核心能力
+- 视频信息抓取（字幕/弹幕/评论/高能进度条/快照截图/HD高清抽帧）
+- 关键词搜索（视频/UP主）
+- UP主投稿列表获取
+- 支持长链接、b23.tv短链接和多P分P视频
+- 字幕多源降级策略：CC字幕 > WBI Player API > AI Summary API
+- HD高清截图基于ffmpeg从视频流直接抽帧，失败降级到雪碧图裁切
+
+四、配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| BILIBILI_COOKIE | string | Bilibili Cookie，用于获取需要登录的内容 |
+
+五、增强点
+- 支持b23短链解析与分P识别
+- 字幕多源降级策略，提高可用率
+- 支持时间点快照（HD抽帧优先，失败降级雪碧图裁切）
+
+六、使用/排障边界
+- 返回中可能含HTML `<img>` 标签，渲染端需原样展示
+- 大批量抓取需控制频率，避免接口限流
+- HD高清截图需要ffmpeg环境
+- ffmpeg可用性影响HD截图质量与成功率
+
+七、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」BilibiliFetch「末」,
+url:「始」https://www.bilibili.com/video/BV1xx411c7mD「末」,
+need_subs:「始」true「末」,
+danmaku_num:「始」20「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: BilibiliFetch, BilibiliSearch, GetUpVideos, b23短链, 分P解析, 字幕提取, 弹幕热度, 视频快照, ffmpeg抽帧, HD截图, HTML图片渲染, synchronous, stdio, v2.1.0, BILIBILI_COOKIE, TagMemo V9.1

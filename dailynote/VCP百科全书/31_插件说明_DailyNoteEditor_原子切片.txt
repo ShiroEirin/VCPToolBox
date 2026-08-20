@@ -1,0 +1,42 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——DailyNoteEditor（原子切片）
+
+版本：1.0.0 | pluginType: placeholder | enabled: false
+
+一、插件身份
+- name: DailyNoteEditor
+- displayName: DailyNoteEditor
+- version: 1.0.0
+- pluginType: placeholder
+- enabled: false
+- entry: main.py（runtime: python）
+- author: VCP Team
+- command: 无（自动触发）
+
+二、核心能力
+- description（manifest）："占位插件，待开发"。
+- enabled 为 false，当前未启用。
+- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- config: {}（空对象，无配置项）
+
+三、占位符与注入点
+- systemPromptPlaceholders: 无（placeholder 类型，无占位符）
+
+四、配置参数
+- config: {}（空对象，无配置项定义）
+- 无 configSchema 声明。
+
+五、调用示例
+触发示例：该目录为占位插件，待开发。enabled 为 false，当前无法触发。
+- 需将 enabled 改为 true 并补充实现代码后才能使用。
+- placeholder 类型插件不提供命令调用，仅作为目录占位。
+
+六、排障建议
+- 插件无响应：检查 enabled 字段（当前为 false，插件未启用）。
+- 占位插件：该插件仅为目录占位，无实际功能实现。
+- 如需日记编辑功能，建议检查 DailyNote（create/update）或 DailyNoteManager（list/organize/associate）。
+
+七、manifest路径
+- Plugin/DailyNoteEditor/plugin-manifest.json（存在但 enabled=false）
+
+Tag: DailyNoteEditor, placeholder, 目录占位, 记忆管理, v1.0.0, enabled=false, python, TagMemo V9.1

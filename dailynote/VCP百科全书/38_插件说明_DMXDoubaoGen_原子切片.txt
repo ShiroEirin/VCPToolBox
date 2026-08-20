@@ -1,0 +1,57 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——DMXDoubaoGen（原子切片）
+
+一、插件身份
+- name: `DMXDoubaoGen`
+- displayName: `Doubao 风格图片生成器`
+- version: `0.2.0`
+- pluginType: `synchronous`
+- author: `B3000Kcn`
+- entryPoint: `node DoubaoGen.js`（nodejs）
+- protocol: `stdio`
+- command: `DoubaoGenerateImage`, `DoubaoEditImage`, `DoubaoComposeImage`
+
+二、核心能力
+- 通过 DMXAPI 使用其提供的模型（如 doubao-seedream-4-0-250828）生成和编辑图片。
+- 提供可调用命令：DoubaoGenerateImage（文生图）、DoubaoEditImage（图生图/修图）、DoubaoComposeImage（多图融合/对话）。
+
+三、命令与参数
+1. `DoubaoGenerateImage`：文生图
+   - prompt (字符串, 必需): 用于图片生成的详细提示词
+   - resolution (字符串, 必需): 图片分辨率，如 1024x1024、864x1152、1152x864、1280x720、720x1280
+   - seed (整数, 可选): 随机种子
+2. `DoubaoEditImage`：图生图/修图
+   - prompt (字符串, 必需): 用于指导图片修改的详细提示词
+   - image (字符串, 必需): 图片来源（https URL 或 file:/// 本地路径）
+   - resolution (字符串, 必需): 图片分辨率，可设为 adaptive
+   - seed (整数, 可选), guidance_scale (可选, 范围0-10): 控制与原图相似度
+3. `DoubaoComposeImage`：多图融合/对话
+   - prompt (字符串, 必需): 用于指导图片融合或对话的详细提示词
+   - image_1 (字符串, 必需): 第1张图片来源
+   - image_2..N (字符串, 可选): 第2~N张图片来源
+   - resolution (字符串, 必需): 图片分辨率，可设为 adaptive
+   - seed (整数, 可选), guidance_scale (可选, 范围0-10)
+
+四、配置参数（configSchema）
+- `VOLCENGINE_API_KEY` (string): 火山引擎API密钥
+
+五、调用示例
+文生图：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DoubaoGen「末」,
+command:「始」DoubaoGenerateImage「末」,
+prompt:「始」科技感的店铺门口，店铺名称是DMXAPI「末」,
+resolution:「始」1024x1024「末」
+<<<[END_TOOL_REQUEST]>>>
+
+图生图：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DoubaoGen「末」,
+command:「始」DoubaoEditImage「末」,
+prompt:「始」给这个女孩戴上墨镜「末」,
+image:「始」https://www.dmxapi.cn/images/i2i_demo.png「末」,
+resolution:「始」adaptive「末」,
+guidance_scale:「始」5.5「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: DMXDoubaoGen, DoubaoGen, synchronous, DoubaoGenerateImage, DoubaoEditImage, DoubaoComposeImage, doubao-seedream-4-0-250828, VOLCENGINE_API_KEY, DMXAPI, TagMemo V9.1

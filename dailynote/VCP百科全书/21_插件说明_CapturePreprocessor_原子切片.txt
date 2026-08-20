@@ -1,0 +1,40 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——CapturePreprocessor（原子切片）
+
+一、插件身份
+- name: `CapturePreprocessor`
+- displayName: `捕获预处理器`
+- version: `1.0.0`
+- pluginType: `messagePreprocessor`
+- author: `VCPToolBox`
+- entryPoint: `CapturePreprocessor.js`（nodejs, script模式）
+- protocol: `direct`
+- command: 无（自动触发）
+
+二、核心能力
+- 预消息处理器: 检测 {{VCPScreenShot}}, {{VCPScreenShotMini}}, {{VCPScreenShot:窗口标题}}, {{VCPScreenShotMini:窗口标题}}, {{VCPScreenShot:28182346}}, {{VCPScreenShot:[很长的标题带空格和标点]}} 和 {{VCPCameraCapture(N)}} 占位符。
+- 通过 /v1/human/tool 透明调用分布式 ScreenPilot 获取截图，注入为即时视觉上下文。
+- 冒号后的纯数字目标会按 hwnd 精确窗口句柄截图，方括号目标用于兼容带空格、冒号、逗号等标点的长窗口标题。
+- invocationCommands: 无（messagePreprocessor类型）
+
+三、配置参数（configSchema）
+- `MONITOR_TIMEOUT_MS` (string, default=`30000`): 调用分布式 ScreenPilot 的超时时间（毫秒）
+
+五、支持的占位符格式
+- `{{VCPScreenShot}}`：全屏截图
+- `{{VCPScreenShotMini}}`：全屏截图（精简版）
+- `{{VCPScreenShot:窗口标题}}`：按窗口标题截图
+- `{{VCPScreenShotMini:窗口标题}}`：按窗口标题截图（精简版）
+- `{{VCPScreenShot:28182346}}`：按 hwnd 窗口句柄截图
+- `{{VCPScreenShot:[带空格和标点的长标题]}}`：兼容复杂窗口标题
+- `{{VCPCameraCapture(N)}}`：摄像头截图，N为帧编号
+
+六、排障建议
+- 截图未注入：确认 ScreenPilot 分布式节点在线且可调用。
+- 超时失败：增大 MONITOR_TIMEOUT_MS 配置值。
+- 窗口标题匹配失败：确认窗口标题格式，尝试使用 hwnd 数字方式。
+
+五、调用示例
+触发示例：发送原始消息后由消息预处理插件先改写，再进入主模型。
+
+Tag: CapturePreprocessor, messagePreprocessor, 消息预处理, VCPScreenShot, VCPScreenShotMini, VCPCameraCapture, ScreenPilot, MONITOR_TIMEOUT_MS, direct, v1.0.0, TagMemo V9.1

@@ -1,0 +1,104 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——PaperReader（原子切片）
+⚠️ 当前以 plugin-manifest.json.block 禁用态存在，以下信息基于 .block manifest
+版本：0.6.0 | pluginType: synchronous | protocol: stdio | timeout: 1800000ms
+
+一、插件身份
+- name: `PaperReader`
+- displayName: `超文本递归阅读器`
+- version: `0.6.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `1800000`
+- author: `VCP`
+- 入口: `bin\paperreader-cli.exe`（executable 类型，Rust stdio closeout build）
+- 目标：把超长PDF/技术文档转成可递归阅读与问答流程
+
+二、核心命令
+VCP Legacy 别名命令：
+- `IngestPDF`：PDF解析、转Markdown、分块（legacy alias for ingest_source）
+- `Read`：推荐默认阅读入口（legacy alias for read_document mode=auto）
+- `ReadSkeleton`：生成文档骨架与全局地图（legacy alias for read_document mode=survey_only）
+- `ReadDeep`：滚动上下文递归摘要（legacy alias for read_document mode=deep_focus）
+- `Query`：检索式问答（legacy alias for retrieve_evidence）
+
+Canonical 命令（0.6.0新增）：
+- `bootstrap_workspace`：创建或验证 Rust workspace
+- `describe_runtime`：返回支持的命令和能力
+- `get_health_snapshot`：返回运行时健康快照
+- `ingest_source`：标准化单源摄入入口
+- `ingest_collection`：多源集合摄入
+- `refresh_ingestion`：重新摄入已有文档
+- `read_document`：标准化文档阅读入口（mode: auto/survey_only/deep_focus/recursive）
+- `resume_read`：从持久化阅读状态恢复
+- `audit_document`：生成审计报告
+- `trace_claim_in_document`：追踪文档中的声明
+- `survey_collection`：持久化集合清单
+- `synthesize_collection`：集合合成入口
+- `compare_documents`：构建文档比较表
+- `audit_collection_conflicts`：审计集合冲突
+- `retrieve_evidence`：检索排序证据
+- `build_evidence_pack`：构建持久化证据包
+- `plan_research`：创建研究图
+- `run_research_graph`：执行研究运行
+- `resume_research_graph`：从检查点恢复研究运行
+- `stream_run_events`：读取运行事件
+- `get_run_state`：运行状态轮询
+- `cancel_run`：中止运行
+- `get_workspace_state`：返回 workspace 状态
+- `list_artifacts`：列出工件
+- `get_artifact`：加载单个工件
+- `reset_run`：重置运行状态
+
+三、配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| MINERU_API_TOKEN | string | (空) | MinerU云端API Token，不填则降级到pdf-parse |
+| MINERU_API_TIMEOUT | integer | 300000 | MinerU轮询超时（ms） |
+| MINERU_POLL_INTERVAL | integer | 5000 | MinerU轮询间隔（ms） |
+| PaperReaderChunkSize | integer | 2000 | 目标chunk大小（tokens） |
+| PaperReaderOverlap | number | 0.15 | chunk重叠比例 |
+| PaperReaderModel | string | (空) | 用于阅读/总结的模型名称 |
+| PaperReaderMaxOutputTokens | integer | 12000 | 单次模型输出上限 |
+| PaperReaderBatchSize | integer | 5 | Deep阅读分批处理的chunk数 |
+| PaperReaderMaxConcurrentLLM | integer | 5 | 进程级LLM最大并发请求数 |
+| PaperReaderMaxConcurrentNodes | integer | 3 | 研究图节点级最大并发数 |
+| PaperReaderMaxChunks | integer | 120 | 单次阅读最多处理的chunk数 |
+| PaperReaderMaxAuditChunks | integer | 8 | 审核抽样最大chunk数 |
+| PaperReaderRecursiveGroupSize | integer | 8 | 递归全局地图分组大小 |
+| PaperReaderRecursiveMaxLevels | integer | 6 | 递归地图最多reduce层级 |
+| PaperReaderRecursiveCritic | boolean | false | 是否启用递归地图critic代理 |
+| PaperReaderRollingContextMaxEntries | integer | 40 | 滚动上下文最大segment条数 |
+| PaperReaderRollingContextMaxChars | integer | 12000 | 滚动上下文最大字符数 |
+
+四、典型场景
+- 论文精读、法律文书梳理、技术白皮书拆解、长文档问答、多文档对比与冲突审计。
+
+五、使用/排障边界
+- 当前为 .block 禁用态，不会被 PluginManager 加载
+- L0 解析优先MinerU，失败降级pdf-parse
+- 入口为 Rust 编译的可执行文件，非 Node.js 脚本
+- 配置项丰富，关注 PaperReaderMaxChunks 防止成本失控
+
+六、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PaperReader「末」,
+command:「始」IngestPDF「末」,
+filePath:「始」D:\papers\transformer.pdf「末」
+<<<[END_TOOL_REQUEST]>>>
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PaperReader「末」,
+command:「始」Query「末」,
+paperId:「始」transformer「末」,
+question:「始」这篇论文的核心创新点是什么？「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: PaperReader, IngestPDF, Read, ReadSkeleton, ReadDeep, Query, 递归阅读, 长文档解析, MinerU, pdf-parse, 章节切分, RollingContext, 0.6.0, .block禁用态, research_graph, evidence_pack, TagMemo V9.1, MinerU布局保留, split_pdf, 第12次上游合并
+
+十、2026-08-20 上游增强（commit 01c740fd）
+**保留 MinerU 布局并支持超页 PDF**：
+- 新增 `paperreader-rs/crates/paperreader-ingestion/src/mineru_layout_json.rs`（319 行）：MinerU 布局 JSON 解析
+- 新增 `split_pdf.rs`（480 行）：超页 PDF 拆分支持
+- `http_gateway.rs`（+147/-13）：HTTP 网关增强
+- paperreader-cli.exe 二进制更新（13.6MB → 14.3MB）

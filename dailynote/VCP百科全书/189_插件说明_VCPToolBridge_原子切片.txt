@@ -1,0 +1,39 @@
+[2026-07-22] - 哈雷酱
+# 工具桥接｜VCPToolBridge｜VCP 原生工具导出桥接器
+
+状态：已验证
+最后核验：2026-07-22
+适用范围：`Plugin/VCPToolBridge` 当前源码；Manifest 版本 1.0.0
+事实来源：
+- Manifest：`Plugin/VCPToolBridge/plugin-manifest.json`
+- 源码：`Plugin/VCPToolBridge/index.js`
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- Manifest 声明版本 1.0.0、pluginType=hybridservice、protocol=direct，入口脚本 `index.js`。
+- 提供 VCP 原生工具向外部（如 AIO Hub）导出的桥接能力，支持元数据同步与远程执行。
+- hasApiRoutes=true，有独立 API 路由。
+- 通信超时 60000ms（1分钟）。
+- 配置项包括：Bridge_Enabled（是否启用桥接，默认 false）、Excluded_Tools（工具黑名单，默认排除 VCPLog,VCPInfo,VCPToolBridge）、Excluded_Display_Keywords（显示名称关键词排除，默认 [AIO]）。
+- 命令 GetStatus 用于获取桥接器运行状态。
+
+## 工作机制
+PluginManager 加载 → `initialize(config, dependencies)` → 注册 API 路由 → 外部客户端请求工具清单 → 过滤黑名单和关键词 → 返回可桥接工具元数据 → 远程执行工具调用。
+
+## 使用/排障边界
+- 适合需要将 VCP 工具能力暴露给外部系统的场景。
+- Bridge_Enabled 默认关闭，需手动开启。
+- 工具黑名单和显示名称关键词排除用于防止循环导出。
+- 默认排除 VCPLog、VCPInfo、VCPToolBridge 自身。
+
+## 历史与兼容性
+- 当前版本 1.0.0，与 SnowBridge 功能类似但面向 AIO Hub。
+- SnowBridge 是更新版本（2.1.0），增加了 Snow 来源元数据校验、限流等安全特性。
+
+## 待验证项
+- 桥接工具清单导出端到端流程。
+- 远程工具执行的可靠性。
+
+关联节点：SnowBridge, AIO Hub
+Tag: VCPToolBridge, index.js, hybridservice, 工具桥接, AIO Hub, GetStatus, 工具导出, 元数据同步, 1.0.0, TagMemo V9.1

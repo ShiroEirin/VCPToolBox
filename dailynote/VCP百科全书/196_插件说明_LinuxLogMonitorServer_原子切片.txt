@@ -1,0 +1,53 @@
+[2026-07-22] - 哈雷酱
+# 日志监控｜LinuxLogMonitorServer｜Linux 日志监控常驻服务
+
+状态：LOW_RISK_UNVERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/LinuxLogMonitorServer` 当前源码；⚠️ 当前未找到 plugin-manifest.json，以下信息基于源码扫描
+事实来源：
+- Manifest：无（存在 `plugin-manifest.json.block` 禁用态）
+- 源码：`Plugin/LinuxLogMonitorServer/LinuxLogMonitorServer.js:1-1212`
+- 文档：`Plugin/LinuxLogMonitorServer/README.md`
+- 运行验证：无
+
+## 核心结论
+- ⚠️ 当前未找到 plugin-manifest.json，以下信息基于源码扫描。
+- `.block` 禁用态 Manifest 声明版本 1.0.0、pluginType=service、protocol=direct。
+- 入口脚本 `LinuxLogMonitorServer.js`，在 VCP 主进程内常驻运行。
+- 通过 Unix Domain Socket（Linux/macOS）或命名管道（Windows）暴露 JSON-RPC 服务。
+- 管理 LogWatcherEngine 生命周期，支持内存查询 + SSH fallback。
+- 依赖 `core/LogWatcherEngine`、`../LinuxLogMonitor/core/AnomalyDetector`、`../LinuxLogMonitor/core/CallbackTrigger`、`modules/SSHManager`。
+- RPC 方法：startMonitor、stopMonitor、searchLog、lastErrors、logStats、getStatus、getBufferStats、subscribe、unsubscribe。
+- 通知方法：anomaly.detected、watcher.error、watcher.stopped、log.rotation、log.truncation。
+- 支持异常检测规则加载（默认规则 + 自定义规则）。
+- 查询优先使用内存缓冲，未覆盖时回退远端 SSH grep/awk 命令。
+- logStats 远端使用 awk 聚合，避免拉取整份日志。
+
+## 工作机制
+PluginManager 加载 → `initialize(config, dependencies)` → 加载 hosts.json → 获取 SSHManager → 初始化 AnomalyDetector（加载默认+自定义规则）→ 初始化 CallbackTrigger → 初始化 LogWatcherEngine → 启动 IPC 服务器 → stdio 插件通过 IPC 调用 RPC → 异常检测和通知广播到订阅客户端。
+
+## 使用/排障边界
+- hosts.json 为默认模板时仅启用本地日志监控。
+- 客户端 startMonitor 后必须发送 subscribe RPC，服务端只向订阅集合包含 taskId 的客户端广播通知。
+- searchLog、lastErrors、logStats 优先查询内存缓冲，缺失时回退远端命令查询。
+- logStats 在远端完成聚合，远端失败但内存有命中时返回 partial/fallbackError。
+- 客户端断连时会停止无其他活跃客户端持有的 watcher（孤儿回收）。
+- UDS 安全：LOG_MONITOR_SOCK 只注入 LinuxLogMonitor 白名单插件，并随请求携带 LOG_MONITOR_TOKEN 鉴权。
+- 异常命中后最多等待 afterContextTimeoutMs（默认5秒）收集后文日志。
+- SIGINT/SIGTERM 由主进程 gracefulShutdown 统一调度。
+
+## 历史与兼容性
+- `.block` 禁用态 Manifest 声明版本 1.0.0，author=VCP Team，pluginType=service。
+- dependencies.shared 声明依赖 SSHManager 共享模块。
+- 配置文件复用 `Plugin/LinuxShellExecutor/hosts.json`。
+- 异常检测规则复用 `Plugin/LinuxLogMonitor/rules/` 下的默认和自定义规则。
+
+## 待验证项
+- UDS/命名管道 IPC 通信的跨平台稳定性。
+- LogWatcherEngine 远端 tail -f 流式会话的可靠性。
+- 异常检测规则匹配的准确性。
+- 内存缓冲与远端 fallback 的数据一致性。
+- 客户端断连后孤儿 watcher 回收的可靠性。
+
+关联节点：LinuxLogMonitor, LinuxShellExecutor, SSHManager, LogWatcherEngine, AnomalyDetector, CallbackTrigger
+Tag: LinuxLogMonitorServer, LinuxLogMonitorServer.js, service, 日志监控, UDS, JSON-RPC, 异常检测, LogWatcherEngine, 内存缓冲, SSH fallback

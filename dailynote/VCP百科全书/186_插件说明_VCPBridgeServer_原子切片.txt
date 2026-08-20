@@ -1,0 +1,69 @@
+[2026-07-22] - 哈雷酱
+# VCPBridgeServer｜VCPBridgeServer｜独立端口透明代理，拦截 CLI 工具请求并注入/替换 System Prompt
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/VCPBridgeServer/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/VCPBridgeServer/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+VCPBridgeServer（v2.0.0）是一个 service 类型插件，作为独立端口的透明代理服务器，用于拦截 CLI 工具（Codex、Claude Code、Cursor 等）的请求并注入/替换 System Prompt。支持 OpenAI Chat、Responses API、Anthropic Messages、Gemini 四种协议的全矩阵转换。
+
+## 工作机制
+- 入口脚本：`bridgeserver.js`（direct 协议）
+- 独立端口运行，与主服务器分离
+- 拦截 CLI 工具的 API 请求，注入或替换 System Prompt
+- 支持四种协议：OpenAI Chat、Responses API、Anthropic Messages、Gemini
+- 劫持模式：replace（完全替换）、prepend（前置追加）、append（后置追加）、off（不劫持）
+- 支持模型名映射（alias:target 格式）
+- System Prompt 支持从 .txt 文件加载
+- `hasApiRoutes: false`：不注册主服务器 API 路由
+
+## 使用/排障边界
+- 监听端口独立于主服务器，通过 `BRIDGE_PORT` 配置
+- 上游 API Key 留空时透传下游请求的 key
+- `BRIDGE_UPSTREAM_TYPE` 默认为 chat
+- System Prompt 支持直接文本或 .txt 文件名（从插件目录加载）
+- 模型映射格式：`alias1:target1,alias2:target2`
+- manifest 中无 `manifestVersion` 字段
+
+## 命令与参数
+本插件为 service 类型，不提供 invocationCommands 工具调用命令。作为透明代理自动运行。
+
+## 配置参数（configSchema）
+| 参数名 | 类型 | 说明 |
+|--------|------|------|
+| BRIDGE_PORT | integer | Bridge Server 监听端口（独立于主服务器） |
+| BRIDGE_UPSTREAM_URL | string | 上游 API 地址（如 https://api.openai.com） |
+| BRIDGE_UPSTREAM_KEY | string | 上游 API Key（留空则透传下游请求的 key） |
+| BRIDGE_UPSTREAM_TYPE | string | 上游 API 类型：chat / anthropic / gemini（默认 chat） |
+| BRIDGE_MODEL | string | 默认模型名（下游未指定时使用） |
+| BRIDGE_SYSTEM_PROMPT | string | 注入的 System Prompt（支持 .txt 文件名从插件目录加载） |
+| BRIDGE_HIJACK_MODE | string | 劫持模式：replace（完全替换）/ prepend（前置追加）/ append（后置追加）/ off（不劫持） |
+| BRIDGE_MODEL_MAP | string | 模型名映射，格式：alias1:target1,alias2:target2 |
+
+## 调用示例
+配置示例（config.json 片段）：
+```json
+{
+  "BRIDGE_PORT": 9090,
+  "BRIDGE_UPSTREAM_URL": "https://api.openai.com",
+  "BRIDGE_UPSTREAM_KEY": "sk-xxx",
+  "BRIDGE_UPSTREAM_TYPE": "chat",
+  "BRIDGE_MODEL": "gpt-4o",
+  "BRIDGE_SYSTEM_PROMPT": "system_prompt.txt",
+  "BRIDGE_HIJACK_MODE": "replace",
+  "BRIDGE_MODEL_MAP": "gpt-4:gpt-4o,claude-3:claude-3-opus"
+}
+```
+
+CLI 工具指向 Bridge Server：
+```
+# 将 CLI 工具的 API 地址指向 Bridge Server 端口
+export OPENAI_API_BASE=http://localhost:9090
+```
+
+关联节点：无直接关联插件
+Tag: VCPBridgeServer, 透明代理, System Prompt, 劫持, CLI工具, 协议转换, service, 2.0.0

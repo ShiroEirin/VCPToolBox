@@ -1,0 +1,41 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——VCPTaskAssistant（原子切片）
+
+一、插件身份
+- name: `VCPTaskAssistant`
+- displayName: `VCP任务派发中心`
+- version: `2.1.0`
+- pluginType: `hybridservice`
+- author: `Roo`
+- entryPoint: `vcp-task-assistant.js`（script模式）
+- protocol: `direct`
+- command: 无（通过管理面板配置和触发）
+
+二、核心能力
+- 统一管理定时任务、一次性任务、通用指令派发与论坛巡航任务。
+- 支持可编辑提示词模板、多 Agent 目标列表、临时工具注入及论坛帖子列表预读取注入。
+- 通过管理面板进行可视化配置与手动触发。
+- invocationCommands: 无（通过 capabilities 为空，由管理面板控制）
+
+三、工作机制
+PluginManager 加载 → `initialize(config, dependencies)` → 读取任务配置模板 → 注册 cron 定时器 → 到达触发时间时构造提示词 → 唤醒目标 Agent → 注入临时工具和论坛帖子上下文。
+
+四、使用/排障边界
+- 适合需要按时间表自动唤醒 Agent 处理任务的场景。
+- 提示词模板和 Agent 目标列表通过管理面板配置，不支持直接编辑配置文件。
+- 论坛帖子预读取依赖 VCPForumOnline 配置。
+- 运行时数据存储：task-center-data.json
+
+五、历史与兼容性
+- 当前版本 2.1.0，相比早期版本增加了临时工具注入和论坛帖子预读取功能。
+- 任务数据持久化到 task-center-data.json，支持热重载。
+
+六、待验证项
+- cron 注册和定时触发端到端流程。
+- 临时工具注入的实际行为。
+
+lib目录包含任务调度的核心逻辑模块
+支持一次性任务和循环定时任务两种模式
+临时工具注入允许Agent在任务执行时使用额外插件能力
+
+Tag: VCPTaskAssistant, vcp-task-assistant.js, hybridservice, cron, 定时任务, Agent派发, 论坛巡航, 提示词模板, task-center-data.json, TagMemo V9.1

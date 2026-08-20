@@ -1,0 +1,37 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] TagMemo V5：历史理论快照
+
+状态：HISTORICAL_SNAPSHOT（不可作为完整现行算法规范）
+最后核验：2026-07-22
+适用范围：历史设计文档与旧百科理论叙述
+证据等级：HISTORICAL_ONLY；部分概念有现行源码映射，详见关联切片
+
+来源：143_VCP记忆_TagMemo浪潮算法V5.txt；VCP百科全书_P0-RAG断言矩阵_证据复核R3.csv AST-031/032。
+
+一、V5理论框架
+- EPA（Evolving Potential Analysis）：逻辑深度 L=logicDepth 与共振 R=resonance 的投影分析。
+- 残差金字塔（Residual Pyramid）：Gram-Schmidt 正交化残差，ResidualPyramid.js:7 定义。
+- 霰弹枪/相控阵（Shotgun/Phased Array）：多向量检索路径的旧称。
+- 动态 Beta：历史公式标注为 sigmoid(L·log(1+R) − S·noise_penalty)。
+- PSR（偏振语义舵）：全目录搜索偏振/PSR/语义舵/polarization/rudder 零命中，无踪迹。
+
+二、统一几何构型探针
+- scripts/tagmemo_unified_geometry_probe.js（1654行）为离线 readonly 探针。
+- 目标：从 SQLite 事实层重建 V9.1 风格有向传播核，比较有限跳软非回溯脉冲场、节点/边 Resolvent。
+- 以 readonly + query_only 打开数据库，不写 SQLite/WAL/配置。
+- 用法：node scripts/tagmemo_unified_geometry_probe.js [--seeds "TagA,TagB"] [--probes 12] [--db /path] [--json report.json]
+
+三、现行边界
+- EPA 与 Residual Pyramid 仍可在引擎层定位（TagMemoEngine.js 位于 VCPToolBox 根目录，3613行）。
+- PSR/偏振语义舵在当前目录零命中；动态 Beta 实现与历史公式存在差异（log(1+R+1) vs log(1+R)）。
+- 因此 V5 既不能整体判定废弃，也不能当作当前完整实现说明。
+
+四、TagMemoEngine 位置
+- 源码路径：VCPToolBox/TagMemoEngine.js（根目录，非 modules/ 下）。
+- 同时承载 V9.1 生产逻辑与 V10 Alpha 实验入口。
+- applyTagBoost 实现下沉至 KnowledgeBaseManager.js:668-671 → TagMemoEngine.js:680-685。
+
+待验证边界：历史参数、阶段顺序、PSR 等价实现、全部运行时行为。
+未写入内容清单：未将 V5 全部模块宣称仍在；未把历史公式覆盖源码实现。
+关联节点：TagMemo 当前源码映射、KnowledgeBaseManager、TagMemoEngine、ResidualPyramid、tagmemo_unified_geometry_probe。
+Tag: TagMemo, V9.1, 历史快照, EPA, ResidualPyramid, PSR, 动态Beta, 霰弹枪, 相控阵, 统一构型探针

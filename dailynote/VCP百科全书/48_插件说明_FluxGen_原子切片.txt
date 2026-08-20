@@ -1,0 +1,46 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——FluxGen（原子切片）
+
+一、插件身份
+- name: `FluxGen`
+- displayName: `Flux 风格图片生成器`
+- version: `0.1.0`
+- pluginType: `synchronous`
+- author: `UserProvided & Roo`
+- entryPoint: `node FluxGen.mjs`（nodejs）
+- protocol: `stdio`
+- command: `FluxGenerateImage`
+
+二、核心能力
+- 通过 SiliconFlow API 使用 FLUX.1-schnell 模型生成具有特定风格的图片。
+- 提供可调用命令：FluxGenerateImage。
+
+三、命令与参数
+- `FluxGenerateImage`：通过SiliconFlow API的FLUX.1-schnell模型生成图片
+  - prompt (字符串, 必需): 用于图片生成的详细【英文】提示词
+  - resolution (字符串, 必需): 图片分辨率，可选值：1024x1024、960x1280、768x1024、720x1440、720x1280
+  - seed (整数, 可选): 随机种子，通常省略以使用随机种子
+
+四、配置参数（configSchema）
+- `SILICONFLOW_API_KEY` (string): SiliconFlow API密钥
+
+五、分辨率可选值
+- `1024x1024` (1:1 正方形)
+- `960x1280` (3:4 竖版)
+- `768x1024` (3:4 竖版)
+- `720x1440` (1:2 超长竖版)
+- `720x1280` (9:16 手机竖版)
+
+六、排障建议
+- 插件无响应：检查 manifest 启用状态、FluxGen.mjs 入口、Node.js 版本。
+- 生成失败：检查 SILICONFLOW_API_KEY 是否有效，网络是否可达 SiliconFlow API。
+- 分辨率不支持：确认使用上述可选值之一。
+
+七、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FluxGen「末」,
+prompt:「始」A majestic cat warrior in futuristic armor, standing on a neon-lit city rooftop at night, cyberpunk style.「末」,
+resolution:「始」1024x1024「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: FluxGen, synchronous, FluxGenerateImage, FLUX.1-schnell, SiliconFlow, prompt, resolution, seed, SILICONFLOW_API_KEY, TagMemo V9.1

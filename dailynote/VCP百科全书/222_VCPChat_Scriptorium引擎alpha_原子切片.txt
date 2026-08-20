@@ -91,4 +91,16 @@
 1. 导入：HTML / MD / TXT / RTF / DOCX（语义化）/ PPTX（静态版式）。
 2. 导出：VDOCX → 连续流 HTML / 分页 HTML / PDF；VPPTX → 单文件 HTML / 逐页 PDF；file:/http 图片转 data: 内联。
 
-Tag: Scriptorium, 共笔文坊, VDOCX, VPPTX, 文档工程, Markdown-first, 定向写入, Lineage, PR协议, Agent端口, alpha, VCPChat, TagMemo V9.1
+Tag: Scriptorium, 共笔文坊, VDOCX, VPPTX, 文档工程, Markdown-first, 定向写入, Lineage, PR协议, Agent端口, alpha, VCPChat, TagMemo V9.1, beta, 输入法同步, SVG资产库, 第12次上游合并
+
+八、2026-08-20 上游大更新（第12次合并，ScriptoriumModules 40文件 +10927/-878）
+**Scriptorium 引擎通过 beta 测试**（commit 7c306000 "文档编辑功能通过beta测试"）：
+1. **输入法竞态修复**（b8119a70）：解耦事件队列消除输入法渲染竞态，新增 `scriptorium-input-sync.js`（6.8KB）输入法同步模块。
+2. **新增 SVG 资产库**：`vdoc-svg-asset-library.js`（482 行）+ `scriptorium-svg-assets.js`（28.6KB）——SVG 资产库管理。
+3. **新增 Lineage UI**：`scriptorium-lineage-ui.js`（32.5KB）文脉可视化界面。
+4. **新增混合编译器**：`vdoc-hybrid-compiler.js`（41.9KB）。
+5. **新增 Pretext 桥接**：`scriptorium-pretext-bridge.js`（5.5KB）。
+6. **新增运行时变体**：`scriptorium-runtime.origin.js`（24KB）。
+7. vdoc-style-library.js +180 样式库增强。
+8. 文件总数从 47 增至 56（新增 input-sync/lineage-ui/pretext-bridge/runtime.origin/svg-asset-library/hybrid-compiler 等）。
+9. 上游 commit 关键词：增强ai功能、大幅强化编辑功能、核心算法优化、打磨优化输入法响应级别。

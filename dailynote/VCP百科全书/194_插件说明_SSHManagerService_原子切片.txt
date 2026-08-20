@@ -1,0 +1,52 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——SSHManagerService（原子切片）
+⚠️ 当前以 plugin-manifest.json.block 禁用态存在，以下信息基于 .block manifest 与源码扫描
+版本：2.0.0 | pluginType: service | protocol: direct
+
+一、插件身份
+- name: `SSHManagerService`
+- displayName: `SSH 连接管理服务`
+- version: `2.0.0`
+- pluginType: `service`
+- protocol: `direct`
+- author: `VCP Team`
+- 入口: `SSHManagerService.js`（Node.js，22354字节，571行）
+
+二、核心结论
+- ⚠️ 当前以 .block 禁用态存在，以下信息基于 .block manifest 与源码扫描。
+- `.block` 禁用态 Manifest 声明版本 2.0.0、pluginType=service、protocol=direct。
+- 入口脚本 `SSHManagerService.js`，在 VCP 主进程内常驻运行。
+- 通过 Unix Domain Socket（Linux/macOS）或命名管道（Windows）暴露 JSON-RPC 服务。
+- 为 stdio 插件提供 SSH 连接复用（连接池）。
+- 依赖 `modules/SSHManager` 的 `getSSHManager` 和 `resetSSHManager`。
+- 读取 `Plugin/LinuxShellExecutor/hosts.json` 主机配置，检测是否为默认模板（MD5 校验）。
+- 默认模板时服务不启动；无有效 SSH 资产时静默跳过。
+- RPC 方法包括：execute、testConnection、getStatus、getPoolStats、connect、disconnect、disconnectAll、listHosts、createStreamSession、stream.start、stream.stop、stream.destroy、stream.getStats。
+- 使用随机生成的 authToken 进行客户端鉴权。
+- 支持流式会话（StreamSession），将数据事件转发到客户端 socket。
+
+三、工作机制
+PluginManager 加载 → `initialize(config, dependencies)` → 加载 hosts.json → 检查是否为默认模板 → 创建 SSHManager 实例（启用连接池）→ 启动 IPC 服务器（UDS/命名管道）→ 将 sockPath 和 token 保存到全局变量 → stdio 插件通过 IPC 调用 RPC 方法。
+
+四、使用/排障边界
+- hosts.json 为默认模板时服务不启动，需先配置实际 SSH 主机。
+- 有效 SSH 资产需满足 type=ssh 且 host、username、password 或 privateKeyPath 完整。
+- Windows 下使用命名管道 `\\.\pipe\vcp-ssh-manager-{pid}`，Linux/macOS 使用 `/tmp/vcp-ssh-manager-{pid}.sock`。
+- 客户端断连时会清理该客户端拥有的流式会话。
+- 进程退出时同步清理 socket 和连接。
+- 当前为 .block 禁用态，不会被 PluginManager 加载。
+
+五、历史与兼容性
+- `.block` 禁用态 Manifest 声明版本 2.0.0，author=VCP Team，pluginType=service。
+- 依赖共享模块 `modules/SSHManager`。
+- 配置文件复用 `Plugin/LinuxShellExecutor/hosts.json`。
+- 源码规模：SSHManagerService.js 22354 字节 / 571 行
+
+六、待验证项
+- UDS/命名管道 IPC 通信的跨平台稳定性。
+- 连接池持久化和预热机制的可靠性。
+- 流式会话的数据转发完整性。
+
+关联节点：LinuxShellExecutor, SSHManager, hosts.json
+
+Tag: SSHManagerService, SSHManagerService.js, service, SSH连接池, UDS, JSON-RPC, 流式会话, 连接复用, 2.0.0, .block禁用态, TagMemo V9.1

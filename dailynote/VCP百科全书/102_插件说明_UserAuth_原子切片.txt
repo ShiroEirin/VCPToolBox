@@ -1,0 +1,41 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——UserAuth（原子切片）
+
+一、插件身份
+- name: `UserAuth`
+- displayName: `用户认证插件`
+- version: 未在manifest中声明
+- pluginType: `static`
+- entryPoint: `node auth.js`
+- protocol: `stdio`
+- refreshIntervalCron: `0 * * * *`（每小时刷新）
+- command: 无（自动触发）
+
+二、核心能力
+- 每小时生成一个6位数的认证码，用于用户权限验证。
+- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- invocationCommands: 无（静态插件）
+
+三、占位符与注入点
+- systemPromptPlaceholders: `{{USER_AUTH_CODE}}`
+  - 描述：提供一个每小时更新的6位数认证码，用于验证用户权限。
+
+四、配置参数
+- 该插件无configSchema，认证码由auth.js内部生成。
+- 运行时依赖：auth_code.txt（存储当前认证码）、code.bin（二进制缓存）
+
+五、排障建议
+- 认证码未更新：检查cron是否正常执行（每小时刷新），auth.js入口是否可用。
+- 占位符未注入：确认插件已启用且manifest未被.block。
+- 认证码格式错误：auth.js生成6位数字，如格式异常检查 code.bin 是否损坏。
+- 多实例冲突：同一时间只应有一个UserAuth实例运行，避免认证码不一致。
+
+六、调用示例
+触发示例：在系统提示词中引用该插件占位符，等待周期刷新后自动注入。
+
+示例系统提示词：
+"用户认证码：{{USER_AUTH_CODE}}（每小时更新一次）"
+
+该占位符会自动注入一个6位数的认证码，用于用户权限验证。
+
+Tag: UserAuth, static, 静态注入, USER_AUTH_CODE, 认证码, 每小时刷新, TagMemo V9.1

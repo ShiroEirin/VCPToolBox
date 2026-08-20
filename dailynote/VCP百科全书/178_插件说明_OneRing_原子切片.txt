@@ -1,0 +1,59 @@
+[2026-07-22] - 哈雷酱
+# OneRing｜OneRing｜实验级统一上下文系统，为唯一 Agent 维护跨前端/群聊/私聊的统一终极上下文
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/OneRing/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/OneRing/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+OneRing 是一个 messagePreprocessor 类型插件（v0.1.0，实验级），通过 `[[OneRing::Agent::Frontend]]` 系统提示词语法触发。它基于 SQLite 记录每条 User/Assistant 发言，标注时间戳、来源对象和前端来源，利用 fuzzy diff 进行历史比对更新。在实际发送时为消息追加或拆分 `[OneRing通知:...]` 来源标记。运行热开关、最大补充上下文数等参数由 `OneRingConfig.json` 通过 chokidar 热加载控制。AI 回复以异步方式在响应完成后入库。
+
+## 工作机制
+- 入口脚本：`OneRing.js`（Node.js，direct 协议）
+- 触发方式：系统提示词中出现 `[[OneRing::Agent::Frontend]]` 语法标记
+- 数据存储：SQLite，记录每条发言的时间戳、来源对象、前端来源
+- 历史比对：使用 fuzzy diff 算法进行消息去重和匹配
+- 上下文补充：跨前端/群聊/私聊为唯一 Agent 维护统一上下文
+- 热加载：`OneRingConfig.json` 通过 chokidar 监听变更并热加载
+- 异步入库：AI 回复在响应完成后异步写入数据库
+- 来源标记：发送消息时追加或拆分 `[OneRing通知:...]` 标记
+
+## 使用/排障边界
+- 版本 0.1.0，标注为实验级，可能存在不稳定行为
+- `ONERING_RECORD_ONLY=true` 时只做标记和插入，不改写上下文（默认值）
+- 未知消息比例超过阈值（默认 0.35）时不补充上下文，但全新上下文仅 1~2 条发言时豁免
+- fuzzy 去重/匹配相似度阈值默认 0.92，过低会导致误判
+- `OneRingConfig.json` 中的 `maxContextBlocks` 控制最大补充上下文数
+- 必须配置 `ONERING_USER_NAME` 以正确识别真实用户发言
+
+## 命令与参数
+本插件为 messagePreprocessor 类型，不提供 invocationCommands 工具调用命令。通过系统提示词语法自动触发。
+
+## 配置参数（configSchema）
+| 参数名 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| ONERING_USER_NAME | string | Ryan | 用于记录真正用户发言的标记名 |
+| ONERING_ALLOW_CONTEXT_PATCH | boolean | true | 是否允许跨端补充。补充数量上限由 OneRingConfig.json 的 maxContextBlocks 热配置控制 |
+| ONERING_MAX_UNKNOWN_RATIO | string | 0.35 | 未知消息比例阈值，超过则不补充（全新上下文仅 1~2 条发言时豁免） |
+| ONERING_DEDUP_SIMILARITY | string | 0.92 | fuzzy 去重/匹配相似度阈值 |
+| ONERING_RECORD_ONLY | boolean | true | 是否只记录不改写上下文。true 时以最终 post 为真相，只做标记和插入 |
+
+## 调用示例
+系统提示词中触发：
+```
+[[OneRing::Agent::Frontend]]
+```
+
+OneRingConfig.json 热配置示例：
+```json
+{
+  "maxContextBlocks": 5,
+  "timelineInsert": true
+}
+```
+
+关联节点：AgentAssistant（可能涉及跨端通讯）
+Tag: OneRing, 统一上下文, 跨前端, SQLite, fuzzy diff, 热加载, messagePreprocessor, 0.1.0

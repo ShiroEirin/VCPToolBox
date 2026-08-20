@@ -1,0 +1,49 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——ImageProcessor（原子切片）
+
+一、插件身份
+- name: `ImageProcessor`
+- displayName: `多模态数据提取器`
+- version: `1.1.0`
+- pluginType: `messagePreprocessor`
+- author: `System`
+- entryPoint: `image-processor.js`（nodejs, script模式）
+- protocol: `direct`
+- command: 无（自动触发）
+
+二、核心能力
+- 处理用户消息中的多模态数据（图像、音频、视频），调用多模态模型提取信息。
+- 将提取的信息替换或附加到消息文本中。
+- 命中缓存则直接复用，未命中才调用多模态API。
+- 把图像替换为可读文本片段，降低主模型处理负担。
+- invocationCommands: 无（messagePreprocessor类型）
+
+三、配置参数（configSchema）
+- `API_URL` (string): 多模态API端点地址
+- `API_Key` (string): 多模态API密钥
+- `MultiModalModel` (string): 多模态模型名称
+- `MultiModalPrompt` (string): 多模态提取提示词
+- `MultiModalModelOutputMaxTokens` (integer): 输出最大Token数
+- `MultiModalModelThinkingBudget` (integer): 思考预算Token数
+- `MultiModalModelAsynchronousLimit` (integer): 并发限制
+- `MediaInsertPrompt` (string): 注入前缀提示词
+- `DebugMode` (boolean): 调试模式
+
+四、缓存机制
+- 文件：`Plugin/ImageProcessor/image_cache.json`（旧）/ `multimodal_cache.sqlite`（新，SQLite）
+- 结构：以图像Base64为key，保存描述、id、timestamp
+- 附带缓存维护工具（purge_old_cache.js、reidentify_image.js）
+- lifecycle: loadCache=initialize, saveCache=shutdown
+
+五、风险点
+- 缓存膨胀会拖慢读取，需周期清理（purge_old_cache.js）。
+- 误配API参数会导致预处理链失败，影响后续对话。
+
+六、触发示例
+该插件为消息预处理器，通常在用户消息包含 Base64 图片时自动触发。
+示例消息片段：
+`data:image/png;base64,iVBORw0KGgoAAA...`
+
+说明：无需手动 TOOL_REQUEST，进入对话链后由预处理流程自动执行。
+
+Tag: ImageProcessor, messagePreprocessor, 图像预处理, Base64识别, 多模态API, image_cache.json, multimodal_cache.sqlite, MultiModalModel, MediaInsertPrompt, 上下文压缩, TagMemo V9.1

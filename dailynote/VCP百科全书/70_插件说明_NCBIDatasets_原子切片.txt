@@ -1,0 +1,77 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——NCBIDatasets（原子切片）
+⚠️ 当前以 plugin-manifest.json.block 禁用态存在，以下信息基于 .block manifest
+版本：0.2.0 | pluginType: synchronous | protocol: stdio | timeout: 30000ms
+
+一、插件身份
+- name: `NCBIDatasets`
+- displayName: `NCBI Datasets 查询插件`
+- version: `0.2.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `30000`
+- author: `B3000Kcn & DBL1F7E5`
+- 入口: `node NCBIDatasets.mjs`（Node.js）
+
+二、核心能力
+- 提供对 NCBI Datasets v2 API 的封装能力，用于检索基因组、基因与物种信息等。
+- 当前为 .block 禁用态，不会被 PluginManager 加载。
+
+三、命令与参数
+提供以下命令（共21个）：
+- `search_genomes`：按物种 tax_id 检索基因组装。参数：tax_id(必需), max_results, assembly_level, assembly_source, page_token
+- `get_gene_info`：获取单个基因详细信息。参数：gene_id 或 gene_symbol+organism
+- `get_genome_info`：获取基因组组装详细信息。参数：accession(必需), include_annotation
+- `get_organism_info`：获取物种综合信息。参数：organism 或 tax_id
+- `get_assembly_info`：获取基因组组装元数据。参数：assembly_accession(必需)
+- `get_assembly_reports`：获取组装数据集报告。参数：assembly_accession(必需), report_type
+- `get_database_stats`：获取数据库统计信息（v2 API已移除，返回提示）。参数：data_type
+- `search_by_bioproject`：通过BioProject搜索。参数：bioproject_accession(必需)
+- `search_by_biosample`：通过BioSample搜索。参数：biosample_accession(必需)
+- `search_assemblies`：按tax_id搜索基因组组装。参数：tax_id(必需), query, assembly_level, max_results
+- `search_genes`：按基因符号/物种/Gene ID搜索。参数：gene_id, gene_symbol, organism, tax_id, max_results
+- `search_taxonomy`：按物种名搜索分类学信息。参数：query(必需), rank
+- `get_taxonomic_lineage`：获取物种完整分类学谱系。参数：tax_id(必需)
+- `get_genome_summary`：获取基因组组装摘要统计。参数：accession(必需)
+- `get_taxonomy_info`：获取分类单元详细信息。参数：tax_id(必需), include_lineage
+- `search_virus_genomes`：搜索病毒基因组。参数：virus_name, tax_id, max_results
+- `get_virus_info`：获取病毒基因组详细信息。参数：accession(必需)
+- `search_proteins`：[已弃用] 搜索蛋白质序列。参数：protein_name, organism
+- `get_protein_info`：[已弃用] 获取蛋白质详细信息。参数：protein_accession
+- `get_genome_annotation`：获取基因组注释报告。参数：accession(必需), annotation_type, feature_type
+- `search_genome_features`：[已弃用] 搜索基因组特征。参数：feature_name, organism
+- `get_assembly_quality`：获取基因组组装质量评估。参数：accession(必需)
+
+四、配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| NCBI_BASE_URL | string | https://api.ncbi.nlm.nih.gov/datasets/v2 | NCBI Datasets API 基础地址 |
+| NCBI_API_KEY | string | (空) | 可选的 NCBI API Key，用于提高速率限制 |
+| NCBI_TIMEOUT | number | 30000 | HTTP 请求超时时间（毫秒） |
+
+五、占位符与注入点
+- systemPromptPlaceholders: 无
+
+六、使用/排障边界
+- 当前为 .block 禁用态，不会被 PluginManager 加载
+- search_proteins、get_protein_info、search_genome_features 在 v2 API 中已弃用，会返回提示信息
+- get_database_stats 在 v2 API 中已移除，会返回提示信息
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+
+七、调用示例
+搜索基因组:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」NCBIDatasets「末」,
+command:「始」search_genomes「末」,
+tax_id:「始」511145「末」,
+max_results:「始」20「末」
+<<<[END_TOOL_REQUEST]>>>
+
+获取基因信息:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」NCBIDatasets「末」,
+command:「始」get_gene_info「末」,
+gene_id:「始」7157「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: NCBIDatasets, synchronous, 同步调用, 检索, 信息获取, search_genomes, get_gene_info, get_genome_info, get_organism_info, multi-command, 0.2.0, .block禁用态, NCBI_API_KEY, TagMemo V9.1

@@ -1,0 +1,70 @@
+[2026-07-22] - 哈雷酱
+# Agnes 视频生成器｜AgnesVideoGen｜Agnes Video V2.0 两步式视频生成（提交+查询）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/AgnesVideoGen/` 当前源码
+事实来源：
+- 源码：`Plugin/AgnesVideoGen/AgnesVideoGen.mjs`
+- 配置/Manifest：`Plugin/AgnesVideoGen/plugin-manifest.json`
+- 运行验证：无
+- 文档：`Plugin/AgnesVideoGen/README.md`
+
+## 核心结论
+- 版本：1.1.0，类型：asynchronous，协议：stdio，超时：1800000ms（30分钟）
+- 入口：`node AgnesVideoGen.mjs`（Node.js）
+- Agnes Video V2.0 视频生成插件，两步完成：submit 提交任务（秒级返回 task_id），query 查询结果（生成完成后返回视频链接）
+- 支持文生视频、图生视频、多图视频、关键帧动画四种模式，自动根据参数判断
+- 额外提供 concat 命令用于视频拼接（ffmpeg 合并重编码）
+
+## 工作机制
+submit → 向 Agnes API 提交任务，秒级返回 task_id → 等待 1-5 分钟 → query 查询 task_id 状态 → completed 时自动下载视频存到本地 /files/ 路径 → 返回可播放视频链接
+
+四种模式自动判断：
+- 不填图片 → 文生视频
+- 填 image（单张URL）→ 图生视频
+- 填 images（多张URL）→ 多图视频
+- 填 images + mode:keyframes → 关键帧动画
+
+## 使用/排障边界
+- 帧数必须满足 8n+1 且 ≤441：121≈5秒、241≈10秒、441≈18秒（24fps）
+- 单次生成最长约 18 秒（441 帧 @ 24fps），需更长视频用 concat 拼接
+- concat 是同步命令，不需要 query
+- 视频链接走 /files/ 路径，需 IMAGESERVER_FILE_KEY 鉴权
+- 常见错误：AGNES_VIDEO_API_KEY 未配置、帧数不满足 8n+1、公网/内网地址选择错误
+
+## 命令与参数
+| command | 说明 |
+|---------|------|
+| submit | 第一步：提交视频生成任务，秒级返回 task_id |
+| query | 第二步：用 task_id 查询结果，completed 时自动下载并返回视频链接 |
+| concat | 视频拼接，同步命令，把多个视频按顺序合并成一个长视频 |
+
+submit 参数：prompt（必需）、image（可选，单张URL）、images（可选，多张URL数组）、mode（可选，keyframes）、num_frames（可选，默认121）、frame_rate（可选，默认24）、width（可选，默认1152）、height（可选，默认768）、negative_prompt（可选）、seed（可选）
+query 参数：task_id（必需）
+concat 参数：video_url1/video_url2/... 或 videos（JSON数组），至少2个视频
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| AGNES_VIDEO_API_KEY | string | (必需) Agnes API 密钥（Bearer Token） |
+| AGNES_VIDEO_MODEL | string | (可选) 视频生成模型，默认 agnes-video-v2.0 |
+| AGNES_VIDEO_DEFAULT_WIDTH | string | (可选) 默认视频宽度，默认 1152 |
+| AGNES_VIDEO_DEFAULT_HEIGHT | string | (可选) 默认视频高度，默认 768 |
+| AGNES_VIDEO_DEFAULT_NUM_FRAMES | string | (可选) 默认帧数，必须满足 8n+1，默认 121（约5秒） |
+| AGNES_VIDEO_DEFAULT_FRAME_RATE | string | (可选) 默认帧率（FPS），1-60，默认 24 |
+| IMAGESERVER_FILE_KEY | string | 文件服务鉴权密钥（VCP 自动注入） |
+| USE_PUBLIC_URL | boolean | 视频链接用对外地址(true)还是内网地址(false)，默认 false |
+| DebugMode | boolean | 调试模式，开启后输出详细日志，默认 false |
+
+## 调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AgnesVideoGen「末」,
+command:「始」submit「末」,
+prompt:「始」A cyberpunk cat walking through neon-lit rainy streets, slow cinematic tracking shot, dramatic lighting「末」,
+num_frames:「始」121「末」,
+frame_rate:「始」24「末」
+<<<[END_TOOL_REQUEST]>>>
+
+关联节点：AgnesGen, Wan2.1VideoGen
+Tag: AgnesVideoGen, 视频生成, 文生视频, 图生视频, 关键帧动画, asynchronous, stdio, Agnes Video V2.0

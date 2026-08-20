@@ -1,0 +1,131 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] KnowledgeBaseManager 知识库管理器 - 原子切片
+
+一、模块基本信息
+1. 模块名称：KnowledgeBaseManager
+2. 模块类型：核心架构模块
+3. 版本号：TagMemo V9.1
+4. 所属项目：VCPToolBox
+5. 源码路径：D:\github\VCP\VCPToolBox\KnowledgeBaseManager.js (1133行)
+6. 功能一句话总结：知识库管理器，协调 SQLite/Rust 向量索引队列，管理向量索引、WAL 健康与 TagMemo 派生计算
+
+二、功能定位
+
+KnowledgeBaseManager 是 VCPToolBox 知识库子系统的核心协调器。它将原本庞大的单体类拆分为多个子模块，自身保留兼容门面角色，同时管理 Rust 向量引擎的加载、SQLite 数据库协调、文件监听、索引持久化等关键流程。
+
+源码注释 (KnowledgeBaseManager.js 行1-2)：
+```
+// KnowledgeBaseManager.js
+// 🌟 架构重构修复版：多路独立索引 + 稳健的 Buffer 处理 + 同步缓存回退 + TagMemo 逻辑回归
+```
+
+三、模块依赖架构
+
+KnowledgeBaseManager 导入以下子模块 (行4-34)：
+
+1. 工具层：
+   - EmbeddingUtils.getEmbeddingsBatch — 批量嵌入
+   - ResultDeduplicator — 结果去重 (TagMemo v4 requirement)
+   - TextChunker.chunkText — 文本分块
+
+2. 知识库子模块 (modules/knowledgeBase/)：
+   - vectorCodec.decodeVectorBlob — 向量 BLOB 解码
+   - sqliteQueryUtils.queryByChunks — SQL 查询工具
+   - textPreprocessor — 文本预处理 (prepareTextForEmbedding, extractTags)
+   - schemaManager.initializeKnowledgeBaseSchema — Schema 初始化
+   - sqliteHealthManager — SQLite 健康管理
+   - memoryProfiler — 内存分析 (estimateVexusIndexBytes, safeIndexStats, buildMemoryProfile)
+   - migrationVectorCache — 迁移向量缓存
+   - diaryMetadataCache — 日记元数据缓存
+   - indexRepository — 索引仓库
+   - databaseCoordinator — 数据库协调器
+   - fileWatcher — 文件监听
+   - ingestionPipeline — 摄取管道
+   - searchService — 搜索服务
+   - tagConsistencyService — 标签一致性服务
+
+3. Rust 引擎 (行36-45)：
+   - 通过 require('./rust-vexus-lite') 加载 VexusIndex
+   - 加载失败直接 process.exit(1)，属于关键依赖
+   - 日志：'[KnowledgeBase] 🦀 Vexus-Lite Rust engine loaded'
+
+4. TagMemo 引擎 (行11)：
+   - TagMemoEngine — 浪潮算法核心
+
+四、构造函数配置 (行48-100)
+
+关键配置项：
+
+1. 路径配置：
+   - rootPath — 知识库根目录 (默认 dailynote)
+   - storePath — 向量存储目录 (默认 VectorStore)
+
+2. 嵌入配置：
+   - model — 嵌入模型 (默认 google/gemini-embedding-001)
+   - modelSig — 向量语义空间签名 (跨模型自动失效)
+   - dimension — 向量维度 (默认 3072)
+
+3. 批处理配置：
+   - batchWindow — 批处理窗口 (默认 1000ms)
+   - maxBatchSize — 最大批量 (默认 50)
+   - indexSaveDelay — 索引保存延迟 (默认 120000ms)
+   - tagIndexSaveDelay — Tag 索引保存延迟 (默认 300000ms)
+
+4. Rust 写入租约 (行68-75) — 🛡️ 避免 rusqlite 与 better-sqlite3 双写 WAL 竞态：
+   - rustWriteLeaseGraceMs — 租约宽限期 (默认 30000ms)
+   - rustWriteLeaseCooldownMs — 冷却期 (默认 10000ms)
+   - rustWriteLeaseCheckpointBeforeGrant — 授予前 WAL 检查点 (默认 true)
+   - rustWriteLeaseTtlMs — 租约 TTL (默认 10分钟)
+   - rustWriteLeaseMaxWaitMs — 最大等待 (默认 30分钟)
+
+5. 索引空闲自动卸载 (行77-79)：
+   - indexIdleTTL — 空闲 TTL (默认 2小时)
+   - indexIdleSweepInterval — 清扫间隔 (默认 10分钟)
+
+6. 过滤配置 (行82-87)：
+   - ignoreFolders — 忽略文件夹 (默认 'VCP论坛')
+   - ignorePrefixes — 忽略前缀 (默认 '已整理')
+   - ignoreSuffixes — 忽略后缀 (默认 '夜伽')
+   - tagBlacklist / tagBlacklistSuper — Tag 黑名单
+   - maxTagsPerFile — 每文件最大 Tag 数 (默认 50)
+
+五、子模块概览 (modules/knowledgeBase/ 目录)
+
+共 14 个文件：
+- databaseCoordinator.js (574行) — 数据库协调器，管理 JS/Rust 读写互斥
+- searchService.js (732行) — 搜索服务实现，拥有搜索行为
+- tagConsistencyService.js (566行) — 标签一致性服务
+- sqliteHealthManager.js (251行) — SQLite 健康管理
+- schemaManager.js (199行) — Schema 定义 (files/chunks/tags/file_tags)
+- ingestionPipeline.js (657行) — 摄取管道
+- indexRepository.js (341行) — 索引仓库
+- fileWatcher.js (341行) — 文件监听
+- memoryProfiler.js — 内存分析
+- migrationVectorCache.js — 迁移缓存
+- diaryMetadataCache.js — 日记元数据缓存
+- sqliteQueryUtils.js — SQL 查询工具
+- textPreprocessor.js — 文本预处理
+- vectorCodec.js — 向量编解码
+
+六、Schema 结构 (schemaManager.js 行3-30)
+
+核心表：
+- files: id, path, diary_name, checksum, mtime, size, updated_at
+- chunks: id, file_id, chunk_index, content, vector (BLOB)
+- tags: id, name, vector (BLOB)
+- file_tags: file_id, tag_id, position
+
+七、SQLite 健康管理 (sqliteHealthManager.js 行19-30)
+
+- configureConnection: WAL 模式 + synchronous=NORMAL + foreign_keys=ON
+- assertIntegrity: PRAGMA quick_check 完整性检查
+- 损坏检测后自动恢复机制
+
+Tag: KnowledgeBaseManager, SQLite, rust-vexus-lite, WAL, 向量索引, 索引仓库, 数据库协调器, 摄取管道, 搜索服务, TagMemo V9.1, Rust写入租约, 空闲卸载, SQL生命周期加固, 第12次上游合并
+
+八、2026-08-20 上游加固（commit 31c3a371，indexRepository.js +276）
+**SQL 生命周期管理加固**：
+- 多步写入操作包裹 `db.transaction()` 事务（BEGIN/COMMIT），失败整体回滚
+- `db.prepare()` 语句统一管理（manifest/changedRows/deletedRows/tag_index_baselines generation 自增）
+- publish 流程事务化，避免中途失败导致索引不一致
+- 强化 generation 代际基线管理（tag_index_baselines 表）

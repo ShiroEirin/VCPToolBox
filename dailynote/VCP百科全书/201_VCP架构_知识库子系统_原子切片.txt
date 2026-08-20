@@ -1,0 +1,112 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 知识库子系统模块化架构 - 原子切片
+
+一、模块基本信息
+1. 模块名称：knowledgeBase 子系统
+2. 模块类型：后端模块化架构
+3. 版本号：TagMemo V9.1
+4. 所属项目：VCPToolBox
+5. 源码路径：D:\github\VCP\VCPToolBox\modules\knowledgeBase\
+6. 功能一句话总结：知识库子系统的 14 个模块化文件，实现数据库协调、搜索、标签一致性、索引管理等职责分离
+
+二、子系统概览
+
+knowledgeBase 目录共包含 14 个 JavaScript 文件，是从原 KnowledgeBaseManager.js 中拆分出的模块化架构。每个模块以 owner (KnowledgeBaseManager 实例) 为核心，实现特定的单一职责。
+
+目录结构：
+```
+modules/knowledgeBase/
+├── databaseCoordinator.js     (574行) 数据库协调器
+├── searchService.js           (732行) 搜索服务
+├── tagConsistencyService.js   (566行) 标签一致性服务
+├── ingestionPipeline.js       (657行) 摄取管道
+├── indexRepository.js         (341行) 索引仓库
+├── fileWatcher.js             (341行) 文件监听
+├── sqliteHealthManager.js     (251行) SQLite 健康管理
+├── schemaManager.js           (199行) Schema 管理
+├── memoryProfiler.js                  内存分析
+├── migrationVectorCache.js            迁移向量缓存
+├── diaryMetadataCache.js              日记元数据缓存
+├── sqliteQueryUtils.js                SQL 查询工具
+├── textPreprocessor.js                文本预处理
+└── vectorCodec.js                     向量编解码
+```
+
+三、核心模块详解
+
+1. DatabaseCoordinator (databaseCoordinator.js)
+   构造函数要求 owner 参数，否则抛出 TypeError (行7-9)
+   核心方法：
+   - waitForIdle(options) — 等待数据库空闲
+     轮询检查 owner.isProcessing, isProcessingDeletes, externalMutationActive, rustWriteLease
+     超时默认 30 分钟，轮询间隔默认 50ms
+   - delay(ms) — Promise 延迟工具
+   职责：协调 JS (better-sqlite3) 与 Rust (rusqlite) 之间的 WAL 写入互斥
+
+2. SearchService (searchService.js)
+   实现函数以 KnowledgeBaseManager 作为 this 执行 (行6-7 注释)
+   "本模块拥有搜索行为，Manager 仅保留兼容门面"
+   核心方法：
+   - search(arg1-arg7) — 多重载搜索接口
+     支持单个 diaryName 或 diaryNames 数组 (虚拟联合索引)
+     参数：queryVec, k, tagBoost, coreTags, coreBoostFactor, options (V9.1 geodesicRerank)
+     coreBoostFactor 默认 1.33 (33% 提升)
+
+3. TagConsistencyService (tagConsistencyService.js)
+   构造函数要求 owner 和 VexusIndex (行19-25)
+   常量：
+   - SNAPSHOT_TTL_MS = 30分钟 (行8)
+   - DETAIL_LIMIT = 200 (行9)
+   - BUILTIN_IGNORED_DIRECTORIES = {node_modules, .git, dist, target, image} (行10-16)
+   功能：Tag 一致性快照管理，检测标签与文件向量的语义一致性
+
+4. SqliteHealthManager (sqliteHealthManager.js)
+   构造函数 (行8-17)：
+   - Database — better-sqlite3 实例
+   - onConnectionRebound — 连接恢复回调
+   - state — 健康状态 (healthy)
+   - corruptionDetected — 损坏检测标志
+   - recovering — 恢复中标志
+   方法：
+   - configureConnection(db) — WAL + NORMAL + foreign_keys (行19-23)
+   - assertIntegrity(db) — PRAGMA quick_check (行25-30)
+
+5. SchemaManager (schemaManager.js)
+   CORE_SCHEMA_SQL 定义 (行3-30)：
+   - files 表: id, path, diary_name, checksum, mtime, size, updated_at
+   - chunks 表: id, file_id, chunk_index, content, vector(BLOB)
+   - tags 表: id, name, vector(BLOB)
+   - file_tags 表: file_id, tag_id, position (联合主键)
+   导出函数：initializeKnowledgeBaseSchema
+
+6. IngestionPipeline (ingestionPipeline.js)
+   实现函数以 KnowledgeBaseManager 作为 this 执行 (行9-10)
+   核心方法：
+   - _hasCompleteStoredVectorsForFile(relPath) — 检查文件向量完整性
+     查询 chunks 数量、vectors 数量、valid_vectors (字节长度匹配)、bad_vectors
+   依赖：TextChunker.chunkText, EmbeddingUtils.getEmbeddingsBatch
+
+7. IndexRepository (indexRepository.js)
+   构造函数 (行8-26)：
+   - config, VexusIndex, getDbPath, waitForCoordinatorIdle
+   - ensureDiaryDateIndex / invalidateDiaryDateIndex — 日记日期索引
+   - diaryIndices — Map (日记名 → 索引实例)
+   - lastUsed — Map (最近使用时间)
+   - loadPromises — Map (加载中的 Promise)
+   - saveTimers — Map (保存定时器)
+   - recoveryActive / recoveryTail — 恢复机制
+   - idleSweepTimer — 空闲清扫定时器
+   方法：shouldPersist(name) — global_tags 持久化由 persistTagIndex 控制
+
+8. FileWatcher (fileWatcher.js)
+   构造函数要求 owner (行9-12)
+   使用 chokidar 进行文件监听
+   方法：_isIgnored(diaryName, fileName) — 基于配置过滤
+
+四、设计模式
+
+1. Owner 模式：所有需要访问 KnowledgeBaseManager 状态的模块都通过 this.owner 引用，而非继承
+2. 实现函数绑定：searchService 和 ingestionPipeline 的方法以 KnowledgeBaseManager 作为 this 执行，状态所有权保持唯一
+3. 延迟初始化：VexusIndex 等重资源按需加载
+
+Tag: knowledgeBase, databaseCoordinator, searchService, tagConsistencyService, sqliteHealthManager, schemaManager, ingestionPipeline, indexRepository, fileWatcher, memoryProfiler, TagMemo V9.1, 模块化架构, Owner模式

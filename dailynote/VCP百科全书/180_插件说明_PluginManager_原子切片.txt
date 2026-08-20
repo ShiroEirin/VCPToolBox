@@ -1,0 +1,83 @@
+[2026-07-22] - 哈雷酱
+# PluginManager｜PluginManager｜VCP 元插件：查询、启用、禁用和重载本地插件
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/PluginManager/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/PluginManager/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+PluginManager（v1.0.0）是 VCP 的元插件（hybridservice 类型），用于查询本地/云端/禁用插件列表，查看插件指令与描述，并在管理员授权后启用、禁用同步/异步/静态本地插件或重载插件。所有操作均需要 6 位管理员验证码（`requireAdmin: true`）。
+
+## 工作机制
+- 入口脚本：`PluginManager.js`（Node.js，direct 协议，timeout 60000ms）
+- 所有命令需要管理员验证码授权
+- 启用插件：将 `plugin-manifest.json.block` 改回 `plugin-manifest.json`，触发重载
+- 禁用插件：将 `plugin-manifest.json` 改为 `plugin-manifest.json.block`，触发重载
+- 启用/禁用仅限 pluginType 为 synchronous、asynchronous 或 static 的本地插件
+- 不能操作 service、hybridservice、messagePreprocessor、云端/分布式插件
+- 不能禁用受保护核心插件
+- 重载插件后返回重载后的预处理器顺序
+
+## 使用/排障边界
+- `requiresAdmin: true`：所有命令必须携带 `requireAdmin` 参数（6 位验证码）
+- 仅可操作 synchronous/asynchronous/static 类型的本地插件
+- service 和 hybridservice 类型插件不可通过此插件启用/禁用
+- 禁用受保护核心插件会被拒绝
+- timeout 60000ms，操作时间较长时注意超时
+
+## 命令与参数
+| 命令 | 说明 | 参数 |
+|------|------|------|
+| ListPlugins | 查询当前 VCP 插件注册表，返回所有已启用本地工具、云端/分布式工具、以及本地禁用插件 | command（固定）, requireAdmin（必需） |
+| GetPluginDetail | 查询指定插件的详细 manifest、注册指令、描述、占位符与来源信息 | command（固定）, pluginName（必需）, requireAdmin（必需） |
+| EnablePlugin | 启用一个本地禁用插件，将 .block 改回 manifest 并触发重载 | command（固定）, pluginName（必需）, requireAdmin（必需） |
+| DisablePlugin | 禁用一个本地插件，将 manifest 改为 .block 并触发重载 | command（固定）, pluginName（必需）, requireAdmin（必需） |
+| ReloadPlugins | 手动触发插件热重载，返回重载后的预处理器顺序 | command（固定）, requireAdmin（必需） |
+
+## 配置参数（configSchema）
+manifest 中未定义 configSchema。
+
+## 调用示例
+列出所有插件：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PluginManager「末」,
+command:「始」ListPlugins「末」,
+requireAdmin:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+获取插件详情：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PluginManager「末」,
+command:「始」GetPluginDetail「末」,
+pluginName:「始」LightMemo「末」,
+requireAdmin:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+启用插件：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PluginManager「末」,
+command:「始」EnablePlugin「末」,
+pluginName:「始」SomePlugin「末」,
+requireAdmin:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+重载插件：
+```
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」PluginManager「末」,
+command:「始」ReloadPlugins「末」,
+requireAdmin:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+关联节点：所有 VCP 插件（元插件管理对象）
+Tag: PluginManager, 插件管理, 元插件, 管理员授权, 启用禁用, 热重载, hybridservice, 1.0.0

@@ -1,0 +1,43 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] DailyNoteManager：list / organize / associate（现行接口切片）
+
+状态：CURRENT_MANIFEST_VERIFIED（Manifest 已核验；organize 内部逻辑未读）
+最后核验：2026-07-22
+适用范围：VCPToolBox main 分支 Plugin/DailyNoteManager
+证据等级：MANIFEST_SCHEMA
+
+一、协议与公开接口
+- Plugin/DailyNoteManager/plugin-manifest.json:4-8 声明 version=2.0.0、pluginType=hybridservice、protocol=direct、timeout=30000ms。
+- 入口脚本：daily-note-manager.js（entryPoint.type=nodejs）。
+- 旧 synchronous/stdio 表述已失效；command 从承载待处理文本重构为子命令名。
+
+二、子命令详情（Manifest 声明）
+
+1. list（列出日记）
+- 功能：按日期范围读取指定文件夹内的所有日记文件，返回每篇日记的URL和完整内容。
+- 参数：folder（必需, string）、startDate（必需, string, YYYY-MM-DD）、endDate（必需, string, YYYY-MM-DD）。
+- 返回：每条日记以 `--- [文件夹/文件名.txt] ---` 标记URL，后跟完整内容。
+
+2. organize（整理日记）
+- 功能：将多篇旧日记归档到「已整理」文件夹并创建一篇新的合并日记。
+- 参数：urls（必需, string, 多URL换行分隔）、maid（必需, string）、folder（可选, string）、Date（必需, string）、Content（必需, string）、Tag（可选, string）、fileName（可选, string）。
+- 工作流程：list 获取URL → 选择整理范围 → organize 创建新日记并归档原始文件。
+- 新日记写入格式与 DailyNote 插件完全一致，优先使用 folder 参数控制存储目录。
+
+3. associate（联想关联日记）
+- 功能：输入一篇或多篇日记URL，通过向量语义搜索发现关联日记。
+- 参数：url（必需, string, 多URL换行分隔）、range（可选, string, 逗号分隔文件夹名）、k（可选, string, 默认10）、minScore（可选, string, 0~1, 默认0）、tagBoost（可选, string, 0~1, 默认0.15）。
+- 多URL输入时自动对结果去重合并。
+
+三、语义边界
+- 可确认：公开接口已经从旧文本提交式 command 重构为三个子命令，参数定义见 Manifest。
+- 不可直接确认：organize 内部是否仍包含融合、去重或格式化逻辑（organize 实现未核读）。
+
+四、配置
+- configSchema: DebugMode (boolean)
+
+历史来源：32_插件说明_DailyNoteManager_原子切片.txt。
+待验证边界：读取/测试 DailyNoteManager 实现，确认 organize 的内部处理与错误返回。
+未写入内容清单：未断言 organize 已删除融合去重；未补写未在 Manifest 出现的参数；未描述运行时输出。
+关联节点：DailyNote、DailyNoteManager、日记组织流程、associate向量检索。
+Tag: DailyNoteManager, list, organize, associate, hybridservice, direct, v2.0.0, Manifest声明, 接口迁移, tagBoost, 待验证

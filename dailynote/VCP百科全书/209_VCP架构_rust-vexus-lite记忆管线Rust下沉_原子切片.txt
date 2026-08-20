@@ -88,4 +88,9 @@ rust-vexus-lite 是 VCP 记忆系统的 Rust 原生计算底座。本次上游�
 | rerank_rivermemo_topology_v3 | RiverMemo V3 | Topology V3生产重排 |
 
 关联节点：RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), RiverMemo拓扑理论(210), rust-vexus-lite向量引擎(197), TagMemoEngine统一构型(198)
-Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology_v3, rayon, N-API, usearch, rusqlite, EPA, Pyramid, Spike, DSTC, V9.1, V9.2, topology-v3, TagMemo V9.1, 2026-07-24
+Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology_v3, rayon, N-API, usearch, rusqlite, EPA, Pyramid, Spike, DSTC, V9.1, V9.2, topology-v3, TagMemo V9.1, 2026-07-24, 第12次上游合并
+
+九、2026-08-20 上游修复（rust-vexus-lite/src/lib.rs +171/-26）
+- **Windows FlushFileBuffers 只读句柄修复**：Windows 的 FlushFileBuffers 要求句柄具备写权限，只读句柄即使文件可读也会返回 ERROR_ACCESS_DENIED；usearch 完成临时文件写入后，此处重新打开同一文件执行持久化屏障（不修改内容）。
+- **normalized_sqlite_path 路径规范化**：`std::fs::canonicalize` 规范化 SQLite 路径，失败时 fallback 原始路径，统一替换反斜杠为正斜杠——避免 Windows 路径格式不一致导致的 SQLite 连接问题。
+- 新增 `std::sync::{Arc, LazyLock, Mutex, RwLock}` 并发原语支持。

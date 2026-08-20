@@ -1,0 +1,67 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——ThoughtClusterManager（原子切片）
+版本：1.0.0 | pluginType: synchronous | protocol: stdio | timeout: 10000ms
+
+一、插件身份
+- name: `ThoughtClusterManager`
+- displayName: `思维簇管理器`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `10000`
+- author: `Roo`
+- 入口: `node ThoughtClusterManager.js`（Node.js）
+- command: `CreateClusterFile`, `EditClusterFile`, `ListClusters`
+
+二、命令与参数
+命令 `CreateClusterFile`，参数如下：
+- `clusterName`（必需，字符串）：目标簇文件夹名称，必须以'簇'结尾。不存在则自动创建。空格自动移除
+- `content`（必需，字符串）：要写入新文件的内容
+
+命令 `EditClusterFile`，参数如下：
+- `clusterName`（可选，字符串）：指定在哪个簇文件夹中搜索。未提供则在所有'簇'结尾文件夹中搜索
+- `targetText`（必需，字符串）：需要被替换的目标文本，长度不能少于15个字符
+- `replacementText`（必需，字符串）：用于替换目标文本的新内容
+
+命令 `ListClusters`，参数如下：
+- 无参数：列出所有以'簇'结尾的文件夹及完整内容
+- `clusterName`（可选，字符串）：指定簇文件夹名（逗号分隔多个）
+- `chainName`（可选，字符串）：按链名查询（从meta_thinking_chains.json解析对应簇列表）
+
+三、核心能力
+- 一个用于创建和编辑AI自身思维链文件的插件，实现元自学习能力
+- 提供可调用命令：CreateClusterFile、EditClusterFile、ListClusters
+
+四、配置参数（configSchema）
+- manifest 中 configSchema 为空对象 {}
+
+五、占位符与注入点
+- systemPromptPlaceholders: 无
+
+六、使用/排障边界
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+- EditClusterFile 的 targetText 不能少于15个字符
+
+七、调用示例
+创建思维簇文件:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ThoughtClusterManager「末」,
+command:「始」CreateClusterFile「末」,
+clusterName:「始」前思维簇「末」,
+content:「始」【思考模块：模块名】
+【触发条件】：
+【核心功能】：
+【执行流程】：「末」
+<<<[END_TOOL_REQUEST]>>>
+
+编辑思维簇文件:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」ThoughtClusterManager「末」,
+command:「始」EditClusterFile「末」,
+clusterName:「始」前思维簇「末」,
+targetText:「始」这是需要被替换的旧的思考内容，确保它不少于15字。「末」,
+replacementText:「始」这是更新后的新的思考内容。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: ThoughtClusterManager, synchronous, 同步调用, CreateClusterFile, EditClusterFile, ListClusters, 思维簇, 元自学习, 1.0.0, TagMemo V9.1

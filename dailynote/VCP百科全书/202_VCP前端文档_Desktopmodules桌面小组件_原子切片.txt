@@ -1,0 +1,171 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] Desktopmodules 桌面小组件系统 - 原子切片
+
+一、模块基本信息
+1. 模块名称：Desktopmodules
+2. 模块类型：VCPChat 前端桌面画布系统
+3. 版本号：1.0.0
+4. 所属项目：VCPChat
+5. 源码路径：D:\github\VCP\VCPChat\Desktopmodules\
+6. 功能一句话总结：VCPChat 桌面小组件系统，包含拖拽系统、主题管理、壁纸管理、天气/音乐/新闻/翻译/性能监控等 widget
+
+二、功能定位
+
+Desktopmodules 是 VCPChat 的桌面画布渲染系统，提供类似桌面操作系统的 widget 体验。用户可以在桌面上放置、拖拽、缩放各种小组件（天气、音乐、新闻、翻译、性能监控等），并支持自定义壁纸（图片/视频/HTML）、主题切换（亮色/暗色）、收藏系统等。
+
+主入口 desktop.js (行1-24) 描述了完整的模块化架构：
+```
+/**
+ * VCPdesktop - 桌面画布渲染器（主入口）
+ * 模块化架构：
+ *   core/state.js          - 全局状态管理 & 常量
+ *   core/theme.js          - 主题同步（light/dark）
+ *   core/statusIndicator.js - 底部状态指示器
+ *   core/zIndexManager.js  - Z-Index 层级管理
+ *   core/dragSystem.js     - 拖拽系统（带限位）
+ *   core/widgetManager.js  - 挂件管理核心（创建/删除/Shadow DOM/脚本处理）
+ *   ui/contextMenu.js      - 右键菜单系统
+ *   ui/saveModal.js        - 收藏命名模态窗
+ *   ui/sidebar.js          - 收藏侧栏
+ *   favorites/thumbnail.js       - 缩略图捕获
+ *   favorites/favoritesManager.js - 收藏系统（保存/加载/删除/恢复）
+ *   api/vcpProxy.js        - vcpAPI 代理层（凭据 + fetch）
+ *   api/ipcBridge.js       - IPC 监听桥接
+ *   builtinWidgets/weatherWidget.js - 内置天气挂件
+ *   builtinWidgets/musicWidget.js   - 内置音乐播放条
+ *   debug/debugTools.js    - 调试工具
+ *
+ * 所有模块通过 window.VCPDesktop 命名空间进行通信。
+ * 模块加载顺序由 desktop.html 中的 script 标签决定。
+ */
+```
+
+三、目录结构
+
+```
+Desktopmodules/
+├── desktop.html          主页面
+├── desktop.js             主入口 (153行)
+├── desktop.css           主样式
+├── core/                  核心子系统
+│   ├── state.js           全局状态管理 (107行)
+│   ├── theme.js           主题同步 (63行)
+│   ├── statusIndicator.js 状态指示器 (62行)
+│   ├── zIndexManager.js   Z-Index 层级管理 (157行)
+│   ├── dragSystem.js      拖拽系统 (102行)
+│   ├── widgetManager.js   挂件管理核心 (741行)
+│   ├── wallpaperManager.js 壁纸管理 (358行)
+│   ├── performanceManager.js 性能管理 (149行)
+│   ├── visibilityFreezer.js 窗口可见性冻结 (403行)
+│   └── styleAutomation.js 全局样式自动化引擎 (519行)
+├── builtinWidgets/       内置挂件
+│   ├── weatherWidget.js   天气挂件 (188行)
+│   ├── musicWidget.js     音乐播放条 (183行)
+│   ├── newsWidget.js      新闻热点 (255行)
+│   ├── translateWidget.js 翻译挂件 (318行)
+│   ├── performanceMonitorWidget.js 性能监视器 (247行)
+│   ├── systemMonitorWidget.js 系统指标监控 (483行)
+│   ├── appTrayWidget.js   应用托盘 (418行)
+│   └── vchatApps.js       VChat内部应用注册表 (546行)
+├── api/                  API层
+│   ├── vcpProxy.js        vcpAPI代理层 (195行)
+│   ├── ipcBridge.js       IPC监听桥接 (469行)
+│   └── desktopMetrics.js  桌面指标服务 (284行)
+├── ui/                   UI组件
+│   ├── contextMenu.js     右键菜单
+│   ├── dock.js            Dock栏
+│   ├── globalSettings.js  全局设置
+│   ├── iconPicker.js      图标选择器
+│   ├── saveModal.js       收藏命名模态窗
+│   └── sidebar.js         收藏侧栏
+├── css/                   样式文件
+│   ├── base.css           基础样式
+│   ├── dock.css           Dock样式
+│   ├── icon-picker.css    图标选择器样式
+│   ├── settings.css       设置样式
+│   ├── shortcuts.css      快捷方式样式
+│   ├── sidebar.css        侧栏样式
+│   ├── theme-overrides.css 主题覆盖
+│   ├── ui-components.css  UI组件样式
+│   └── widgets.css        挂件样式
+├── favorites/            收藏系统
+│   ├── favoritesManager.js 收藏管理
+│   └── thumbnail.js       缩略图捕获
+└── debug/                调试
+    └── debugTools.js      调试工具
+```
+
+四、核心模块详解
+
+1. WidgetManager (core/widgetManager.js)
+   职责：挂件创建/删除/内容管理、Shadow DOM 隔离、内联脚本/样式处理、自动尺寸调整
+   - createWidget(widgetId, options) — 创建挂件容器
+     分配 z-index、创建抓手带和关闭按钮
+     支持 Shadow DOM 隔离
+   - 移除防抖：removingWidgetIds Set 跟踪正在移除的挂件
+
+2. DragSystem (core/dragSystem.js)
+   职责：挂件拖拽交互、边界限位、光标状态管理
+   - setupDrag(widgetElement, gripElement) — 设置拖拽行为
+   - 拖拽限位：上边界不能拖入标题栏区域，左右下边界限制
+   - 拖拽期间提升 z-index
+   - 锁定状态下禁止拖拽
+
+3. Theme (core/theme.js)
+   职责：初始主题读取、IPC 主题变更监听、light/dark 切换
+   - initThemeSync() — 从 URL 参数读取初始主题
+   - 监听 desktopApi.onThemeUpdated 回调
+
+4. WallpaperManager (core/wallpaperManager.js)
+   职责：自定义壁纸的创建/切换/移除
+   - 支持类型：image(图片) / video(mp4) / html(动态) / none
+   - 壁纸层结构：#desktop-wallpaper-layer (z-index: 0)
+   - 配置：enabled, type, source, opacity, blur, brightness, videoMuted, videoPlaybackRate
+
+5. VisibilityFreezer (core/visibilityFreezer.js)
+   职责：窗口最小化或系统级遮挡时冻结所有动画以节省资源
+   - 检测：document.visibilitychange + Electron IPC 'window-occluded'
+   - 冻结范围：壁纸层(视频暂停)、CSS动画、Web Animations API、canvas/rAF、Three.js、Dock GIF
+   - 不监听 blur/focus 事件（避免过于灵敏）
+   - 功能开关：visibilityFreezerEnabled
+
+6. StyleAutomation (core/styleAutomation.js)
+   职责：按固定频率拉取 desktop-metrics 快照，将指标值映射为全局样式
+   - 只接受结构化配置（避免任意 JS/CSS 注入）
+   - CSS 变量名正则校验：/^--desktop-[a-z0-9-]{1,64}$/i
+   - 安全间隔：250ms ~ 60000ms
+
+五、内置挂件
+
+1. WeatherWidget — 天气信息展示，含预报
+2. MusicWidget — 迷你音乐播放条，含进度条和播放控制
+3. NewsWidget — 调用 /admin_api/dailyhot 获取今日热点，分来源标签页 + 虚拟滚动
+4. TranslateWidget — AI 驱动多语言翻译，官方示范插件，演示 vcpAPI.post() 安全调用后端 AI API
+5. PerformanceMonitorWidget — 可视化各挂件、壁纸和 Docker 的 CPU/GPU 估算占用
+6. SystemMonitorWidget — 9 种系统指标监控挂件：CPU、RAM、磁盘、网络、GPU、电池、Docker、传感器、进程
+7. AppTrayWidget — 应用网格展示，支持搜索、拖拽到桌面、单击启动
+8. VchatApps — VChat 内部应用注册表（聊天主界面、笔记中心、论坛、翻译、骰子、Canvas、音乐、RAG 监听等）
+
+六、API 层
+
+1. VcpProxy (api/vcpProxy.js)
+   - 凭据管理（admin API: Basic Auth + VCP Chat API: Bearer Token）
+   - 后端 API 代理 fetch
+   - OpenAI 兼容 chat completion post
+   - widget 脚本安全访问后端
+
+2. IpcBridge (api/ipcBridge.js)
+   - IPC 监听桥接，处理 DesktopRemote RPC 请求
+   - sendDesktopRemoteRpcResponse / handleDesktopRemoteRpcRequest
+
+3. DesktopMetrics (api/desktopMetrics.js)
+   - 系统指标 IPC 封装
+   - 能力缓存
+   - 组件定义：cpu, memory, disk, network, gpu, battery, docker, sensors, processes
+   - 别名映射：ram→memory, mem→memory, storage→disk
+
+七、通信机制
+
+所有模块通过 window.VCPDesktop 命名空间进行通信。模块加载顺序由 desktop.html 中的 script 标签决定。主入口 desktop.js 在 DOMContentLoaded 事件中初始化各子系统。
+
+Tag: Desktopmodules, 桌面小组件, widgetManager, dragSystem, wallpaperManager, theme, visibilityFreezer, styleAutomation, VCPChat, Shadow DOM, IPC桥接

@@ -1,0 +1,43 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——RiverTestPlugin（原子切片）
+⚠️ 当前以 plugin-manifest.json.block 禁用态存在，以下信息基于 .block manifest 与源码扫描
+版本：1.0.0 | pluginType: synchronous | protocol: stdio | timeout: 30000ms
+
+一、插件身份
+- name: `RiverTestPlugin`
+- displayName: `River Context API Test`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `30000`
+- author: `Antigravity`
+- 入口: `node RiverTestPlugin.js`（Node.js，2214字节，62行）
+- command: `ExecuteTest`
+
+二、核心结论
+- ⚠️ 当前以 .block 禁用态存在，不会被 PluginManager 加载。
+- 功能为测试 `river:「始」text「末」` 或 `river:「始」full「末」` 的 River Context API 语法。
+- 从 STDIN 读取 JSON 参数，解析 `river_context` 字段。
+- 收到 river_context 数组时，在 `river/` 子目录下以时间戳命名持久化 JSON 文件。
+- 命令 ExecuteTest 用于测试 river 语法。
+
+三、工作机制
+PluginManager 加载 → stdio 通信 → 从 STDIN 读取 JSON → 解析 `river_context` 字段 → 创建 `river/` 目录 → 以时间戳命名持久化上下文 → 返回执行报告。
+
+四、使用/排障边界
+- 这是一个测试插件，仅用于验证 River Context API 语法。
+- 当前为 .block 禁用态，不会被 PluginManager 加载。
+- 如果没有收到 river_context 或不是数组，会记录收到的参数键名用于调试。
+
+五、历史与兼容性
+- `.block` 禁用态 Manifest 声明 author=Antigravity，版本 1.0.0。
+- 属于开发测试工具，非生产用途。
+- 源码规模：RiverTestPlugin.js 2214 字节 / 62 行
+
+六、待验证项
+- River Context API 语法的实际行为。
+- 持久化文件的目录权限和写入可靠性。
+
+关联节点：River Context API
+
+Tag: RiverTestPlugin, RiverTestPlugin.js, synchronous, 测试插件, river_context, River API, ExecuteTest, 1.0.0, .block禁用态, TagMemo V9.1

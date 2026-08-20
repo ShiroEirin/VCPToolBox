@@ -1,0 +1,320 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] RAGDiaryPlugin模块化重构 - 架构升级与接口规范
+
+⚠️ 本文为2026-03-11的更新日志快照。模块化方向正确，但文件名与实际不完全匹配，且实际模块数量远超本文描述。以下为更正版。
+
+一、插件基本信息
+
+1. 插件名称：RAGDiaryPlugin / RAG日记本插件
+2. 插件类型：消息预处理器(MessagePreprocessor)
+3. 版本号：6.0 (日月同辉V6)
+4. 所属模块：VCPToolBox/Plugin/RAGDiaryPlugin
+5. 功能一句话总结：基于向量检索的日记本智能召回系统
+
+二、架构升级概述
+
+1. 重构背景
+
+原RAGDiaryPlugin.js为单体架构，代码量超过3000行，职责混杂，维护困难。莱恩哥在V6版本中进行了彻底的模块化重构。
+
+2. 新架构组成（更正后）
+
+⚠️ 以下模块名称为2026-03-11描述，实际文件名已变化：
+┌────────────────────────────────────────────────────────────┐
+│                    RAGDiaryPlugin.js                       │
+│              (主控协调器 - 约245266字节/245KB)               │
+├──────────────┬──────────────┬──────────────┬───────────────┤
+│ Text         │ (算法逻辑在   │ Cache        │ (TimeDecay    │
+│ Sanitizer    │  RAGDiary    │ Manager      │  未找到独立   │
+│ (10911字节)  │  Plugin.js中) │ (4843字节)   │  文件)        │
+│ 文本净化      │              │ 缓存管理      │              │
+└──────────────┴──────────────┴──────────────┴───────────────┘
+
+⚠️ 更正说明：
+- ContentSanitizer.js → 实际为 TextSanitizer.js（10911字节）
+- RAGAlgorithmEngine.js → 不存在独立文件，算法逻辑在RAGDiaryPlugin.js（245266字节/245KB）中
+- RAGCacheManager.js → 实际为 CacheManager.js（4843字节）
+- TimeDecayProcessor.js → 目录中未见此文件，时间衰减可能已合并到其他模块
+
+3. 模块对照表（原文 vs 实际）
+
+| 原文模块名 | 原文文件 | 实际文件 | 实际大小 | 状态 |
+|------|------|------|------|------|
+| 内容净化器 | ContentSanitizer.js | TextSanitizer.js | 10911字节 | ⚠️ 已更名 |
+| 算法引擎 | RAGAlgorithmEngine.js | (合并入RAGDiaryPlugin.js) | 245266字节 | ⚠️ 无独立文件 |
+| 缓存管理器 | RAGCacheManager.js | CacheManager.js | 4843字节 | ⚠️ 已更名 |
+| 时间衰减处理器 | TimeDecayProcessor.js | (目录中未找到) | - | ⚠️ 可能已合并 |
+
+二-2、实际模块清单（2026-07-22核验）
+
+Plugin/RAGDiaryPlugin/目录实际包含约30个文件：
+
+| 文件名 | 大小(字节) | 职责推测 |
+|------|------|------|
+| RAGDiaryPlugin.js | 245266 | 主控协调器+算法引擎 |
+| DirectDiaryTextProcessor.js | 47536 | 直接日记文本处理 |
+| AIMemoHandler.js | 43406 | AI总结/AIMemo处理 |
+| TDBPlaceholderProcessor.js | 24477 | TDB占位符处理 |
+| SemanticGroupManager.js | 20098 | 语义分组管理 |
+| ContextVectorManager.js | 19429 | 上下文向量管理 |
+| MetaThinkingManager.js | 18296 | 元思考管理 |
+| FoldingStore.js | 12202 | 折叠存储（配合SQLite） |
+| BM25QueryOptimizer.js | 12056 | BM25查询优化 |
+| TextSanitizer.js | 10911 | 文本净化（原ContentSanitizer） |
+| RAGResultFormatter.js | 8484 | 结果格式化 |
+| TimeExpressionParser.js | 9104 | 时间表达式解析 |
+| CacheManager.js | 4843 | 缓存管理（原RAGCacheManager） |
+| VectorMathUtils.js | 4448 | 向量数学工具 |
+| AttachmentMemoUtils.js | 2278 | 附件记忆工具 |
+| MessageContentUtils.js | 2467 | 消息内容工具 |
+| test_reranker.js | 3214 | 重排序测试脚本 |
+| plugin-manifest.json | 1314 | 插件清单 |
+| rag_tags.json | 470 | 标签配置（非旧版rag_params.json） |
+| config.env | 730 | 运行配置 |
+| config.env.example | 1663 | 配置模板 |
+| semantic_groups.json | 3307 | 语义分组定义 |
+| semantic_groups.edit.json | 2807 | 语义分组编辑版 |
+| timeExpressions.config.js | 2747 | 时间表达式配置 |
+| meta_thinking_chains.json | 2426 | 元思考链定义 |
+| AIMemoPrompt.txt | 6884 | AIMemo提示词模板 |
+| META_THINKING_GUIDE.md | 6497 | 元思考使用指南 |
+| README.md | 17939 | 插件说明文档 |
+| folding_store.db | 1204224 | 折叠存储SQLite数据库 |
+| folding_store.db-wal | 4124152 | WAL日志 |
+| folding_store.db-shm | 32768 | 共享内存 |
+| vector_cache.json | 233308 | 向量缓存 |
+| meta_chain_vector_cache.json | 438618 | 元思考链向量缓存 |
+
+三、TextSanitizer - 文本净化器（原ContentSanitizer）
+
+1. 功能定位
+专门负责文本内容的清洗和标准化，为向量化做准备。
+
+2. 方法列表（基于原文，待核验当前实现）
+
+| 方法名 | 参数 | 返回值 | 功能描述 |
+|--------|------|--------|----------|
+| stripHtml | html: string | string | 移除HTML标签，提取纯文本 |
+| stripEmoji | text: string | string | 移除Unicode Emoji字符 |
+| stripToolMarkers | text: string | string | 净化VCP工具调用标记 |
+| stripSystemNotification | text: string | string | 移除系统通知区块 |
+| jsonToMarkdown | obj: object, depth: number | string | JSON对象转Markdown |
+| isLikelyBase64 | str: string | boolean | 检测是否为Base64编码 |
+
+3. VCP工具标记净化规则
+
+```javascript
+// 匹配模式
+/(\w+):\s*[「『]始[」』]([\s\S]*?)[「『]末[」』]/g
+
+// 技术关键字黑名单
+tool_name, command, archery, maid
+
+// 技术值黑名单  
+dailynote, update, create, no_reply
+```
+
+净化逻辑：保留用户输入内容，过滤系统级技术参数。
+
+四、算法引擎（原RAGAlgorithmEngine，现合并入RAGDiaryPlugin.js）
+
+1. 功能定位
+核心算法计算模块，负责向量相似度计算和动态参数调整。当前逻辑合并于RAGDiaryPlugin.js（245266字节）中。
+
+2. 核心算法（基于原文，待核验当前实现）
+
+(1) 余弦相似度计算
+```javascript
+static cosineSimilarity(vecA, vecB)
+// 返回: 0-1之间的相似度分数
+```
+
+(2) 加权平均向量
+```javascript
+static getWeightedAverageVector(vectors, weights)
+// 支持多向量按权重融合
+```
+
+(3) V3动态参数计算(LRS模型)
+```javascript
+static calculateDynamicParams(queryVector, userText, aiText, vectorDBManager, contextVectorManager, ragParams)
+// 返回: { k, tagWeight, tagTruncationRatio, metrics: { L, R, S, beta } }
+```
+
+3. LRS三元组模型
+
+| 参数 | 含义 | 计算来源 | 影响 |
+|------|------|----------|------|
+| L | LogicDepth | EPA分析 | 逻辑深度越高，K值越大 |
+| R | Resonance | EPA分析 | 共鸣度越高，权重越大 |
+| S | SemanticWidth | 上下文向量 | 语义宽度越高，噪声惩罚越大 |
+
+4. Sigmoid动态调整
+
+```javascript
+const betaInput = L * Math.log(1 + R + 1) - S * noise_penalty;
+const beta = this.sigmoid(betaInput);  // 压缩到0-1范围
+const finalTagWeight = min + beta * (max - min);
+```
+
+五、CacheManager - 缓存管理器（原RAGCacheManager）
+
+1. 功能定位
+通用缓存管理组件，实现LRU(最近最少使用)+TTL(生存时间)双重策略。
+
+2. 构造函数参数
+
+```javascript
+constructor(name, options = {
+    maxSize: 100,      // 最大条目数
+    ttl: 3600000,      // 生存时间(ms)，默认1小时
+    enabled: true      // 是否启用
+})
+```
+
+3. 方法列表（基于原文，待核验当前实现）
+
+| 方法 | 参数 | 返回值 | 功能 |
+|------|------|--------|------|
+| get | key: string | any | 获取缓存值 |
+| set | key: string, data: any | void | 设置缓存值 |
+| clear | - | number | 清空缓存，返回清除数量 |
+| startCleanupTask | - | void | 启动定时清理任务 |
+| stopCleanupTask | - | void | 停止定时清理任务 |
+| getStats | - | object | 获取统计信息 |
+| generateHashKey | content: string | string | 生成SHA256哈希键 |
+
+4. 统计信息格式
+
+```javascript
+{
+    name: "缓存名称",
+    size: 当前条目数,
+    maxSize: 最大容量,
+    hits: 命中次数,
+    misses: 未命中次数,
+    hitRate: "命中率百分比",
+    ttl: 生存时间
+}
+```
+
+5. LRU实现原理
+
+利用JavaScript Map的插入顺序特性：
+- get操作：删除后重新插入，移到末尾(最新)
+- set操作：超出容量时删除第一个(最旧)
+
+六、TimeDecayProcessor - 时间衰减处理器
+⚠️ 当前Plugin/RAGDiaryPlugin/目录中未找到TimeDecayProcessor.js独立文件，时间衰减逻辑可能已合并到RAGDiaryPlugin.js中。以下为原文内容保留。
+
+1. 功能定位
+实现时间衰减重排算法，让较新的日记本条目获得更高权重。
+
+2. 语法格式
+
+```
+::TimeDecay[halfLife]|[minScore]|[whitelistTags]
+```
+
+| 参数 | 类型 | 可选 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| halfLife | int | 是 | 30 | 半衰期天数 |
+| minScore | float | 是 | 0.5 | 最小保留分数 |
+| whitelistTags | string[] | 是 | [] | 目标标签白名单 |
+
+3. 使用示例
+
+```
+::TimeDecay              # 使用默认参数(半衰期30天)
+::TimeDecay7             # 半衰期7天
+::TimeDecay7|0.3         # 半衰期7天，最小分数0.3
+::TimeDecay7|0.3|工作,项目  # 只处理包含"工作"或"项目"标签的条目
+```
+
+4. 衰减公式
+
+```javascript
+const decayFactor = Math.pow(0.5, diffDays / halfLife);
+const newScore = originalScore * decayFactor;
+```
+
+衰减效果表(半衰期=7天)：
+| 时间差 | 衰减系数 | 剩余权重 |
+|--------|---------|---------|
+| 0天 | 1.000 | 100% |
+| 3.5天 | 0.707 | 70.7% |
+| 7天 | 0.500 | 50% |
+| 14天 | 0.250 | 25% |
+| 21天 | 0.125 | 12.5% |
+
+5. 日期提取策略
+
+支持多源日期提取，优先级：
+1. 文本内日期：[2026-03-11]
+2. 文件路径日期：2026-03-11 或 2026.03.11
+
+七、AgentAssistant更新 - 任务放弃/拒绝系统
+
+1. 新增配置参数
+
+```env
+DELEGATION_SYSTEM_PROMPT="[异步委托模式]..."
+DELEGATION_HEARTBEAT_PROMPT="[系统提示:]..."
+```
+
+2. 任务状态标记
+
+| 标记 | 含义 |
+|------|------|
+| [[TaskComplete]] | 任务完成 |
+| [[TaskFailed]] | 任务失败/放弃 |
+
+3. 失败原因分类
+
+- 缺少必要工具
+- 信息不足
+- 权限限制
+- 其他无法完成的原因
+
+八、关联插件
+
+1. 上游依赖
+- VectorDBManager: 向量数据库管理
+- ContextVectorManager: 上下文向量管理（ContextVectorManager.js, 19429字节）
+- MetaThinkingManager: 元思考管理（MetaThinkingManager.js, 18296字节）
+- AIMemoHandler: AI记忆处理（AIMemoHandler.js, 43406字节）
+
+2. 下游消费
+- VCPChat: 聊天界面召回展示
+- AdminPanel: 管理面板配置
+
+九、注意事项
+
+1. 缓存配置
+- RAG_CACHE_MAX_SIZE: 查询缓存大小(默认100)
+- RAG_CACHE_TTL_MS: 查询缓存TTL(默认3600000ms)
+- EMBEDDING_CACHE_MAX_SIZE: 向量缓存大小(默认500)
+
+2. 时间衰减配置
+- RAG_TIME_DECAY_ENABLED: 是否启用(默认true)
+- RAG_TIME_DECAY_LAMBDA: 衰减系数(默认0.001)
+
+3. 性能优化
+- 所有净化方法为静态方法，无需实例化
+- 缓存使用Map结构，O(1)时间复杂度
+- LRU策略保证热点数据常驻内存
+
+4. 参数文件更正
+⚠️ rag_params.json已不存在，当前参数文件为rag_tags.json（470字节）。调参时请使用rag_tags.json。
+
+附：与原文差异说明
+
+1. ContentSanitizer.js → TextSanitizer.js（已更名，10911字节）
+2. RAGAlgorithmEngine.js → 不存在独立文件，算法逻辑在RAGDiaryPlugin.js（245266字节/245KB）中
+3. RAGCacheManager.js → CacheManager.js（已更名，4843字节）
+4. TimeDecayProcessor.js → 目录中未找到独立文件，可能已合并
+5. 原文描述4个模块，实际目录包含约30个文件
+6. rag_params.json → rag_tags.json（470字节）
+7. 新增模块（原文未提及）：AIMemoHandler.js、BM25QueryOptimizer.js、ContextVectorManager.js、DirectDiaryTextProcessor.js、FoldingStore.js（含SQLite数据库folding_store.db）、MetaThinkingManager.js、RAGResultFormatter.js、SemanticGroupManager.js、TDBPlaceholderProcessor.js、TimeExpressionParser.js、VectorMathUtils.js、AttachmentMemoUtils.js、MessageContentUtils.js
+
+Tag: VCP百科全书, RAGDiaryPlugin, 模块化重构, ContentSanitizer, RAGAlgorithmEngine, RAGCacheManager, TimeDecayProcessor, LRU缓存, 时间衰减, 日月同辉V6, AgentAssistant, 任务委托, 莱恩哥更新, 已验证, TextSanitizer, CacheManager, AIMemoHandler, BM25QueryOptimizer, FoldingStore, MetaThinkingManager, TDBPlaceholderProcessor, PARTIALLY_STALE, 更正版

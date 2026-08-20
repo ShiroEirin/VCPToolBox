@@ -1,0 +1,77 @@
+[2026-08-20] - 哈雷酱
+[VCP百科全书] VCPMobileSync 移动端双向增量同步服务（Wire 协议 1.2）
+状态：CURRENT_VERIFIED
+最后核验：2026-08-20（第12次上游合并，VCPChat 215提交，新插件首次收录）
+适用范围：`VCPChat\VCPDistributedServer\Plugin\VCPMobileSync\` 当前源码
+事实来源：plugin-manifest.json + README.md + index.js + sync/ + transport/ 目录结构
+
+# 一、定位
+
+VCPChat 桌面端的专属分布式服务插件，让 VCPChat 桌面端与 VCPMobile 手机端进行可诊断、失败即停的双向增量同步。采用 **Double-Track 3-Tier（双轨三层）** 同步架构，底层设计多层级 Merkle 聚合指纹算法与 NDJSON 流式吞吐防线。
+
+- 插件类型：`service`（无 AI 可见调用命令，纯基础设施）
+- 通信协议：`direct`
+- 版本：1.2.0（Wire 协议 1.2 硬切）
+- 作者：Nova
+
+# 二、同步范围
+
+| 数据类型 | 物理路径 |
+|---|---|
+| 智能体 (Agent) | `Agents/{id}/config.json` |
+| 群组 (Group) | `AgentGroups/{id}/config.json` |
+| 话题 (Topic) | `Agents|groups` 下 topics 数组 |
+| 消息历史 (Message) | `UserData/{parentId}/topics/{topicId}/history.json` |
+| 附件 (Attachment) | Mobile→Desktop 按 hash 上传二进制；Desktop→Mobile 只同步合法元数据 |
+| 自定义头像 (Avatar) | `Agents|groups/{id}/avatar.png`、`user_avatar.png` |
+
+合并策略：**双向增量合并**，并发冲突以修改时间戳最新一端为准。
+
+# 三、三阶段增量同步协议 V2
+
+1. **Phase 1 轻量级索引扫描 (Reconcile)**：对比两端实体索引
+2. **Phase 2 双哈希差分比对 (Double-Hash Merkle Diff)**：Merkle 聚合指纹定位差异
+3. **Phase 3 NDJSON 流式吞吐 (Stream Ingestion)**：流式传输差异数据
+
+# 四、目录结构
+
+```
+VCPMobileSync/
+├── index.js (31.5KB)        # 主入口：初始化 DB + 启动 WS/HTTP 服务
+├── plugin-manifest.json
+├── protocol.js (5.7KB)      # Wire 1.2 协议常量
+├── error-contract.js (15KB) # 结构化错误对象契约
+├── config/defaults.js       # 默认配置
+├── core/                    # db.js(12KB SQLite) hash.js idempotency.js logger.js
+├── dto/                     # agent/group/topic DTO
+├── fixtures/                # Wire 1.2 golden 测试基准
+├── sync/                    # canonical(13KB) central(25KB) diff(14KB) entity(36KB) manifest(16KB) message(28KB) projection(5KB)
+├── transport/               # ndjson.js(4KB) routes.js(17KB HTTP) websocket.js(9KB)
+└── utils/lock.js mime.js
+```
+
+# 五、配置（config.env）
+
+```env
+MobileSyncToken=同步安全令牌（必填，手机端握手密码）
+MobileSyncPort=5975（必填，WebSocket/HTTP 端口）
+MobileSyncUseCentralIndex=true（可选）
+```
+
+# 六、安全防线
+
+- stableStringify 防哈希分裂
+- 墓碑拦截机制防数据回流
+- 并发读写锁 + 原子写入
+- Session-Phase-Operation 日志轮转
+- 1.2 硬切：全部跨端错误统一为结构化对象，不回写桌面旧消息附件结构
+
+# 七、依赖
+
+`better-sqlite3` 原生模块（需 electron-rebuild 重编为 Electron ABI——本机当前已编译至 ABI 145）。
+
+# 八、启用
+
+VCPChat 插件管理器启用（需分布式服务器开启），手机端设置→同步设置填写令牌+地址+端口。
+
+Tag: VCP架构, VCPChat, 分布式服务器, VCPMobileSync, Wire协议, 双向增量同步, Merkle指纹, NDJSON, 移动端同步, 第12次上游合并

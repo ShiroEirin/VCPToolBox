@@ -1,0 +1,78 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] VCP记忆系统——TagMemo浪潮算法V5（历史快照）→V9.1/V10 Alpha
+
+⚠️ 本文记录的V5算法为历史快照，当前生产版本为V9.1/V9.2，实验版本为V10 Alpha。V5的EPA模块/残差金字塔/偏振语义舵已演进，不可作为现行规范。
+
+一、核心哲学
+在浪潮算法的视角下，3072维向量空间并非平坦的，而是充满了语义引力。标签（Tags）被视为空间中的引力源，算法根据感应到的标签引力，将向量向核心语义点进行"拉扯"和"扭曲"，实现原子级精准的语义核心穿透。
+
+核心命题：向量是单程票（多对一映射不可逆，丢失措辞/语序/逻辑链条）、投影碰撞是常态（不相关概念可能投影到相同位置）、知识不等于记忆（知识是图书馆主题聚类，记忆是日记时序链条+因果网络）。TagMemo本质：不是优化向量检索，是构建思维的版本控制系统（Git for Thoughts）。
+
+二、四大核心模块
+1. EPA模块（Embedding Projection Analysis）：逻辑深度(L)投影熵值、世界观门控、跨域共振(R)
+2. 残差金字塔(Residual Pyramid)：Gram-Schmidt正交化投影，多级剥离直至90%能量解释
+3. 知识库管理器(KnowledgeBaseManager)：核心标签虚拟补全+权重豁免、共现矩阵关联词拉回、去重阈值0.88
+4. 偏振语义舵(PSR)：犹豫度检测+辩证对冲+逻辑分段(V5)
+5. ResultDeduplicator(V4新增)：SVD主题建模+残差选择去重
+
+三、V5突破：霰弹枪查询+相控阵雷达去重
+霰弹枪查询：将拆解后的语义片段像霰弹一样打向知识库，实现饱和式打捞
+相控阵去重：通过SVD巡航提取潜在主题，利用残差选择保留最大新信息量
+
+四、动态Beta公式
+beta = sigma(L * log(1+R) - S * noise_penalty)
+L高且R高→加大标签增强；S高→收紧增强回归稳健检索
+
+五、四阶段工作流
+阶段一 感应：净化处理→EPA投影
+阶段二 分段与分解：语义分段(V5逻辑动能)→首轮感应→金字塔迭代
+阶段三 扩张与召回：核心标签补全→关联词拉回→特权过滤
+阶段四 重塑与检索：动态参数→向量融合→偏振修正→霰弹枪+相控阵(V5)
+
+六、核心标签vs普通标签
+核心标签：显式指定或首轮强感应，缺失时虚拟补全，Boost 1.2x-1.4x，噪音完全豁免
+普通标签：残差金字塔逐层剥离，缺失自动忽略，原始贡献权重，严格门控筛选
+
+七、RAG动态K值计算
+基础K（按文本长度）：短(<30字)→3, 中(30~100字)→4, 长(>100字)→6
+EPA调整：kAdj = round(L*3 + log(R)*2)，最终K = clamp(k_base+kAdj, 3, 10)
+K值乘数：手动写:1.5时，最终召回数 = round(dynamicK * 1.5)
+
+八、调参指南（rag_params.json实时调整无需重启）
+⚠️ 注意：当前参数文件已更名为rag_tags.json（470字节），路径为Plugin/RAGDiaryPlugin/rag_tags.json。rag_params.json已不存在。
+前端意图感知层：noise_penalty(0.05)语义宽度惩罚、tagWeightRange([0.05,0.45])标签能量比例、tagTruncationBase(0.6)保留前百分比
+后端语义引擎层：activationMultiplier([0.5,1.5])残差新颖特征、dynamicBoostRange([0.3,2.0])EPA二次修正、coreBoostRange([1.20,1.40])核心标签加权、deduplicationThreshold(0.88)去重阈值、techTagThreshold(0.08)技术噪音过滤
+
+九、演化路径
+V1时间打捞→V2共现矩阵→V3 SVD残差金字塔→V4偏振语义舵→V5霰弹枪+相控阵
+
+十、版本演进路径
+
+演进总览（截至2026-07-22源码核验）：
+V1时间打捞 → V2共现矩阵 → V3 SVD残差金字塔 → V4偏振语义舵 → V5霰弹枪+相控阵 → V6动态增强 → V7矩阵防抖 → V8查询级距离场缓存 → V9.1查询级势能场+ArtifactBundle → V9.2生产搜索 → V10 Alpha统一认知几何
+
+（一）V9.1 生产版本关键特性
+1. Spike Propagation能量场：TagMemoEngine.js中实现了查询级energyField（第40-42行），取代V8的全局距离场缓存。搜索链路必须使用查询级energyField，避免await并发污染。
+2. 查询级势能场重排（KnowledgeBaseManager.js:777-801）：势能场配置通过potentialFieldConfig注入。tag_boost参数加"+"后缀启用势能场重排（如tag_boost=0.6+）。
+3. ArtifactBundle不可变快照（TagMemoEngine.js:26-30）：RCU风格单轨活动资产包，包含锚增益/残差比例/预计算入度/配对Map等。发布后对象及Map只读，重建创建全新Map再替换指针。验证逻辑在_validateArtifactBundle（第182-199行）。
+4. BM25混合打分已成为标准流程：TDBKnowledge.js中存在BM25稀疏检索调用（第800行），BM25QueryOptimizer.js（12056字节）为独立优化模块。VCPChat前端config.js中BM25默认开启（default: true）。
+5. tag_boost参数演进：V5时代TagMemo0.75为阈值格式；V9.1改为tag_boost(0~1)连续值+"+"后缀启用势能场重排。
+
+（二）V9.2 生产搜索版本
+V9.2为当前生产搜索的稳定版本，基于V9.1的ArtifactBundle基础设施。
+
+（三）V10 Alpha 实验版本关键特性
+来源：VCPChat/VCPHumanToolBox/renderer_modules/config.js:942-954
+1. 统一认知几何实验：不替换V9.2生产搜索，在同一不可变V10 Artifact与同一对称候选超集上运行。
+2. Local/Transfer双尺度场：两种尺度的能量场计算。
+3. Pure/Gated/Observed三臂：experiment_arm参数支持all/pure/gated/observed四种模式。all共享同一Artifact、Query State、双尺度场、候选超集与曲线。
+4. 统一路径几何：在同一对称候选超集上比较不同臂的几何读出一致性。
+5. BM25候选进入V10对称候选超集（config.js:953 default:true）。
+6. force_artifact_rebuild参数：强制重新编译并发布V10内存Artifact；正式跑批建议仅首条预热请求启用。
+
+（四）工具与参数文件
+1. tagmemo_unified_geometry_probe.js（scripts/tagmemo_unified_geometry_probe.js，1654行）：统一几何构型离线探针。从SQLite事实层重建V9.1风格有向传播核，比较有限跳软非回溯脉冲场/节点Resolvent/边状态非回溯Resolvent，检验场诱导软域与候选Tag曲线几何一致性。仅以readonly+query_only打开数据库。
+2. TagMemo统一构型一键测试.bat：VCPToolBox根目录下的一键测试脚本。
+3. 参数文件：rag_tags.json（470字节，Plugin/RAGDiaryPlugin/rag_tags.json），非旧版rag_params.json。
+
+Tag: TagMemo浪潮算法, V5, EPA模块, 残差金字塔, 偏振语义舵, 霰弹枪查询, 相控阵去重, 动态Beta, 核心标签, 语义引力, 向量重塑, RAG检索, K值计算, rag_tags, 调参指南, V9.1, V9.2, V10 Alpha, HISTORICAL_SNAPSHOT, 势能场, Spike Propagation, ArtifactBundle, BM25混合打分, 统一认知几何

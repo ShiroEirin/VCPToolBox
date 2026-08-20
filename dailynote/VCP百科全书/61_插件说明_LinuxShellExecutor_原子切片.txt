@@ -1,0 +1,62 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——LinuxShellExecutor（原子切片）
+版本：1.2.0 | pluginType: hybridservice | protocol: direct | timeout: 60000ms
+
+一、插件身份
+- name: `LinuxShellExecutor`
+- displayName: `Linux Shell 安全执行器`
+- version: `1.2.0`
+- pluginType: `hybridservice`
+- protocol: `direct`
+- timeout: `60000`
+- author: `VCP Team`
+- requiresAdmin: true
+- 入口: `node LinuxShellExecutor.js`（Node.js）
+- 定位：高风险系统操作执行器，强调多层安全防护
+
+二、命令与参数
+命令 `LinuxShellExecutor`，参数如下：
+- `command`（必需，字符串）：要执行的Shell命令，或 `preset:预设名?参数` 格式
+- `hostId`（可选，字符串）：目标主机ID，默认 'local'
+- `isLongRunning`（可选，布尔）：设为 true 时任务转入后台并返回 taskId
+- `requireAdmin`（可选，字符串）：用户提交的管理员验证码（6位），用于灰名单授权、未知命令授权逃逸、write/danger预设确认
+- `doubleConfirm`（可选，布尔）：二次确认标志，灰名单critical风险与danger预设必需
+- `timeout`（可选，数字）：超时时间（毫秒）
+- `outputFormat`（可选，字符串）：输出格式 'raw'|'formatted'|'json'
+- `action`（可选，字符串）：设为 'listHosts' 时列出主机列表
+
+三、关键能力
+- 统一八层验证的Linux Shell命令执行器，所有命令校验收敛至 execute() 内的单一顺序管线
+- 主机资产发现与选择（hostId导向）
+- 分级安全策略（黑名单/灰名单/白名单 + AST语义基线）
+- 长任务托管（返回taskId，配合日志监控）
+- 与共享 `SSHManager` 协作，支撑跨插件连接管理
+- 多命令链式使用 &&（如 cmd1 && cmd2），禁用分号(;)作为分隔符
+
+四、依赖
+- npm: ssh2, dotenv
+
+五、使用/排障边界
+- 管理类命令必须明确授权与安全等级
+- 批量安装/日志追踪任务建议联动 `LinuxLogMonitor`
+- 禁用 ; 作为分隔符（安全层拦截）
+- 引号内分号合法：grep "pattern;" file
+- 管道(|)正常支持
+- 失败排查优先看：权限、认证、命令级别、交互阻塞提示
+- 黑名单/特殊操作符/AST/白名单路径限制不可通过验证码绕过
+
+六、调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」uname -a && uptime「末」,
+hostId:「始」DE-server「末」
+<<<[END_TOOL_REQUEST]>>>
+
+长待机指令调用:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」yum install -y nginx「末」,
+isLongRunning:「始」true「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: LinuxShellExecutor, Shell安全执行, SSHManager, 主机资产, 长任务托管, taskId, PAM防护, 安全分级, 命令审计, Linux运维, hybridservice, 1.2.0, requiresAdmin, AST验证, TagMemo V9.1

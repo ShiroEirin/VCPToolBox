@@ -1,0 +1,81 @@
+[2026-07-22] - 哈雷酱
+# AI 代码工程 Worker｜AICodeWorker｜将耗 Token 的代码读写任务交给本地免费 opencode 执行
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/AICodeWorker/` 当前源码
+事实来源：
+- 源码：`Plugin/AICodeWorker/AICodeWorker.js`
+- 配置/Manifest：`Plugin/AICodeWorker/plugin-manifest.json`
+- 运行验证：无
+- 文档：`Plugin/AICodeWorker/README.md`
+
+## 核心结论
+- 版本：1.7.0，类型：synchronous，协议：stdio，超时：660000ms（11分钟）
+- 入口：`node AICodeWorker.js`（Node.js）
+- 核心用途：把耗 Token 的代码读写任务交给本地免费的 opencode 执行，VCP 模型只需下命令和看结果
+- 三模式：analyze（只读）、patch（输出 diff 不直接修改）、write（直接修改文件）
+- v1.5+ 规范化报告输出：三模式强制输出【读取文件清单】+【执行结果摘要】锚点，buildResult 精准提取，新增 fileReadList 字段
+- 支持多 Worker：opencode（默认，免费）和 antigravity（Gemini 3 强模型，需额外启用）
+- 7 个内置预设（index/read/scan/bug/set/append/create），低算力模型可快速调用
+
+## 工作机制
+VCP AI 下达 command（run/run_and_wait）→ AICodeWorker 构造任务书（preset 自动生成或手写 task）→ 启动 opencode/agy 子进程执行 → 解析输出中的【读取文件清单】和【执行结果摘要】锚点 → 返回结构化结果（fileReadList + summary + output + state）
+
+run_and_wait = 同步等待结果；run = 异步提交后返回 jobId，后续用 query 查询
+
+## 使用/排障边界
+- 每个opencode实例占用约1.5~2G内存，服务器总内存上限6G，严禁同时并发多个AICodeWorker
+- MAX_CONCURRENT_JOBS（默认1）为硬保险，超限的 run/run_and_wait 会被直接拒绝
+- 正确做法：串行调用，等上一个 run_and_wait 返回后再发下一个
+- 并行派不同 worker 时需操作不相交的文件，避免写冲突
+- ALLOW_DANGEROUS_SKIP_PERMISSIONS 已失效（保留仅兼容旧配置），三种模式恒自动批准
+- antigravity 需 ENABLE_ANTIGRAVITY=true 且配置 AGY_BIN 路径和 AGY_PROXY（墙内必填）
+
+## 命令与参数
+| command | 说明 |
+|---------|------|
+| run | 异步提交任务，返回 jobId |
+| run_and_wait | 同步提交任务并等待结果返回 |
+| query | 查询任务进度（参数：jobId） |
+| listJobs | 列出历史任务（参数：limit，默认10） |
+| cancel | 取消任务（参数：jobId） |
+| capabilities | 查看插件能力和 opencode 版本 |
+
+run/run_and_wait 参数：preset（可选，预设名）、targetPath（preset时必填）、projectPath（可选）、task（可选）、mode（可选，analyze/patch/write）、timeoutSec（可选，默认600）、summaryHint（可选）、worker（可选，默认opencode）
+
+7个预设：index（函数索引）、read（读取文件）、scan（扫描目录）、bug（分析错误）、set（修改配置）、append（追加内容）、create（创建文件）
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| ENABLE_OPENCODE | boolean | true | 是否启用 opencode worker |
+| ENABLE_MIMOCODE | boolean | false | 预留开关（暂未启用） |
+| OPENCODE_BIN | string | opencode | opencode 可执行文件名 |
+| OPENCODE_BASE_URL | string | (空) | opencode API 基础地址 |
+| OPENCODE_API_KEY | string | (空) | opencode API 密钥 |
+| OPENCODE_MODEL | string | (空) | opencode 模型名称 |
+| ALLOWED_PROJECT_ROOTS | string | /app/VCPToolBox_new | 允许操作的项目根目录 |
+| JOB_ROOT | string | /app/VCPToolBox_new/Plugin/AICodeWorker/jobs | 任务输出目录 |
+| DEFAULT_TIMEOUT_SEC | integer | 600 | 默认超时秒数 |
+| MAX_TASK_CHARS | integer | 20000 | 任务书最大字符数 |
+| ALLOW_DANGEROUS_SKIP_PERMISSIONS | boolean | false | 已失效(保留仅兼容旧配置) |
+| REDACT_SECRETS | boolean | true | 是否脱敏输出中的密钥 |
+| PROJECT_CONTEXT | string | (空) | 项目上下文，自动注入每条任务书 |
+| FILE_SIZE_WARN_KB | number | 200 | 大文件预检阈值（KB） |
+| MAX_CONCURRENT_JOBS | integer | 1 | 全局并发上限（opencode和antigravity共用） |
+| ENABLE_ANTIGRAVITY | boolean | false | 是否启用 antigravity worker |
+| AGY_BIN | string | (空) | agy 可执行文件绝对路径 |
+| AGY_MODEL | string | (空) | agy 默认模型 |
+| AGY_PROXY | string | (空) | agy 连 Google/Gemini API 所需代理 |
+
+## 调用示例
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」AICodeWorker「末」,
+command:「始」run_and_wait「末」,
+preset:「始」index「末」,
+targetPath:「始」/app/VCPToolBox_new/Plugin/AICodeWorker/AICodeWorker.js「末」
+<<<[END_TOOL_REQUEST]>>>
+
+关联节点：CodeSearcher
+Tag: AICodeWorker, 代码工程, opencode, antigravity, synchronous, stdio, preset, analyze, patch, write

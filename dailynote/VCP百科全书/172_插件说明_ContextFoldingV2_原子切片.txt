@@ -1,0 +1,45 @@
+[2026-07-22] - 哈雷酱
+# 上下文语义折叠V2｜ContextFoldingV2｜基于向量语义相似度对远距离低相关AI输出进行摘要折叠以减少Token消耗
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/ContextFoldingV2/` 当前源码
+事实来源：
+- 源码：`Plugin/ContextFoldingV2/ContextFoldingV2.js`
+- 配置/Manifest：`Plugin/ContextFoldingV2/plugin-manifest.json`
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- 版本：1.0.0，类型：messagePreprocessor，协议：direct
+- 入口：`ContextFoldingV2.js`（script 方式）
+- 基于向量语义相似度，对正文中远距离、低相关性的AI输出进行摘要折叠，减少 Token 消耗同时保留上下文连贯性
+- 通过在系统提示词引入 `[[ContextFoldingV2]]` 占位符激活功能
+- requiresContextBridge: true，需要 ContextBridge 支持
+
+## 工作机制
+系统提示词中包含 `[[ContextFoldingV2]]` 占位符 → VCP 框架识别并激活插件 → messagePreprocessor 在消息发送前预处理 → 从最新AI回复往上数，超过 FOLDING_MIN_DEPTH 之后的AI输出 → 计算与最新输出的语义相似度 → 低于 FOLDING_SIMILARITY_LOW 的判定为无关 → 使用 FOLDING_SUMMARY_MODEL 生成摘要替换原文 → 减少上下文 Token 数量
+
+## 使用/排障边界
+- 必须在系统提示词中包含 `[[ContextFoldingV2]]` 才能激活
+- FOLDING_MIN_DEPTH 控制从最新回复往上数多少条之后才可能被折叠
+- 相似度低于 FOLDING_SIMILARITY_LOW（默认0.3）的才会折叠，高于 FOLDING_SIMILARITY_HIGH（默认0.5）的不会折叠
+- 摘要模型需要单独配置，默认使用 gemini-2.0-flash-lite（轻量快速）
+- 作为 messagePreprocessor 不通过命令调用，不需要 invocationCommands
+
+## 命令与参数
+无 invocationCommands，通过系统提示词占位符 `[[ContextFoldingV2]]` 激活，作为 messagePreprocessor 在消息预处理阶段自动执行
+
+## 配置参数（configSchema）
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| FOLDING_SUMMARY_MODEL | string | gemini-2.0-flash-lite | 用于生成折叠摘要的模型名称 |
+| FOLDING_MIN_DEPTH | integer | 3 | 最低折叠触发深度（从最新AI回复往上数，此值之后的AI输出才可能被折叠） |
+| FOLDING_SIMILARITY_LOW | number | 0.3 | 折叠触发的相似度下限（低于此值判定为无关） |
+| FOLDING_SIMILARITY_HIGH | number | 0.5 | 折叠触发的相似度上限（动态K公式摇摆范围） |
+
+## 调用示例
+该插件为 messagePreprocessor，不通过 TOOL_REQUEST 调用。在系统提示词中添加 `[[ContextFoldingV2]]` 即可激活。
+
+关联节点：CapturePreprocessor, WorkspaceInjector
+Tag: ContextFoldingV2, 语义折叠, Token优化, messagePreprocessor, direct, 向量相似度, 上下文压缩, 1.0.0, TagMemo V9.1

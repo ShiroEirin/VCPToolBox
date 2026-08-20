@@ -1,0 +1,61 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件实现——RAGDiaryPlugin（源码事实切片）
+
+一、源码锚点
+- manifest: Plugin/RAGDiaryPlugin/plugin-manifest.json
+- entry: Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js（当前245266字节，约6000+行）
+- 核心链路: processMessages() -> _processRAGPlaceholder() -> vectorDBManager.search()
+- 关键增强: _calculateDynamicParams(), _truncateCoreTags(), _rerankDocuments()
+
+二、模块化拆分（当前目录约30个文件）
+主控模块：
+- RAGDiaryPlugin.js（245266B，主控入口，向量检索/TagBoost/重排全链路）
+- DirectDiaryTextProcessor.js（47536B，日记文本直接处理）
+- AIMemoHandler.js（43406B，AI总结处理器，与LightMemo共享）
+
+检索增强模块：
+- BM25QueryOptimizer.js（12056B，BM25查询优化器，关键词初筛与混合打分）
+- ContextVectorManager.js（19429B，上下文向量管理）
+- SemanticGroupManager.js（20098B，语义分组管理）
+- TDBPlaceholderProcessor.js（24477B，TDB冷知识库占位符处理）
+- MetaThinkingManager.js（18296B，元思考管理，检索链路中的元思考注入）
+- FoldingStore.js（12202B，折叠存储，配合folding_store.db SQLite数据库）
+- TimeExpressionParser.js（9104B，时间表达式解析，支持query内时间范围约束）
+- RAGResultFormatter.js（8484B，检索结果格式化）
+- CacheManager.js（4843B，查询缓存管理，非旧版RAGCacheManager.js）
+- TextSanitizer.js（10911B，文本清洗，非旧版ContentSanitizer.js）
+- VectorMathUtils.js（4448B，向量数学工具）
+- MessageContentUtils.js（2467B，消息内容工具）
+- AttachmentMemoUtils.js（2278B，附件记忆工具）
+
+配置与数据文件：
+- rag_tags.json（470B，标签配置，非旧版rag_params.json）
+- semantic_groups.json / semantic_groups.edit.json（语义分组配置）
+- meta_chain_vector_cache.json / meta_thinking_chains.json（元思考链缓存与配置）
+- timeExpressions.config.js（时间表达式配置）
+- folding_store.db（SQLite数据库，含WAL模式）
+- AIMemoPrompt.txt（AI总结提示词模板）
+- README.md / META_THINKING_GUIDE.md（文档）
+
+三、行为事实（代码级）
+- 支持查询缓存 CacheManager（可开关、TTL、最大容量）。
+- TagMemo 路径调用 applyTagBoost 感应 matchedTags，再做截断降噪。当前版本已演进至 V9.1/V10 Alpha，支持查询级势能场重排（potential field）。
+- Time-Aware 模式使用"语义路 + 时间路"平衡召回（代码注释为 60/40）。
+- 历史路径 V4/V5 包含 historySegments 分段检索与 deduplicateResults 去重，当前版本中这些路径仍存在但已被 V9.1/V10 Alpha 的增强检索链路覆盖（历史快照）。
+- BM25QueryOptimizer 提供 BM25 关键词初筛与 BM25-向量混合打分，作为向量检索的前置过滤。
+- AIMemoHandler 支持在检索完成后将候选结果交由 AI 进行总结，生成摘要式记忆注入。
+- TDBPlaceholderProcessor 处理 TDB 冷知识库（TriviumDB）占位符，支持大规模百科/手册/私有资料库的 BM25稀疏召回+向量稠密召回+图扩散 混合检索。
+- MetaThinkingManager 在检索链路中注入元思考链，增强复杂查询的推理深度。
+- FoldingStore 使用 SQLite WAL 模式存储折叠记忆片段，支持增量更新与大规模场景下的高效读写。
+- SemanticGroupManager 管理日记内容的语义分组，提升长文档场景下的召回精度。
+
+四、排序与稳定性
+- rerank 配置齐全时调用外部 rerank；支持 token 截断与批次化。
+- 内置 rerank 熔断统计，连续失败会短期跳过 rerank。
+- 最终排序优先 rerank_score，其次回退 score。
+- 支持 RRF（Reciprocal Rank Fusion）双排名融合，α 参数可配置（如 rrf0.7 表示 Reranker 占70%权重）。
+
+五、触发示例（混合服务）
+触发示例：在系统提示词内放置 RAG 占位符，聊天流程进入 processMessages 后自动执行向量检索、TagBoost、BM25混合打分、去重与重排。当前版本还支持 AIMemo 总结、TDB 冷知识库检索、元思考注入等增强路径。
+
+Tag: RAGDiaryPlugin, RAGDiaryPlugin.js, processMessages, _processRAGPlaceholder, applyTagBoost, BM25QueryOptimizer, AIMemoHandler, ContextVectorManager, FoldingStore, MetaThinkingManager, TDBPlaceholderProcessor, SemanticGroupManager, CacheManager, TextSanitizer, VectorMathUtils, TimeExpressionParser, RAGResultFormatter, TagMemo V9.1, V10 Alpha, SQLite WAL, 混合服务, 源码事实切片

@@ -1,0 +1,50 @@
+[2026-07-22] - 哈雷酱
+# ImageFileServer｜提供受密码保护的静态图片与静态文档服务
+
+状态：CURRENT_VERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/ImageFileServer/` 当前源码
+事实来源：
+- 源码/manifest：`Plugin/ImageFileServer/plugin-manifest.json`
+- 运行验证：无
+
+## 核心结论
+ImageFileServer 是一个 service 类型插件，通过密码保护的路径前缀提供静态图片和文件服务。使用 direct 协议直接运行 Node.js 脚本。图片与文件各自独立配置密钥，通过 URL 路径中的 `/pw=[Key]/` 前缀实现访问控制。
+
+## 工作机制
+- 入口脚本：`image-file-server.js`（Node.js，direct 协议）
+- 启动后作为常驻服务运行，监听 HTTP 请求
+- 图片服务：通过 `/pw=[Image_Key]/images/...` 路径提供
+- 文件服务：通过 `/pw=[File_Key]/files/...` 路径提供
+- 图片与文件密钥独立配置，互不影响
+- 支持 DebugMode 调试开关
+
+## 使用/排障边界
+- Image_Key 和 File_Key 必须配置，否则对应服务无法正常鉴权
+- DebugMode 开启后输出详细日志
+- 路径中的密钥前缀格式为 `/pw=[密钥值]/images/` 或 `/pw=[密钥值]/files/`
+- 不提供上传功能，仅为静态资源服务
+
+## 命令与参数
+本插件为 service 类型，不提供 invocationCommands 工具调用命令。通过 HTTP 路径直接访问。
+
+## 配置参数（configSchema）
+| 参数名 | 类型 | 说明 |
+|--------|------|------|
+| Image_Key | string | 图片服务访问密钥 |
+| File_Key | string | 文件服务访问密钥 |
+| DebugMode | boolean | 调试模式开关 |
+
+## 调用示例
+访问图片：
+```
+GET /pw=[Image_Key]/images/avatar.png
+```
+
+访问文件：
+```
+GET /pw=[File_Key]/files/document.pdf
+```
+
+关联节点：无直接关联插件
+Tag: ImageFileServer, 图床, 文件服务, 密码保护, 静态资源, service

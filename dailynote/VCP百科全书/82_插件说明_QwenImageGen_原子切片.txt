@@ -1,0 +1,68 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——QwenImageGen（原子切片）
+版本：1.0.0 | pluginType: synchronous | protocol: stdio | timeout: 120000ms
+
+一、插件身份
+- name: `QwenImageGen`
+- displayName: `通义千问图片生成`
+- version: `1.0.0`
+- pluginType: `synchronous`
+- protocol: `stdio`
+- timeout: `120000`
+- author: `Roo`
+- 入口: `node QwenImageGen.js`（Node.js）
+- command: `GenerateImage`, `EditImage`
+
+二、命令与参数
+命令 `GenerateImage`，参数如下：
+- `prompt`（必需，字符串）：用于图片生成的详细提示词
+- `negative_prompt`（可选，字符串）：负向提示词
+- `image_size`（可选，字符串）：图片分辨率，格式"宽x高"。推荐值：1328x1328(1:1)、1664x928(16:9)、928x1664(9:16)、1472x1140(4:3)、1140x1472(3:4)、1584x1056(3:2)、1056x1584(2:3)
+- `cfg`（可选，数字，范围0.1-20）：控制与提示词的匹配度，官方推荐4.0
+- `seed`（可选，整数）：种子
+- `num_inference_steps`（可选，数字，范围1-100，默认20）：推理步数
+
+命令 `EditImage`，参数如下：
+- `prompt`（必需，字符串）：用于指导图片修改的详细提示词
+- `image`（必需，字符串）：公网可访问的 https URL 或分布式服务器的本地文件路径 (file:///...)
+- `image2`（可选，字符串）：第2张参考图片
+- `image3`（可选，字符串）：第3张参考图片
+- `negative_prompt`（可选，字符串）：负向提示词
+- `seed`（可选，整数）：种子
+- `num_inference_steps`（可选，数字，范围1-100，默认20）：推理步数
+
+三、核心能力
+- 使用 SiliconFlow API 调用通义千问模型生成和编辑图片
+- 提供可调用命令：GenerateImage（文生图）、EditImage（图生图/修图）
+
+四、配置参数（configSchema）
+| 参数 | 类型 | 说明 |
+|------|------|--------|
+| SILICONFLOW_API_KEY | string | SiliconFlow API Key |
+
+五、占位符与注入点
+- systemPromptPlaceholders: 无
+
+六、使用/排障边界
+- 插件无响应：先检查 manifest 启用状态、入口脚本、运行时依赖
+- 结果异常：核对命令名与参数字段，再查看插件目录缓存/日志文件
+- EditImage 的 image 参数支持公网URL和本地 file:/// 路径
+
+七、调用示例
+生成图像:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」QwenImageGen「末」,
+command:「始」GenerateImage「末」,
+prompt:「始」a beautiful landscape with mountains and rivers「末」,
+image_size:「始」1328x1328「末」
+<<<[END_TOOL_REQUEST]>>>
+
+编辑图像:
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」QwenImageGen「末」,
+command:「始」EditImage「末」,
+image:「始」https://example.com/image.jpg「末」,
+prompt:「始」change the sky to sunset colors「末」
+<<<[END_TOOL_REQUEST]>>>
+
+Tag: QwenImageGen, synchronous, 同步调用, 多媒体, GenerateImage, EditImage, SiliconFlow, image_size, cfg, num_inference_steps, 1.0.0, SILICONFLOW_API_KEY, TagMemo V9.1

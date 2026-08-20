@@ -1,0 +1,49 @@
+[2026-07-22] - 哈雷酱
+# 工具桥接｜SnowBridge｜Snow CLI 工具桥接器
+
+状态：LOW_RISK_UNVERIFIED
+最后核验：2026-07-22
+适用范围：`Plugin/SnowBridge` 当前源码；⚠️ 当前未找到 plugin-manifest.json，以下信息基于源码扫描
+事实来源：
+- Manifest：无（存在 `plugin-manifest.json.block` 禁用态）
+- 源码：`Plugin/SnowBridge/index.js:1-1764`
+- 配置：`Plugin/SnowBridge/config.env.example`
+- 运行验证：无
+- 文档：无
+
+## 核心结论
+- ⚠️ 当前未找到 plugin-manifest.json，以下信息基于源码扫描。
+- `.block` 禁用态 Manifest 声明版本 2.1.0、pluginType=hybridservice、protocol=direct。
+- 入口脚本 `index.js`，hasApiRoutes=true，通信超时 60000ms（1分钟）。
+- 为 Snow CLI 导出 VCP 原生工具，提供工具清单同步、远程执行与取消控制。
+- 通过 Monkey Patch 拦截 WebSocketServer.handleDistributedServerMessage，处理三种消息类型：get_vcp_manifests、execute_vcp_tool、cancel_vcp_tool。
+- 支持 Snow 来源元数据校验（x-snow-client、x-snow-protocol、x-snow-tool-mode、x-snow-channel）。
+- 支持速率限制（默认每客户端每分钟 60 次）。
+- 支持异步任务回调转发（plugin_async_callback 事件）。
+- 支持工具结果压缩摘要（Compact Result Sidecar），针对 FileOperator、UrlFetch、LightMemo、VSearch 等工具。
+- 命令 GetStatus 获取桥接器运行状态。
+
+## 工作机制
+PluginManager 加载 → `initialize(config, dependencies)` → 绑定 PluginManager 事件监听 → `registerApiRoutes` 注册 `/status` 路由 → `applyMonkeyPatch` 拦截分布式消息 → Snow CLI 请求工具清单 → 过滤黑名单/关键词 → 返回可桥接工具 → 远程执行或取消。
+
+## 使用/排障边界
+- Bridge_Enabled 默认关闭，需在 config.env 中手动开启。
+- 配置项丰富：Bridge_Enabled、Excluded_Tools、Excluded_Display_Keywords、Allowed_Tools、Require_Snow_Request_Headers、Allowed_Snow_Tool_Modes、Bridge_Access_Token、Rate_Limit_Per_Minute。
+- Require_Snow_Request_Headers=true 时，请求必须满足固定契约：x-snow-client=snow-cli、x-snow-protocol=function-calling、x-snow-channel=bridge-ws。
+- Allowed_Snow_Tool_Modes 默认接受 bridge 与 hybrid，local 会被拒绝。
+- 工具结果压缩针对高频工具（FileOperator、UrlFetch、LightMemo、VSearch），超长结果会截断为摘要。
+- 当前为 `.block` 禁用态。
+
+## 历史与兼容性
+- `.block` 禁用态 Manifest 声明版本 2.1.0，author=Gugu_Kilo。
+- 与 VCPToolBridge 功能类似但面向 Snow CLI，增加了安全校验和限流。
+- SnowBridge 只做最薄的文本归一化（换行符、空白行），不承担工具定义压缩。manifest 直接传递原始 capabilities.invocationCommands。
+
+## 待验证项
+- Monkey Patch 拦截分布式消息的稳定性。
+- Snow 来源元数据校验的端到端流程。
+- 异步任务回调转发的可靠性。
+- 工具结果压缩摘要的实际效果。
+
+关联节点：VCPToolBridge, Snow CLI, WebSocketServer, PluginManager
+Tag: SnowBridge, index.js, hybridservice, Snow CLI, 工具桥接, Monkey Patch, 元数据校验, 限流, 异步回调, GetStatus

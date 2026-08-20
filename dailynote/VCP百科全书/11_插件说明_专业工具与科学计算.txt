@@ -1,0 +1,41 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——专业工具与科学计算插件组
+
+⚠️ 本类别切片基于2026-03快照，部分插件可能已新增或移除
+
+一、插件组定位
+服务高精度计算、科研阅读、项目级静态分析与专业领域查询，补齐LLM在"确定性计算与专业数据"上的短板。
+
+二、核心插件
+- SciCalculator：确定性数学内核（大数、微积分、符号推导）
+- PaperReader：长文档/PDF结构化解析与导航
+- NCBIDatasets / KEGGSearch：生命科学专业检索
+- CodeSearcher（含Rust加速变体）：项目级代码语义定位
+- ArxivDailyPapers / CrossRefDailyPapers：学术论文每日检索与占位符注入
+- DeepWikiVCP：GitHub仓库文档检索（DeepWiki MCP API）
+- FlashDeepSearch：闪电深度研究插件（多维度关键词扩展+报告生成）
+- AnySearch：通用搜索插件
+
+三、适用场景
+- 数学与工程计算必须"可复现"
+- 学术论文长文理解与证据抽取
+- 复杂仓库重构前的全局画像
+- 生信检索中的高可信引用链
+- GitHub仓库文档快速检索与AI问答
+
+四、输出规范建议
+- 计算任务：结果 + 公式/步骤 + 误差说明
+- 文献任务：结论 + 证据段落 + 来源信息
+- 项目分析：模块图 + 风险点 + 变更建议
+
+五、风控与质量
+- 关键计算结论建议二次校验
+- 文献结论区分"事实"与"作者观点"
+- 项目建议按"低风险→高收益"排序执行
+
+
+- DeepWikiVCP 的 wiki_ask 返回内容可能较长，建议优先使用而非 wiki_content
+- FlashDeepSearch 的 SearchBroadness 参数影响研究广度，范围5-20
+
+关联节点：SciCalculator, PaperReader, NCBI, KEGG, CodeSearcher, ArxivDailyPapers, CrossRefDailyPapers, DeepWikiVCP, FlashDeepSearch, AnySearch
+Tag: 专业工具插件, 科学计算, SciCalculator, PaperReader, 生信检索, NCBI, KEGG, 代码分析, 确定性计算, DeepWikiVCP, FlashDeepSearch, ArxivDailyPapers, CrossRefDailyPapers, TagMemo V9.1

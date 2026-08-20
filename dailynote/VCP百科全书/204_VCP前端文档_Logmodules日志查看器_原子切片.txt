@@ -1,0 +1,109 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] Logmodules 日志查看器 - 原子切片
+
+一、模块基本信息
+1. 模块名称：Logmodules
+2. 模块类型：VCPChat 前端功能模块
+3. 版本号：1.0.0
+4. 所属项目：VCPChat
+5. 源码路径：D:\github\VCP\VCPChat\Logmodules\
+6. 功能一句话总结：VCP 日志中心前端模块，提供实时日志查看、过滤、搜索、清空等功能
+
+二、功能定位
+
+Logmodules 是 VCPChat 的日志查看器模块，以独立 Electron 窗口形式运行。它通过轮询后端 API 获取实时日志，支持预设过滤、自定义关键词搜索、正/逆序显示、行数限制等功能，为开发者提供便捷的日志排查工具。
+
+三、文件结构
+
+```
+Logmodules/
+├── log.html    (92行)   UI布局
+├── log.js      (519行)   核心逻辑
+└── log.css     (509行)   样式定义
+```
+
+四、核心逻辑 (log.js)
+
+1. API 通信 (行1)
+   - const api = window.utilityAPI || window.electronAPI
+
+2. 存储键 (行3-6)
+   ```
+   STORAGE_KEYS = {
+       lineLimit: 'vcp-log-center-line-limit',
+       reverseOrder: 'vcp-log-center-reverse-order'
+   }
+   ```
+
+3. 预设过滤器 (行8)
+   PRESET_FILTERS = ['IP', 'TOOL', 'RAG', 'POST', 'PLUGIN', 'ERROR']
+
+4. 轮询配置 (行9)
+   POLL_INTERVAL_MS = 1800（1.8秒轮询间隔）
+
+5. 全局状态 (行11-23)
+   - serverBaseUrl / apiAuthHeader — API 地址和认证
+   - allLines — 全部日志行数组
+   - currentOffset — 当前偏移量
+   - currentLogPath — 当前日志文件路径
+   - isReverseOrder — 是否逆序显示
+   - lineLimit — 行数限制 (默认 500)
+   - pollTimer — 轮询定时器
+   - isLoading — 加载中标志
+   - activePreset — 当前激活的预设过滤器
+   - currentFilter — 当前自定义过滤词
+   - scrollHideTimer / suppressScrollReveal — 滚动隐藏控制
+
+6. DOM 元素引用 (行25-30)
+   - status — 日志状态指示
+   - meta — 元数据显示
+   - lines — 日志行容器
+   - empty — 空状态提示
+   - toast — 通知提示
+
+五、UI 布局 (log.html)
+
+1. 窗口结构：
+   - 标题栏：VCP日志中心 + 状态指示 + 操作按钮（刷新/清空后端日志/最小化/最大化/关闭）
+   - CSP 安全策略：default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src *
+
+2. 关键 DOM 元素：
+   - log-lines — 日志行容器
+   - empty-state — 空状态
+   - confirm-modal — 确认模态窗（清空日志确认）
+   - toast — 通知提示
+
+六、样式系统 (log.css)
+
+1. 暗色主题变量 (行1-12)：
+   - --log-bg: #07151d
+   - --log-panel: rgba(13, 42, 56, 0.82)
+   - --log-border: rgba(255, 255, 255, 0.12)
+   - --log-text: #e0e6e9
+   - --log-muted: #aebdc4
+   - --log-accent: #daa520
+   - --log-danger: #e57373
+   - --log-code-bg: rgba(0, 0, 0, 0.34)
+   - --log-hover: rgba(255, 255, 255, 0.08)
+
+2. 亮色主题变量 (行14-25)：
+   - --log-bg: #eef3f7
+   - --log-panel: rgba(255, 255, 255, 0.86)
+   - --log-text: #2f4050
+   - --log-accent: #4a90e2
+   - --log-danger: #e74c3c
+
+3. 引用全局 themes.css 中的变量作为 fallback
+
+七、功能特性
+
+1. 实时轮询：1.8秒间隔自动拉取最新日志
+2. 预设过滤：IP/TOOL/RAG/POST/PLUGIN/ERROR 六大类快捷过滤
+3. 自定义搜索：关键词搜索
+4. 正/逆序显示：可切换日志排列顺序
+5. 行数限制：可配置最大显示行数（默认 500）
+6. 清空后端日志：通过 API 清空后端日志文件
+7. 本地存储：行数限制和逆序设置持久化到 localStorage
+8. 主题适配：支持亮色/暗色主题自动切换
+
+Tag: Logmodules, 日志查看器, log.js, VCPChat, 轮询, 预设过滤, Electron IPC, 日志中心

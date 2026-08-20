@@ -1,0 +1,41 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——VCPTimeLine（原子切片）
+
+一、插件身份
+- name: `VCPTimeLine`
+- displayName: `VCP Agent 时间线`
+- version: `1.0.0`
+- pluginType: `hybridservice`
+- author: `VCPToolBox`
+- entryPoint: `VCPTimeLine.js`（nodejs, script模式）
+- protocol: `direct`
+- timeout: `300000`（5分钟）
+- requiresContextBridge: `true`
+- hasApiRoutes: `false`
+- command: 无（通过注入标记触发）
+
+二、核心能力
+- 为 Agent 生成按月时间线和一句话摘要。
+- 通过 `[[VCPTimeLine::Agent]]` 或 `[[VCPTimeLine::Agent:K:Threshold]]` 注入全量月摘要及语义相关的完整月度时间线。
+- invocationCommands: 无（hybridservice类型，由 ContextBridge 触发）
+
+三、工作机制
+PluginManager 加载 → `initialize(config, dependencies)` → ContextBridge 触发时解析注入标记 → 按月聚合 Agent 活动记录 → 生成时间线和摘要 → 注入到上下文中。
+
+四、使用/排障边界
+- 适合需要为 Agent 提供历史活动回顾的场景。
+- 注入标记格式为 `[[VCPTimeLine::Agent]]` 或 `[[VCPTimeLine::Agent:K:Threshold]]`，K 和 Threshold 为可选参数。
+- 依赖 ContextBridge，需确保宿主环境已启用。
+- 超时时间较长（5分钟），大规模数据聚合时需注意性能。
+
+五、配置参数
+- configSchema: 无（空对象）
+
+六、待验证项
+- 时间线生成和注入端到端流程。
+- K 和 Threshold 参数的具体语义。
+
+
+- 超时5分钟在大量历史数据场景下是否足够。
+
+Tag: VCPTimeLine, VCPTimeLine.js, hybridservice, 时间线, 月度摘要, ContextBridge, 上下文注入, requiresContextBridge, TagMemo V9.1

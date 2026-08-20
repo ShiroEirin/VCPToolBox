@@ -1,0 +1,44 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——EmojiListGenerator（原子切片）
+
+版本：1.0.0 | pluginType: static
+
+一、插件身份
+- name: EmojiListGenerator
+- displayName: 表情包列表文件生成器
+- version: 1.0.0
+- manifestVersion: 1.0.0
+- pluginType: static
+- author: System
+- entryPoint.type: nodejs
+- entryPoint.command: node emoji-list-generator.js
+- communication.protocol: stdio
+- communication.timeout: 15000
+- command: 无（自动触发）
+
+二、核心能力
+- description（manifest）："扫描项目 image/ 目录下的表情包文件夹，并在插件自己的 generated_lists/ 目录下生成对应的 .txt 列表文件。"
+- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- capabilities: {}（空对象，无命令和占位符）
+
+三、占位符与注入点
+- systemPromptPlaceholders: 无（capabilities 为空）
+
+四、配置参数
+- configSchema.DebugMode: boolean
+- lifecycle: {}（空对象）
+
+五、调用示例
+触发示例：插件自动执行，扫描 image/ 目录下的表情包文件夹并生成 .txt 列表文件到 generated_lists/ 目录。
+- 无需手动命令调用，作为 static 插件自动运行。
+- 生成的列表文件可供其他插件或系统组件使用。
+
+六、排障建议
+- 插件无响应：检查 manifest 启用状态、emoji-list-generator.js 入口脚本、Node.js 运行时。
+- 结果异常：核对 image/ 目录是否存在表情包文件夹，generated_lists/ 目录是否有写入权限。
+- 列表为空：确认 image/ 目录下有表情包子目录。
+
+七、manifest路径
+- Plugin/EmojiListGenerator/plugin-manifest.json（存在且已启用）
+
+Tag: EmojiListGenerator, static, 静态注入, 多媒体, v1.0.0, stdio, generated_lists, TagMemo V9.1

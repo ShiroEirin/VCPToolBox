@@ -1,0 +1,138 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] Rust 向量引擎 (rust-vexus-lite) - 原子切片
+
+一、模块基本信息
+1. 模块名称：rust-vexus-lite (Vexus-Lite)
+2. 模块类型：Rust Native 模块 (NAPI-RS)
+3. 版本号：0.1.0
+4. 所属项目：VCPToolBox
+5. 源码路径：D:\github\VCP\VCPToolBox\rust-vexus-lite\
+6. 功能一句话总结：Rust 实现的高性能向量搜索引擎，通过 NAPI-RS 暴露给 Node.js，用于 SQLite 中的向量检索与 TagMemo V9.1 派生计算
+
+二、功能定位
+
+rust-vexus-lite 是 VCPToolBox 的核心 Rust 原生模块，取代了早期的纯 JavaScript HNSW 实现。它通过 NAPI-RS 桥接供 Node.js 层调用，提供以下能力：
+
+1. 向量索引管理：基于 usearch 库构建 HNSW 索引，支持创建、加载、保存、搜索、删除
+2. EPA 基底重算：在 Rust 侧完成 SVD 分解与正交基底选取，将计算密集任务下沉到原生层
+3. 残差分析：Gram-Schmidt 正交投影、Intrinsic Residual 计算
+4. 成对语义距离：Tag 级余弦相似度预计算（V8.2 PairwiseSim）
+5. SQLite 读写协调：通过 rusqlite 直接读写 SQLite WAL，与 better-sqlite3 协调
+
+三、核心数据结构
+
+以下结构定义于 lib.rs 第 12-100 行，通过 #[napi(object)] 暴露给 JS 层：
+
+1. SearchResult (行13-16)
+   - id: i64 — 对应 SQLite 中 chunks.id 或 tags.id
+   - score: f64 — 相似度分数
+   - 说明：返回 ID 而非 Tag 文本，上层 JS 拿 ID 去 SQLite 查具体内容
+
+2. SvdResult (行19-24)
+   - u: Vec<f64> — 扁平化正交基底向量集 (k * dim)
+   - s: Vec<f64> — 特征值（奇异值）
+   - k: u32, dim: u32
+
+3. OrthogonalProjectionResult (行27-31)
+   - projection / residual / basis_coefficients
+
+4. HandshakeResult (行34-37)
+   - magnitudes / directions
+
+5. ProjectResult (行40-45)
+   - projections / probabilities / entropy / total_energy
+
+6. IntrinsicResidualResult (行48-56)
+   - tag_count, computed_count, skipped_count, elapsed_ms
+   - algorithm_version, artifact_sig, effective_config
+
+7. EpaBasisResult (行60-73)
+   - success, message, tag_count, cluster_count, basis_count
+   - elapsed_ms, algorithm, phase_summary
+   - anchor_count, representative_sample_count, density_bucket_count, publish_elapsed_ms
+
+8. PairwiseSimResult (行77-83) — TagMemo V8.2 成对语义距离预计算结果
+   - pair_count, computed_count, skipped_count, stored_count, elapsed_ms
+
+9. VexusStats (行87-92) — 统计信息
+   - total_vectors, dimensions, capacity, memory_usage
+
+10. VexusIndex (行96-100) — 核心索引结构
+    - index: Arc<RwLock<Index>> — usearch 索引的线程安全包装
+    - dimensions: u32
+    - epa_pending_cache: Arc<Mutex<Option<EpaPendingCache>>>
+
+四、核心方法
+
+1. new(dim, capacity) (行106-127)
+   - 创建新的空 usearch 索引
+   - metric: L2sq（归一化向量下 L2sq 等价于 Cosine）
+   - quantization: F32
+   - connectivity: 16, expansion_add: 128, expansion_search: 64
+
+2. load(index_path, _map_path, dim, capacity) (行132-172)
+   - 从磁盘加载索引文件
+   - 保留 map_path 参数仅为 JS 调用签名兼容（映射关系由 SQLite 管理）
+   - 检查容量并自动扩容
+
+3. save(index_path) (行176-200)
+   - 原子写入：先写 .tmp 临时文件，再 rename
+   - Windows 兼容性修复：目标文件存在时先 remove 再 rename
+
+4. compute_svd (行369-425)
+   - 使用 nalgebra::DMatrix 进行 SVD 分解
+   - 计算 V^T 的行作为主成分
+   - 返回 SvdResult (u, s, k, dim)
+
+5. compute_orthogonal_projection (行429+)
+   - 高性能 Gram-Schmidt 正交投影
+   - 接收查询向量和扁平化 Tag 向量集
+
+6. 内部辅助函数：
+   - stable_sha256_hex (行818-823) — SHA-256 签名
+   - json_escape (行825-832) — JSON 转义
+   - f32_slice_to_base64 (行834-841) — 向量转 Base64
+   - normalize_f32_vector (行843-854) — 向量归一化
+
+五、依赖项 (Cargo.toml)
+
+核心依赖 (行9-37)：
+- napi 2.16 + napi-derive 2.16 — NAPI-RS 桥接
+- tokio 1 (full) — 异步运行时
+- bincode 1.3 — 序列化（替代 JSON）
+- serde 1.0 + serde_json 1.0 — 序列化框架
+- base64 0.21 + sha2 0.10 — 编码与哈希
+- usearch 2.8 — HNSW 向量索引
+- hashbrown 0.14 — 哈希 Map 优化
+- nalgebra 0.32 — 线性代数 (SVD)
+- rusqlite 0.29 (bundled) — SQLite 驱动
+- notify 6.1 — 跨平台文件监听
+
+构建配置 (行42-46)：
+- lto: true — 链接时优化
+- codegen-units: 1 — 最大优化
+- opt-level: 3 — 最高优化级别
+- strip: true — 移除符号信息
+
+六、EPA 辅助结构
+
+定义于 lib.rs 第 856 行之后：
+- EpaDensityBucket — 密度桶 (count, sum, best_idx, best_residual, samples)
+- EpaAnchorCandidate — 锚点候选 (key, density, centroid, label_idx, base_score)
+- EpaPendingCache — EPA 待处理缓存
+- EpaBasisTask — EPA 基底计算任务
+
+SQLite 操作函数 (行770-784)：
+- open_sqlite_readonly — 以 readonly + query_only 打开
+- open_sqlite_readwrite — 以读写模式打开
+- checkpoint_sqlite_wal — WAL 检查点
+
+七、与上层的关系
+
+- KnowledgeBaseManager.js (行36-45) 通过 require('./rust-vexus-lite') 加载 VexusIndex
+  - 加载失败时直接 process.exit(1)，属于关键依赖
+  - 日志前缀：'[KnowledgeBase] 🦀 Vexus-Lite Rust engine loaded'
+- KnowledgeBaseManager 中的 Rust 写入租约机制 (行68-75) 协调 rusqlite 与 better-sqlite3 的 WAL 竞态
+- TagMemoEngine.js 的 EPA、残差、成对相似度等派生计算最终都下沉到 Rust 侧执行
+
+Tag: rust-vexus-lite, 向量引擎, Rust, SQLite, usearch, rusqlite, NAPI-RS, nalgebra, SVD, EPA, TagMemo V9.1, HNSW替代

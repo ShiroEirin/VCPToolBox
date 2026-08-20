@@ -1,0 +1,93 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] VCP记忆系统——日记系统架构与四大记忆检索模式
+
+一、日记系统核心定位
+VCP日记系统不仅是"知识库"，更是"动态的个性化系统提示词注入"。AI日记本条目作为上下文注入时，直接影响并塑造AI的输出逻辑和行为模式。即使没有工具说明占位符，AI也能基于日记中内化的经验自主正确调用工具。
+
+灵魂核心化：记忆与智能体名称唯一绑定，跨模型跨平台连续积累。无论底层模型如何升级，只要"智能体名称"不变，就能访问并延续同一个记忆核心。
+
+二、日记写入机制
+AI通过输出特定标记提交日记：
+<<<DailyNoteStart>>>
+Maid: 角色名
+Date: 日期
+Folder: 目标文件夹（可选）
+Content: 日记内容
+<<<DailyNoteEnd>>>
+
+⚠️ 更正：写入后由DailyNote插件（v3.0.0常驻队列服务）持久化存储到dailynote/对应文件夹中。原"DailyNoteWrite插件"名称已失效，当前为DailyNote插件（Plugin/DailyNote/dailynote.js，68782字节，hybridservice/direct协议，version=3.0.0，timeout=1800000ms/30分钟）。写入通过进程内residentQueue Promise链串行化处理（dailynote.js:46, 1602-1621）。
+
+文件命名格式：YYYY-MM-DD-HH_MM_SS.txt
+日记格式规范：[日期] - 角色名 + 正文内容 + Tag: 关键词列表
+
+三、四大记忆检索模式
+
+模式一：All记忆完整注入（广度优先）
+语法：{{角色名日记本}} 或 <<角色名日记本>>
+⚠️ 当前语法可能仍有效，待运行时核验。
+机制：将指定文件夹下的全部日记条目作为完整上下文注入
+适用：全面回顾、综合思考、长期规划、复杂推理
+核心优势：通过"高质向量化惯性通道"效应，显著提升AI推理能力
+
+模式二：TagMemo浪潮RAG检索（深度优先）
+语法：《《角色名日记本::Time::Group::TagMemo0.75》》
+⚠️ TagMemo0.75为V5参数格式，当前已演进至V9.1。V9.1的tag_boost参数取值0~1（如0.6），加"+"后缀启用势能场重排（如0.6+）。语法可能已变化，待核验。
+机制：TagMemo浪潮算法语义检索，返回Top-K最相关条目
+参数：Time(时间加权)、Group(词元组增强)、tag_boost(V9.1标签增强+势能场)、Rerank(重排序)
+适用：快速问答、特定历史经验的决策辅助、精准信息定位
+
+模式三：元思考递归检索
+语法：[[VCP元思考:主题::Group]]
+机制：多阶段递归思维链，每个思维簇依次检索元逻辑模块
+⚠️ MetaThinkingManager.js（18296字节）确认存在于Plugin/RAGDiaryPlugin/目录中。
+适用：深度分析、结构化推理、多维度思考框架构建
+
+模式四：AI自主记忆管理
+⚠️ 更正：DailyNoteManager插件（v2.0.0，hybridservice/direct），当前提供list/organize/associate三命令。原"更名为DailyNote统一插件"描述已过时，当前为DailyNoteManager v2.0.0，command已从旧文本提交式重构为三个子命令。
+能力：list（列表）、organize（整理，内部逻辑待核验）、associate（关联）
+机制：AI主动调用管理插件对记忆库进行自优化
+
+四、向量化惯性通道理论
+⚠️ 以下为2026-03-02的理论推测，无当前源码可证实，标记为HISTORICAL_SNAPSHOT
+All记忆模式下AI表现显著优于传统RAG的理论解释：
+- 优质信息在3072维向量空间形成"优质区域"
+- Transformer初始思考坐标被锚定在优质信息场中
+- 生成路径沿高质量向量轨迹前进，形成向量化惯性
+- 经验化向量编码超越表层语义的深层模式
+类比：SDXL质量标签(best quality, masterpiece)引导模型进入高质量输出通道
+
+五、Pro引导Flash的隐性能力传递
+实验：Agent P(Pro)产生黄金上下文含COT → Agent F(Flash)在此上下文中工作
+现象：F能力非线性跃升，深度内化P的思考模式，即时发生无需训练
+机制：黄金认知脚手架 + 向量惯性 + 隐性行为克隆与认知同化
+实证：100道微积分题，Pro完成前10道后Flash继续90道，正确率显著提升
+
+六、跨模型记忆协同
+不同模型的记忆条目带来"基因库"多样性，在向量空间互补，形成"取长补短"的学习。整个AI群体通过共享记忆的学习和互动，集体知识水平持续提升，涌现出超越个体能力的智慧。
+
+七、日记文件夹结构
+dailynote/
+├── Nova/              ← Nova的私人日记本
+├── Nova的知识/        ← Nova的知识库
+├── 公共日记本/        ← 共享知识库
+├── 前思维簇/          ← 元思考-前思维
+├── 逻辑推理簇/        ← 元思考-逻辑推理
+├── 反思簇/            ← 元思考-反思
+├── 结果辩证簇/        ← 元思考-辩证
+├── 陈词总结梳理簇/    ← 元思考-总结
+├── VCP开发/           ← VCP开发文档
+├── VCP工具/           ← 插件说明文档
+└── VCP百科全书/       ← 本百科全书
+
+八、DailyNote统一插件功能
+⚠️ 更正：当前DailyNoteManager v2.0.0提供list/organize/associate三命令。原描述的"创建日记、编辑日记、删除日记、移动日记、批处理操作"等功能由DailyNote v3.0.0插件承担。
+
+附：当前插件状态
+DailyNote: v3.0.0, hybridservice/direct, 常驻FIFO队列服务（residentQueue Promise链串行化），命令为create/update，支持folder/fileName参数
+DailyNoteManager: v2.0.0, hybridservice/direct, 当前子命令为list/organize/associate
+LightMemo: 当前后端插件，提供SearchRAG/MapDistance/TagMemoAB命令，支持tag_boost V9.1与+后缀、BM25、core_tags、aimemo等参数
+RAGDiaryPlugin: 消息预处理器(MessagePreprocessor)，通过messagePreprocessors关联到messageProcessor.js（modules/messageProcessor.js:325）
+MetaThinkingManager.js: 确认存在于Plugin/RAGDiaryPlugin/目录（18296字节）
+
+关联节点：TagMemo浪潮算法, VCP元思考, 向量化惯性通道, DailyNoteManager, 灵魂核心化
+Tag: VCP日记系统, 记忆四模式, All记忆, TagMemo RAG, 元思考检索, 记忆自优化, 向量化惯性通道, Pro引导Flash, 跨模型协同, 灵魂核心化, DailyNote插件, 日记写入协议, 知识共享, DailyNote v3.0.0, DailyNoteManager v2.0.0, TagMemo V9.1, HISTORICAL_SNAPSHOT

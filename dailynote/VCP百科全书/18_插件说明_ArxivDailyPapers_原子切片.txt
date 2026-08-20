@@ -1,0 +1,44 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] 插件说明——ArxivDailyPapers（原子切片）
+
+一、插件身份
+- name: `ArxivDailyPapers`
+- displayName: `ArxivDailyPapers`
+- version: `1.0.0`
+- pluginType: `static`
+- author: `Gemini`
+- entryPoint: `node ArxivDailyPapers.js`
+- protocol: `stdio`
+- refreshIntervalCron: `*/30 * * * *`（每30分钟刷新）
+- command: 无（自动触发）
+- 当前状态：`plugin-manifest.json.block`（禁用态清单）
+
+二、核心能力
+- Fetches daily research papers from the Arxiv API and provides them as a placeholder.
+- 以自动注入/后台服务方式提供能力，不要求直接命令调用。
+- invocationCommands: 无（静态插件）
+
+三、占位符与注入点
+- systemPromptPlaceholders: `{{ArxivDailyPapersData}}`
+  - 描述：Daily research papers from Arxiv, updated every 30 minutes.
+
+四、配置参数（configSchema）
+- `ARXIV_SEARCH_TERMS` (string, required, default=`all:("Large Language Models" OR "Retrieval Augmented Generation")`): Arxiv API搜索词
+- `ARXIV_MAX_RESULTS` (number, required, default=100): 从Arxiv API获取的最大结果数
+- `ARXIV_DAYS_RANGE` (number, optional, default=1): 查询天数范围（1=今天，2=今天和昨天）
+- `ARXIV_DEBUG_MODE` (boolean, optional, default=false): 是否启用调试模式
+
+五、权限与缓存
+- permissions: fetch_data_from_url, write_to_file_system, read_from_file_system
+- cacheFiles: arxiv_papers.json
+- logLevel: info
+
+六、排障建议
+- 占位符未注入：确认插件已启用（移除.block后缀）。
+- 无结果：检查 ARXIV_SEARCH_TERMS 配置是否正确，网络是否可访问 Arxiv API。
+- 结果过期：检查 cron 是否正常执行（每30分钟刷新）。
+
+七、调用示例
+触发示例：在系统提示词中引用该插件占位符，等待周期刷新后自动注入。
+
+Tag: ArxivDailyPapers, static, 静态注入, ArxivDailyPapersData, ARXIV_SEARCH_TERMS, ARXIV_MAX_RESULTS, ARXIV_DAYS_RANGE, plugin-manifest.json.block, TagMemo V9.1

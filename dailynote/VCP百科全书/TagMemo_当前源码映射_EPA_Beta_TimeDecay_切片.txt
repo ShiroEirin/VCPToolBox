@@ -1,0 +1,47 @@
+[2026-07-22] - 哈雷酱
+[VCP百科全书] TagMemo 当前源码映射：EPA、Residual Pyramid、Beta、TimeDecay
+
+状态：PARTIALLY_STALE / SOURCE_CONFIRMED_DISCREPANCY
+最后核验：2026-07-22
+适用范围：VCPToolBox main 分支当前 RAG/TagMemo 引擎
+证据等级：SOURCE_BODY + DIRECTORY_PRESENCE
+
+一、EPA（Evolving Potential Analysis）
+- 调用链：RAGDiaryPlugin.js:817-820 调用 getEPAAnalysis。
+- 转发：KnowledgeBaseManager.js:774-778 转发至 TagMemoEngine.js:1126（getEPAAnalysis）。
+- 参数：L=logicDepth（逻辑深度），R=resonance（共振值）。
+- TagMemoEngine.js 位于 VCPToolBox 根目录（3613行），非 modules/ 下。
+
+二、Residual Pyramid（残差金字塔）
+- ResidualPyramid.js:7 定义引擎，使用 Gram-Schmidt 正交化残差。
+- TagMemoEngine.js:8、:482 实例化 ResidualPyramid。
+- 保留并下沉引擎层，V9.1 生产 ArtifactBundle 中包含锚增益/残差比例。
+
+三、applyTagBoost
+- 调用链：RAGDiaryPlugin.js:3423 → KnowledgeBaseManager.js:668-671 → TagMemoEngine.js:680-685。
+- 同名存活，实现下沉引擎层，已演进到 V9.1。
+- AIMemo+ 路径亦调用（AIMemoHandler.js:562-565）。
+
+四、动态 Beta
+- 位置：RAGDiaryPlugin.js:826-830。
+- 注释写 log(1 + R)，实际代码为 log(1 + R + 1)。
+- 完整公式：beta = sigmoid(L·log(1+R+1) − S·noise_penalty)。
+- noise_penalty 默认 0.05 取自 rag_params.json。
+- 该差异需 Git blame/回归测试，不能直接修改。状态标记：SOURCE_CONFIRMED_DISCREPANCY。
+
+五、TimeDecay
+- 独立 TimeDecayProcessor 文件不存在；功能内联于 RAGDiaryPlugin.js:3682 的 _applyTimeDecay。
+- 由 ::TimeDecay 修饰符触发（:2621-2625），半衰期公式见 :3766。
+- decayFactor = 0.5^(diffDays/halfLife)，默认 halfLife=30 天、minScore=0.5。
+- 支持修饰符：[halfLife]、[minScore]、[whitelistTags]。
+
+六、参数文件
+- RAGDiaryPlugin 目录存在 rag_tags.json。
+- RAGDiaryPlugin.js:272-296 另从项目根路径读取 rag_params.json。
+- 两者职责不同，不应仅凭目录名合并。
+
+历史来源：143_VCP记忆_TagMemo浪潮算法V5.txt、167_VCP更新_RAG模块化重构与Agent任务系统.txt。
+待验证边界：Beta 意图、参数实时加载、PSR 等价实现、TimeDecay 与 Rerank 的组合效果。
+未写入内容清单：未称 V9.1 为完整算法版本；未把注释公式当作实现；未断言参数变更无需重启的所有路径。
+关联节点：TagMemo_V5 历史快照、RAGDiaryPlugin、KnowledgeBaseManager、TagMemoEngine、ResidualPyramid、rag_tags/rag_params。
+Tag: TagMemo, EPA, ResidualPyramid, applyTagBoost, DynamicBeta, log差异, TimeDecay, _applyTimeDecay, SOURCE_CONFIRMED_DISCREPANCY
