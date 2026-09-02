@@ -1,5 +1,6 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] 插件说明——RAGDiaryPlugin（原子切片）修正版
+最后核验：2026-09-02（第13次上游合并：7a05b29e 兼容反转义净化器 + 05552bfd fix）
 
 一、插件身份
 - manifest 名称：`RAGDiaryPlugin`
@@ -16,6 +17,7 @@
   - 旧名 `DailyNoteEdit` 已拆分为独立的 `DailyNoteEditor`
 - 支持日记内容增量向量化与大规模变化下全量重建策略。
 - 向量索引底层从 HNSW 演进为 SQLite + rust-vexus-lite，通过 SQLite WAL 模式实现增量更新。
+- 【2026-09-02 第13次上游合并】7a05b29e"兼容反转义净化器"+05552bfd：TextSanitizer.js 新增 **TOOL_REQUEST_ESCAPE / 「始ESCAPE」「末ESCAPE」** 反转义协议——日记文本中嵌入的工具块用 ESCAPE 边界符转义，检索注入时还原，避免日记里的工具块样例被误执行；RAGDiaryPlugin.js +109 行（配合 SemanticGroupEditor v2.0.0 加权查询）。另外 39139988"简化hornet进入无向量管线"：Agent/Hornet.txt 精简 + TVStxt/toollite.txt +107 行，Hornet 走免向量轻管线。
 - 结合 BM25 混合检索、多阶段重排（含 RRF 融合），提升长周期记忆召回稳定性。
 - 新增能力：
   - BM25 关键词初筛与 BM25-向量混合打分（BM25QueryOptimizer）

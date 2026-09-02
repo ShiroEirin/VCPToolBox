@@ -1,6 +1,12 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 ⚠️ VCPChat前端模块，2026-03后新增了大量模块（Desktopmodules/Agenttaskmodules等），以下内容可能不完整
 [VCP百科全书] Canvasmodules - 协同Canvas编辑模块
+
+【2026-09-02 第13次上游合并重构】8b4e2bb9"重构canvas系统"+a6f45d11"优化canvas ui"+配套：
+- Canvasmodules/canvas.js +69、canvas.css +48、canvas.html +19
+- modules/ipc/canvasHandlers.js +234 行 IPC 扩展；新增 tests/canvas-edit-approval.test.js（画布编辑审批测试）
+- VCPDistributedServer 侧配套：VCPChat\VCPDistributedServer\Plugin\FileOperator +47 行（配合画布文件读写）、VCPDistributedServer.js +55 行
+- 新增 modules/services/attachmentDialogState.js（附加文件管理器 d516dbf1"优化附加文件管理器"，tests/attachment-dialog-state.test.js 护栏）
 
 一、模块基本信息
 1. 模块名称：Canvasmodules / 协同Canvas编辑模块

@@ -1,0 +1,43 @@
+[2026-09-02] - 哈雷酱
+[VCP百科全书] VCPChat 聊天内核深度解耦（modules/chat/ 事件契约 + 流式渲染器 v4）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-02（第13次上游合并，e1dbc98d 流式渲染器v4 + 契约证据体系落地）
+适用范围：`VCPChat\modules\chat\`（25文件）、`VCPChat\docs\contracts\`、`VCPChat\modules\renderer\` 当前源码
+事实来源：modules/chat/ 文件清单实测 + chatEventContract.js / streamCoordinator.js / singleChatRequestOrchestrator.js 源码 + docs/contracts/README.md + docs/chat-kernel-*.md 路线图
+
+# 一、定位
+
+上游把聊天功能从 main.js 巨石中拆出为独立的"聊天内核层"：请求编排、流会话、事件契约、历史变更权限、持久化分片、渲染表面各自成模块，并用机器可校验的契约证据系统（chat contracts）防止事件链路失控。main.js 本轮净变化 853 行。
+
+# 二、modules/chat/ 25个文件分片（全部本轮新增/重写）
+
+- **编排**：singleChatRequestOrchestrator.js (388行) 单聊请求唯一编排入口，归一化 content parts、首文本片段更新；导入 tavernRulesEngine。
+- **流会话**：streamCoordinator.js (265行，冻结 DTO + deferred)、streamSession.js (85行)、streamConsumerRegistry.js (55行)、streamTransientHistory.js (113行)、vcpStreamBridge.js (164行，桥接 VCP 后端流)。
+- **事件契约**：chatEventContract.js (42行)——DOM/Electron-free 的类型化词汇表：STREAM_TERMINAL_KINDS = completed/failed/cancelled/discarded；CHAT_EVENT_CONTRACTS 定义 chat.stream.started/chunk/final/completed/failed/cancelled/discarded，只有 completed 是 durable:true；normalizeChatTerminal 把 end/done/success/stop 归一为 completed，abort/cancel 归一为 cancelled。
+- **权限与持久化**：chatHistoryMutationAuthority.js (77行)、chatHistoryPersistence.js (125行)、mainChatStateAuthority.js (61行)。
+- **表面与呈现**：chatSurface.js (59行)、chatSurfaceSlots.js (42行)、surfaceConversation.js (41行)、chatPresentationSkin.js (19行)、chatPresentationState.js (33行)、chatThemePlugin.js (14行)。
+- **其余**：chatOperation.js (34行)、chatPluginManifest.js (81行)、chatRepository.js (24行)、memoryChatRepository.js (18行)、contentModes.js (5行)、contentRuntime.js (75行)、contentTransforms.js (22行)。
+
+# 三、契约证据系统（docs/contracts/）
+
+chat-contract.schema.json (28行) 机器校验 schema + chat-contracts.json (113行) 人工契约登记 + generated/chat-event-graph.json (9876行，脚本生成不手编) + snapshots/（chat-stream、cancel、discarded、failed 四类终局快照各22行）。npm scripts：build:chat-event-graph、check:chat-contracts、test:chat-contract-invariants、guard:chat-kernel-consumers。动态事件入口必须在契约 dynamicSites 登记，未登记入口使 gate 失败（不许用无关 allowlist 掩盖）。
+
+# 四、流式渲染器 v4（commit e1dbc98d"大工程推进，流式渲染器v4"）
+
+- modules/renderer/streamManager.js **1442 行重写级迭代**；contentProcessor.js (497行变化)；新增 markdownCodeDomainScanner.js (204行，代码围栏域扫描防误渲染)；messageRenderer.js (123行变化)；mainChatStreamConsumer.js / mainChatSurfaceAdapter.js 接入消费端。
+- 配套：chatHistoryPersistence.js (64行变化)、streamTransientHistory.js (32行变化)。
+- 关联提交：d39bec68 修复异步群聊解耦竞态、b749a61d 加固竞态防御、27330c2d 链路迭代加速、8c664bdc 重构 vchat 滚动器（modules/ui-helpers.js +156行、styles/chat.css +17行）。
+
+# 五、路线图文档（证据链）
+
+docs/chat-event-producer-consumer-roadmap.md (218行)、chat-kernel-deep-decoupling-roadmap.md (45行)、chat-kernel-evidence-and-contracts-roadmap.md (180行)、chat-kernel-vd7-final-audit.md (66行)、docs/2026-08-chat-kernel-and-ui-roadmaps/ 目录（历史 roadmap 4篇）。
+
+# 六、与既有生态关系
+
+- hasUserParticipation（modules/ipc/chatHandlers.js:1400）未读判定逻辑保留在 IPC 层，与内核层正交。
+- 话题未读规则：手动未读始终保留；Agent/TopicSponsor 旧标记在用户参与后失效（unreadSource === 'manual' || !hasUserParticipation(history)）。
+- 渲染表面同时服务经典 UI 与 next-ui/interactive-chat-app.js、standalone-chat-app.js 新壳。
+
+关联节点：VCPChat 前端架构(162)、VCP-CDS(216)、Scriptorium 流式文档(222)、启动器体系(225)
+Tag: VCP前端, VCPChat, 聊天内核, 深度解耦, streamCoordinator, chatEventContract, 事件契约, 流式渲染器v4, streamManager, 竞态加固, vchat滚动器, 契约证据, chat-event-graph, 第13次上游合并

@@ -2,20 +2,20 @@
 [VCP百科全书] MediaRenderer - HTML/SVG/程序音乐媒体生成器
 
 状态：CURRENT_VERIFIED
-最后核验：2026-07-31（第7次上游合并后重新核验，v1.1.0→v2.2.0重大升级）
+最后核验：2026-09-02（第13次上游合并，e2762e4d 新增鼠标主题生成器功能，v2.2.0→v2.3.0）
 适用范围：`Plugin/MediaRenderer/` 当前源码
 事实来源：
-- `Plugin/MediaRenderer/plugin-manifest.json` (v2.2.0, manifestVersion 1.0.0)
-- `Plugin/MediaRenderer/MediaRenderer.js` (623行→大幅扩展)
-- `Plugin/MediaRenderer/AudioSynthesisWorker.js` (255行, 新增)
-- `Plugin/MediaRenderer/README.md` (467行, 从257行扩展)
-- `Plugin/MediaRenderer/config.env.example` (40行, 从21行扩展)
+- `Plugin/MediaRenderer/plugin-manifest.json` (v2.3.0, manifestVersion 1.0.0)
+- `Plugin/MediaRenderer/MediaRenderer.js` (本轮 +489 行)
+- `Plugin/MediaRenderer/CursorThemePackager.js` (697行, 本轮新增)
+- `Plugin/MediaRenderer/CURSOR_THEME_PROTOCOL.md` (370行, 本轮新增)
+- `Plugin/MediaRenderer/README.md` (+159 行扩展)
 - 上游commit: `59a92268 完成多媒体代码插件工程化全套落地` (2026-07-31)
 
 一、插件基本信息
 1. 插件名称：MediaRenderer / HTML/SVG/程序音乐媒体生成器
 2. 插件类型：hybridservice
-3. 版本号：2.2.0（从v1.1.0升级）
+3. 版本号：2.3.0（2026-09-02 第13次上游合并，e2762e4d"新增鼠标主题生成器功能"）
 4. 通信协议：direct, timeout=300000ms (5分钟)
 5. 入口文件：MediaRenderer.js
 6. requiresAdmin: true（v2.2.0新增，因GenerateAudio需管理员验证码）

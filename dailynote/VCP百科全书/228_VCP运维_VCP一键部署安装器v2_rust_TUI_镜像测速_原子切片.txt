@@ -1,0 +1,35 @@
+[2026-09-02] - 哈雷酱
+[VCP百科全书] VCP 一键部署安装器 v2.0.0（vcp-installer-source，Rust TUI）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-02（第13次上游合并，04bc25ff 迭代安装器 + tag v1.4.0 同期发布）
+适用范围：`VCPToolBox\vcp-installer-source\` 当前源码（61文件）
+事实来源：Cargo.toml + 目录结构实测 + git diff fcf24e99..HEAD --stat（53文件 +13762/-5614）
+
+# 一、定位
+
+VCPToolBox 仓库自带的 Rust TUI 一键部署工具（与 VCPChat 侧 Tauri 安装器 225 是两个不同项目）。职责：自动下载 Node.js/Electron 运行时、克隆 VCP 仓库、npm 依赖安装、Electron 原生模块重编、环境配置。上游本轮继续大迭代（+13762/-5614，新增 mirrors 镜像子系统与 releases 交付目录）。
+
+# 二、架构（Cargo.toml + src/）
+
+- name `vcp-installer`，version **2.0.0**，edition 2021，license CC-BY-NC-SA-4.0，描述"VCP一键部署工具 - 自动下载运行时、克隆仓库、配置环境"。
+- TUI：ratatui 0.28 + crossterm 0.28；异步 tokio(full)；下载 reqwest 0.12 (stream+json)。
+- src/installer/：archive_ops.rs、component_ops.rs、electron_rebuild.rs（Electron ABI 重编流程）、package.rs、stream_util.rs、_verify5.py（校验脚本）。
+- 本轮新增 src/mirrors/：config.rs + mod.rs + tester.rs——镜像源自动测速切换（配套 releases/vcp-mirrors.ini、show-tui-pages.bat）。
+- src/：cache.rs（缓存）、env_log.rs、log_router.rs、ui/config_guide.rs（TUI 配置向导页）。
+
+# 三、本轮迭代内容（commit 04bc25ff"迭代安装器"+此前累积）
+
+- 镜像子系统：vcp-mirrors.ini 配置 + tester 自动探测可用镜像。
+- Electron rebuild 工序独立成 electron_rebuild.rs（对 node-pty/conpty 等 N-API 模块的安装期重编，与手动 node-gyp + Electron headers 配方同源）。
+- releases/ 交付目录 + show-tui-pages.bat 页面预览工具。
+- 上游同期发布 tag **v1.4.0**（指向 686d06c0 merge commit），为 VCPToolBox 仓库版本节点。
+
+# 四、与既有生态关系
+
+- 与 VCPChat Tauri 安装器（225）互补：本工具部署 VCP 全家桶（ToolBox+Chat），Tauri 安装器专注 VCPChat 自身。
+- 依赖 ELECTRON_GET_USE_PROXY / GLOBAL_AGENT_HTTP(S)_PROXY 等代理环境变量惯例（与本机 10809 链路一致）。
+- patch_main.js + build.bat 为 Windows 构建入口；新旧版本对比分析文档随仓库。
+
+关联节点：VCPChat Tauri 安装器(225)、node-pty 重编(74/78)、PowerShellExecutor(72)
+Tag: VCP运维, vcp-installer, Rust TUI, ratatui, 一键部署, 镜像测速, electron_rebuild, v1.4.0, 第13次上游合并

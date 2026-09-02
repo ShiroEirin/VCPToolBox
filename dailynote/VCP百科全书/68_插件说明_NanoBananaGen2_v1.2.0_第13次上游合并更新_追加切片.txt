@@ -1,0 +1,19 @@
+[2026-09-02] - 哈雷酱
+追加更新：NanoBananaGen2 v1.2.0（第13次上游合并，commit 83e4a4f5 + 411dc628 PR#459）
+
+（本追加切片对应主切片 68_插件说明_NanoBananaGen2_原子切片.txt，主切片头部已同步 v1.2.0）
+
+一、v1.2.0 变更（相对 v1.1.0）
+1. displayName 从"Gemini 3 NanoBanana 图像生成 (官方)"改为"NanoBanana 图像生成 (自定义渠道)"，描述明确"可接入任何 /v1/chat/completions 兼容服务、多渠道绑定轮询（URL+KEY+多MODEL 对应）、单渠道多模型随机"
+2. 渠道故障转移（channel failover）：请求失败自动切换下一渠道
+3. details 响应裁剪：base64 图片数据不再塞进 details（防止上下文爆炸）
+4. http 代理与本地 URL 修复
+5. 新增 config.env 参数（config.env.example +9 行）：
+   - SAFETY_BYPASS_TEXT——追加到 prompt 尾部的破限文本，留空则完全不追加，不设置时用源码内置默认值
+   - MAX_RETRIES=2——429/503 最大重试次数
+   - RETRY_BASE_DELAY_MS=2000——重试基础等待毫秒
+   - USE_PUBLIC_URL 说明修正：true=输出不带端口的公网 URL（需反代已做端口映射）；false=本地部署
+6. plugin-manifest.json configSchema 同步登记 USE_PUBLIC_URL/SAFETY_BYPASS_TEXT/MAX_RETRIES/RETRY_BASE_DELAY_MS
+7. 新增 package.json（插件本地依赖声明）
+
+Tag: NanoBananaGen2, v1.2.0, 渠道故障转移, failover, SAFETY_BYPASS_TEXT, MAX_RETRIES, RETRY_BASE_DELAY_MS, 第13次上游合并

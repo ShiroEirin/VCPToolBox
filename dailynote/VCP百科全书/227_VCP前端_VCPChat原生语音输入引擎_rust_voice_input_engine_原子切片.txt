@@ -1,0 +1,40 @@
+[2026-09-02] - 哈雷酱
+[VCP百科全书] VCPChat 原生语音输入引擎（rust_voice_input_engine + adapter + 右Alt听写）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-02（第13次上游合并，a892e459 增强语音聊天可靠性，引擎首次收录）
+适用范围：`VCPChat\rust_voice_input_engine\`、`VCPChat\modules\voice\voice-input-engine-adapter.js`、`VCPChat\preloads\voice-input-capture.js`、`VCPChat\Voicechatmodules\` 当前源码
+事实来源：Cargo.toml + src/main.rs(963行) + adapter(361行) + preload(28行) + voicechat.js(631行) 实测 + test-right-alt.ps1(192行)
+
+# 一、定位
+
+Rust 编写的跨平台原生"语音输入焦点与快捷键 sidecar"。解决 Windows 语音听写（Win+H）在 Electron 应用中无法自动唤起/无焦点反馈的问题：由原生进程负责按键注入与焦点仲裁，Electron 主进程通过 stdin/stdout JSON 行协议与之通信。package.json 的 build 脚本已改为 `node rust_chat_data_service/build-runtime.js && node rust_voice_input_engine/build-runtime.js`（两个 Rust 运行时都要构建）。
+
+# 二、引擎本体（rust_voice_input_engine/）
+
+- Cargo.toml：name `vcp_voice_input_engine`，version 0.1.0，edition 2021，描述"VCP cross-platform native voice input focus and shortcut sidecar"。依赖 serde/serde_json；Windows 目标段条件依赖。
+- src/main.rs（963行）两种输入模式：
+  - `windows_voice_typing`（别名 win_h，code 1）：注入 Win+H 唤起系统语音输入。
+  - `right_alt_hold`（别名 right_alt，code 2）：按住右 Alt 触发听写，HOTKEY_POLL_MS=12ms 轮询，RIGHT_ALT_WATCHDOG_MS=15秒看门狗。
+  - 全局状态：OUTPUT_LOCK 输出互斥、CONFIGURED_HOTKEY_VK、HOOK_KEY_PRESSED 原子量；mpsc channel + 线程模型。
+- 运行时产物：`runtime/win32-x64/vcp_voice_input_engine.exe`（随仓库分发）。
+- 测试脚本：test-right-alt.ps1（192行），支持 ScanCode/VirtualKey 两种注入模式、50-30000ms 时长等参数。
+
+# 三、Electron 侧接入
+
+- **modules/voice/voice-input-engine-adapter.js**（361行）`VoiceInputEngineAdapter` 类：spawn 子进程 + readline 逐行解析 JSON 事件；DEFAULT_REQUEST_TIMEOUT_MS=5000、DEFAULT_READY_TIMEOUT_MS=10000；pendingRequests Map 按序号管理请求；lifecycleState 状态机（stopped→...）；事件监听器 Set；startPromise 防 double-start。
+- **preloads/voice-input-capture.js**（28行）渲染层桥。
+- **Voicechatmodules/voicechat.js**（631行，本轮 +245 行迭代）与 voicechat.html：语音聊天 UI 主体，配套提交 3f01311f 优化语音体验。WebIndexTTS2 开发文档与示例引用清理（server.js 1023行精简）。
+
+# 四、语音链路整体（本轮多提交）
+
+Voicechatmodules 提交链：3f01311f 优化语音体验 ← 4df8f4fa 加固 ← accc88e5 狂暴工程迭代收尾 ← 8fecce4b 加速工程推进 ← b9e2b573/f58a7b9d/03abbcb6 持续迭代。音频引擎 audio_engine/audio_server_rubato.exe (9.9MB) 本轮更新。ipc 层 modules/ipc/voiceHandlers.js 本轮 +600 行。
+
+# 五、与既有生态关系
+
+- 独立于 TTS 输出链（WebIndexTTS2 是 TTS 合成，本引擎是"输入"侧听写）。
+- 与 VCP-CDS(216) 平级的 Rust sidecar，安装器 `--include-rust` 联动构建（225）。
+- modules/voice/ 目录为新增顶层模块组（voice-input-engine-adapter.js 361行）。
+
+关联节点：VCPChat 语音聊天(138)、Tauri 安装器(225)、VCP-CDS(216)
+Tag: VCP前端, VCPChat, 语音输入, rust_voice_input_engine, 右Alt, Win+H, 听写, sidecar, voice-input-engine-adapter, Rust, 第13次上游合并

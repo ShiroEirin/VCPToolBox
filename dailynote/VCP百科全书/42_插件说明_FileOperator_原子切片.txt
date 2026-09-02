@@ -1,4 +1,4 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] FileOperator - 文件操作器
 
 一、插件基本信息
@@ -6,6 +6,11 @@
 2. 插件类型：同步插件 (synchronous)
 3. 版本号：1.0.1
 4. 所属模块：VCPDistributedServer/Plugin
+
+【2026-09-02 第13次上游合并更新】ff728009"工程推进标准化"：
+- ApplyDiff 参数名规范化：searchString/replaceString → target/replace（getTargetReplaceParameters 新字段优先，旧字段保留兼容，避免已有 Agent 提示词和批量调用迁移失败）
+- 报错文案同步：Search string → Target
+- VCPChat 侧同轮 8b4e2bb9"重构canvas系统"也给 VCPChat\VCPDistributedServer\Plugin\FileOperator 增加 47 行配合改动（FileOperator.js +47、plugin-manifest.json +4）
 5. 功能一句话总结：强大的文件系统操作插件，支持读写删除移动复制，自动解析PDF/Word/Excel
 
 二、功能定位
@@ -340,4 +345,4 @@ downloadDir:「始」D:/downloads「末」
 
 注意：本次重构只改 Plugin/FileOperator（VCPToolBox 侧），VCPChat 侧 VCPDistributedServer/Plugin/FileOperator 同步获得（上游 884b1a20 另有 resolveAndNormalizePath 规范化）。
 
-Tag: 文件操作, 读写删除, PDF解析, 文件搜索, 下载上传, 目录管理, 权限控制, 行尾保留, 编码检测, 参数容错, 第12次上游合并
+Tag: 文件操作, 读写删除, PDF解析, 文件搜索, 下载上传, 目录管理, 权限控制, 行尾保留, 编码检测, 参数容错, 第12次上游合并, ApplyDiff参数规范化, target/replace, 第13次上游合并

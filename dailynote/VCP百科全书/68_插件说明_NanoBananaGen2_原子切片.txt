@@ -1,10 +1,10 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] 插件说明——NanoBananaGen2（原子切片）
 
 一、插件身份
 - name: NanoBananaGen2
-- displayName: Gemini 3 NanoBanana 图像生成 (官方)
-- version: 1.1.0
+- displayName: NanoBanana 图像生成 (自定义渠道)
+- version: 1.2.0（2026-09-02 第13次上游合并升级；1.1.0→1.2.0）
 - pluginType: synchronous
 - command: NanoBananaGenerateImage, NanoBananaEditImage, NanoBananaComposeImage
 - 调用时使用工具名 NanoBananaGen2

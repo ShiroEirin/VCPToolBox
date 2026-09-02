@@ -129,3 +129,11 @@ Tag: KnowledgeBaseManager, SQLite, rust-vexus-lite, WAL, 向量索引, 索引仓
 - `db.prepare()` 语句统一管理（manifest/changedRows/deletedRows/tag_index_baselines generation 自增）
 - publish 流程事务化，避免中途失败导致索引不一致
 - 强化 generation 代际基线管理（tag_index_baselines 表）
+
+九、2026-09-02 第13次上游合并更新（commit aa5610b2"强化tag迭代资产管理器"）
+- modules/knowledgeBase/tagConsistencyService.js 本轮 +204 行级强化：tag 迭代资产管理器升级
+- TDBKnowledge.js 冷知识存储升级至 TriviumDB 0.7.5（commit 8a274bd4，PR#454 前置），新增 env 可调参数：TDB_KNOWLEDGE_EXPECTED_NODES（期望节点数校验）、TDB_KNOWLEDGE_MEMORY_LIMIT_MB（内存上限）、TDB_KNOWLEDGE_AUTO_BUILD_QUIVER（默认 true 自动构建索引）
+- EmbeddingUtils.js +34 行配合调整；新增独立向量日志区（e1435d76）
+- tests/tagConsistencyIncrementalIndex.test.js（254行）与 tests/ragRefreshSystemBoundary.test.js（119行）新增测试护栏
+
+Tag(追加): TriviumDB 0.7.5, tagConsistencyService, TDB_KNOWLEDGE_EXPECTED_NODES, 第13次上游合并

@@ -1,11 +1,10 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] 插件说明——SemanticGroupEditor（原子切片）
-版本：1.0.0 | pluginType: synchronous | protocol: stdio | timeout: 10000ms
+版本：2.0.0 | pluginType: synchronous | protocol: stdio | timeout: 10000ms
 
 一、插件身份
 - name: `SemanticGroupEditor`
 - displayName: `语义组编辑器`
-- version: `1.0.0`
 - pluginType: `synchronous`
 - protocol: `stdio`
 - timeout: `10000`
@@ -14,13 +13,23 @@
 - command: `QueryGroups`, `UpdateGroups`
 
 二、命令与参数
-命令 `QueryGroups`：查询当前系统中所有的语义词元组，返回组名和对应的词元列表。无参数。
+命令 `QueryGroups`：查询语义词元组。不传 groupname 返回全部组概览；传入 groupname（多个组英文逗号分隔）只返回指定组详情，不存在的组名明确提示。
 
 命令 `UpdateGroups`，参数如下：
 - `groupname`（必需，字符串）：要更新或创建的组名
 - `groupwords`（必需，字符串）：词元列表，用英文逗号分隔
 
-支持批量操作（使用数字后缀 command1/groupname1/groupwords1, command2/groupname2/groupwords2...）
+命令 `SetWeight`（v2.0.0 新增）：设置语义词元组权重。
+
+所有命令支持串语法批量操作（使用数字后缀 command1/groupname1/groupwords1, command2/groupname2/groupwords2...）。
+
+三、v2.0.0 变更（2026-09-02 第13次上游合并，commit 9dc33601 PR#454"weighted queries and serial commands"）
+1. 版本 1.0.0→2.0.0，author 从 Roo 改为 lionsky & infinite-vector
+2. 描述改为"用于查询、更新和设置 RAG 知识库中语义词元组权重的插件。所有命令支持串语法批量操作"
+3. QueryGroups 支持 groupname 过滤参数（按名查询）
+4. 新增 SetWeight 命令——加权查询体系（配合 RAGDiaryPlugin 加权检索）
+5. 串语法（serial commands）批量操作标准化
+6. SemanticGroupEditor.js 本轮 310 行级重写
 
 三、核心能力
 - 一个用于查询和更新RAG知识库中语义词元组的插件

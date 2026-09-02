@@ -1,0 +1,34 @@
+[2026-09-02] - 哈雷酱
+[VCP百科全书] VCPChat 引导启动器体系（bootstrap + scripts + launchers + Tauri 安装器）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-02（第13次上游合并，VCPChat 0330670c..668b232b，引导体系首次成体系落地）
+适用范围：`VCPChat\bootstrap\`、`VCPChat\scripts\vcpchat-*.mjs`、`VCPChat\launchers\`、`VCPChat\apps\bootstrap-installer\`、`VCPChat\NativeSpalash\` 当前源码
+事实来源：目录清单 + 各文件行数实测 + apps/bootstrap-installer/README.md + docs/vcpchat-launcher-user-guide.md + docs/vcpchat-managed-launch-architecture.md (803行) + package.json scripts 块
+
+# 一、定位
+
+VCPChat 本轮（2026-08~09 上游工程推进）把"从零源码到可启动"的全过程工程化，形成四层引导体系：普通用户图形入口（launchers）、开发者诊断修复命令（scripts/vcpchat-*.mjs）、故障恢复界面（bootstrap/recovery）、正式安装器（apps/bootstrap-installer，Tauri）。设计灵感标注为 Hermes 风格，视觉使用 VCPChat 极简 Aero token。
+
+# 二、四层结构（实测行数）
+
+1. **图形入口 `launchers/`**：VCPChat-Launcher.vbs (Windows) / VCPChat-Launcher.command (macOS) / VCPChat-Launcher.sh (Linux) / VCPChat-Setup.command（已构建 Installer 时）。双击即打开图形安装器，通过 `--source-root` 传入源码根目录。用户明确点击修复后才修改环境；启动成功并收到主窗口 ready 信号后启动器自动退出。
+2. **开发者命令 `scripts/vcpchat-*.mjs`**（9个，package.json scripts 挂载）：doctor(55行诊断)、start:managed→dev-launcher(314行受控启动)、vcpchat(入口)、vcpchat:ui→recovery-ui(26行)、bootstrap(63行)、repair:managed→repair(121行)、update:managed→update(156行)、runtime-closure(59行闭包校验)、release-evidence(60行)、packed-smoke(112行打包冒烟)。
+3. **恢复平面 `bootstrap/`**：recovery-main.cjs(125行)、recovery-preload.cjs(19行)、recovery-renderer.js(247行)、recovery.css(86行)、recovery.html(70行)。独立于 Electron 应用的失败诊断 UI。
+4. **安装器 `apps/bootstrap-installer/`**：Tauri 2 项目，productName "VCPChat Setup"，version 0.1.0，identifier com.vcpchat.setup，最低 Windows 11。src-tauri 含 lib.rs(1136行)、manifest.rs(142行)、process.rs(180行)、source.rs(255行)、storage.rs(218行)；前端 src/ 含 app.tsx(160行)、store.ts(223行)、theme.ts。Windows 发布物为单文件根级 `VCPChat-Setup.exe`，不做 NSIS/MSI。注意：README 明示"缺源码安装仍 fail-closed（签名载荷下载未接通），开发构建不可当生产安装器用"。
+
+# 三、周边配套
+
+- **NativeSpalash/**：Rust 原生启动画面（main.rs 本轮 +317 行），新增内嵌字体 ZiHun219Hao-MengQuLuoLiTi-2.ttf (9.3MB)、build_and_deploy.bat(63行)；仓库根新增 StartVCPchat.exe (13.4MB) 托管启动器产物，旧 NativeSplash.exe 被移除。
+- **契约文档**：docs/vcpchat-managed-launch-architecture.md(803行)、vcpchat-tauri-installer-development-plan.md(253行)、vcpchat-installer-commercial-readiness.md(61行)、vcpchat-bootstrap-contracts.md(101行)、project-entrypoints.md(56行入口权威地图)。
+- **CI**：.github/workflows/vcpchat-installer.yml(78行) 与 chat_kernel_ui.yml(92行) 新增。
+- **既有脚本不受影响**：launchers 不替换 npm start / start.bat / 启动Vchat.vbs。
+
+# 四、与既有生态关系
+
+- Recovery UI 与聊天内核（226）解耦：recovery 渲染层不依赖 chat surface。
+- 安装器拥有 modules/services/chatDataService/bin/ 与 audio_engine/bin/ 生成物的修复权（Git 脏检查忽略）。
+- bootstrap-installer 依赖 `--include-rust` 同时构建 VCP-CDS 与平台 Rust 运行时。
+
+关联节点：VCPChat 主进程(main.js)、VCP-CDS(216)、chat 内核(226)、vcp-installer(228)
+Tag: VCP前端, VCPChat, 引导启动, bootstrap, recovery, Tauri, 安装器, Hermes, doctor, repair, StartVCPchat, NativeSpalash, launchers, 第13次上游合并

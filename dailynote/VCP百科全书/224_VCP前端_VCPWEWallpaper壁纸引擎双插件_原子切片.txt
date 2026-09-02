@@ -1,9 +1,11 @@
-[2026-08-20] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] VCPWEWallpaper + VCPWEWallpaperUI（Wallpaper Engine 壁纸双插件）
-状态：CURRENT_VERIFIED
-最后核验：2026-08-20（第12次上游合并，VCPChat 215提交，新插件首次收录）
+状态：DEPRECATED_BY_UPSTREAM（上游已停用）
+最后核验：2026-09-02（第13次上游合并：上游把两个插件的 plugin-manifest.json 重命名为 plugin-manifest.json.block，插件已被禁用；VChatAutoTTS、VChatDynamicWallpaper 也同批被 block）
 适用范围：`VCPChat\VCPDistributedServer\Plugin\VCPWEWallpaper\` 与 `VCPChat\VCPDistributedServer\Plugin\VCPWEWallpaperUI\` 当前源码
-事实来源：两者 plugin-manifest.json + README.md + lib/ 目录结构
+事实来源：两者 plugin-manifest.json.block + README.md + lib/ 目录结构 + git diff 0330670c..HEAD rename 记录
+
+⚠️ 状态变更警告：上游在 0330670c..668b232b 合并区间内将本双插件的 manifest 改为 .block 后缀（R100 纯重命名，代码本身未改动），意味着**插件管理器不再加载这两个插件**。若需继续使用壁纸功能，需在插件管理器中重新启用（去掉 .block）或关注上游后续替代方案。VChatAutoTTS（R096，32行变化）与 VChatDynamicWallpaper（R096）同批被 block。
 
 # 一、定位（前后端配套双插件）
 

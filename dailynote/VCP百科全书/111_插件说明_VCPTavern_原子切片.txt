@@ -1,6 +1,7 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] 插件说明——VCPTavern（原子切片）修正版
 版本：0.1.0 | pluginType: hybridservice
+最后核验：2026-09-02（第13次上游合并：c572791a + e364f79e 占位符 allowlist 编辑器 + b56110a AdminPanel 构建产物清理）
 
 一、插件身份
 - manifest 名称：`VCPTavern`
@@ -16,6 +17,7 @@
 - 支持相对注入与深度注入，控制注入位置与优先级。
 - 提供时间感知变量（当前时间、距上次会话时长等）。
 - 类似 SillyTavern 的高级上下文编辑功能。
+- 【2026-09-02 第13次上游合并】c572791a（PR#455 Wooden-Gear）为 VCPTavern 新增 **allowlist 占位符解析**：只有列入白名单的占位符才会在 VCPTavern 管理面板可配置/可解析，VCPTavern.js 重构 +213/-70；配套 AdminPanel-Vue 新增 vcptavern_editor（Tavern 占位符 allowlist 编辑器，useVcptavernEditor.ts/VcptavernEditor.vue/vcptavern_editor.html/js/css）；b56110a 清理过时的 AdminPanel 构建产物。
 
 三、触发方式
 在角色系统提示词中加入占位符：

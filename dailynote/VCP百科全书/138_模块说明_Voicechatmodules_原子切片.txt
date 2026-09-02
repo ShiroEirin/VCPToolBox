@@ -1,6 +1,13 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 ⚠️ VCPChat前端模块，2026-03后新增了大量模块（Desktopmodules/Agenttaskmodules等），以下内容可能不完整
 [VCP百科全书] Voicechatmodules - 语音聊天模块
+
+【2026-09-02 第13次上游合并语音大迭代】
+- voicechat.js +245 行、voicechat.html 更新；提交链：3f01311f 优化语音体验 ← 4df8f4fa 加固 ← accc88e5 狂暴工程迭代收尾 ← 8fecce4b/b9e2b573/f58a7b9d/03abbcb6 持续迭代
+- modules/ipc/voiceHandlers.js +600 行 IPC 扩展
+- 新增**原生语音输入引擎**（详见切片227）：rust_voice_input_engine（Rust sidecar，Win+H/右Alt听写）+ modules/voice/voice-input-engine-adapter.js(361行) + preloads/voice-input-capture.js
+- audio_engine/audio_server_rubato.exe (9.9MB) 更新；WebIndexTTS2 server.js 大精简（1023行级删减，移除示例引用资产）
+- tests/voice-input-engine.test.js、tests/message-renderer-tts.test.mjs 新增
 
 一、模块基本信息
 1. 模块名称：Voicechatmodules / 语音聊天模块

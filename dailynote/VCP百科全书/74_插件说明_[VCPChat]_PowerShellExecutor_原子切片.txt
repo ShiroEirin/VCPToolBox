@@ -1,6 +1,8 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] PowerShellExecutor - PowerShell命令执行器
 ⚠️ 前端分布式插件，manifest定义在VCPChat仓库
+
+【2026-09-02 第13次上游合并更新】fc3b81f1"修复重复的ipc定义"：PowerShell GUI 专属窗口控制不再复用应用级 minimize-window/maximize-window/close-window 通道——ipcMain 是全局事件总线，通用通道会让日志中心等其它窗口的操作误落到此 guiWindow，且 PowerShell 自身消息与应用级处理器重复执行（最大化切换两次等于没变）。新增 isPowerShellGuiSender(event) 判定（event/guiWindow 存活校验）；PowerShellExecutor.js +44、gui/preload.js +9。
 
 一、插件基本信息
 1. 插件名称：PowerShellExecutor / PowerShell命令执行器

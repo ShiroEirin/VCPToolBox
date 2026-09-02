@@ -1,17 +1,40 @@
-[2026-08-20] - 哈雷酱
-[VCP百科全书] VCPMobileSync 移动端双向增量同步服务（Wire 协议 1.2）
+[2026-09-02] - 哈雷酱
+[VCP百科全书] VCPMobileSync 移动端双向增量同步服务（Wire 协议 1.2 → 1.4）
 状态：CURRENT_VERIFIED
-最后核验：2026-08-20（第12次上游合并，VCPChat 215提交，新插件首次收录）
+最后核验：2026-09-02（第13次上游合并，plugin-manifest 1.2.0→1.4.0，Wire 协议硬切 1.4，同步引擎大规模重构约 50 提交）
 适用范围：`VCPChat\VCPDistributedServer\Plugin\VCPMobileSync\` 当前源码
-事实来源：plugin-manifest.json + README.md + index.js + sync/ + transport/ 目录结构
+事实来源：plugin-manifest.json + README.md + index.js + sync/ + transport/ 目录结构 + git log 0330670c..HEAD（27文件 +6001/-2948）
 
 # 一、定位
 
 VCPChat 桌面端的专属分布式服务插件，让 VCPChat 桌面端与 VCPMobile 手机端进行可诊断、失败即停的双向增量同步。采用 **Double-Track 3-Tier（双轨三层）** 同步架构，底层设计多层级 Merkle 聚合指纹算法与 NDJSON 流式吞吐防线。
 
+# 二、Wire 协议 1.4 硬切（2026-09-02 第13次上游合并）
+
+- plugin-manifest version 1.2.0→**1.4.0**；README 徽章 Wire Protocol 1.4。
+- **协议 1.4 硬切与兼容边界**（README 第102行起）：VERSION_CHECK { mobileVersion, protocolVersion: "1.4" } / VERSION_ACK { pluginVersion: "1.4.0", protocolVersion: "1.4" }。兼容性只由 protocolVersion 精确判断；pluginVersion 仅诊断信息。**旧 Wire 不保留别名或双栈**。
+- Wire 1.4 使用**完整复合身份**（compound identities：ownerType/ownerId/topicId 三元组）、强类型状态、统一 ok/error 外壳。Phase 3 每个 Topic 的 decision 必须是判别联合之一：`{ ..., ok: true, ... }` 或 `{ ownerType, ownerId, topicId, ok: false, error: WireSyncError }`。
+- 中央模式 Mobile→Desktop 消息同步会投影并写入 history.json；只修改 MobileSync 插件与 VCP-CDS 同步接口，不改模型调用/提示词/渲染。
+
+# 三、本轮约 50 个同步引擎提交的主线（0330670c..668b232b）
+
+- **CDS 对齐**：12f7315a 对齐 desktop 与 cds wire 1.4、a8ead26f 把中央 avatar 状态移入 cds、f2c0e9e7 关闭 cds protocol 3 contract、7609701f 从 CDS 提供已提交实体、074da2cd CDS 先于 owner manifests 刷新。
+- **身份与键契约**：8d7f8e7e 统一 canonical key contract、dc54b332 身份绑定进聚合哈希、d04692ff/e304e4b7 关闭复合身份数据面/审计缺口、01bd7345 对齐 Wire 1.3 复合身份、a07b9d28 规范化 legacy 复合身份、285b73af 硬切 legacy 复合索引 schema。
+- **墓碑与恢复**：7085536d 墓碑核对进物理历史、c8c3e25b 保留墓碑+暴露 owner 损伤、76b6532b 保留墓碑并本地化附件、912d42cb 修正 sqlite 墓碑绑定、516773a2 简化 cds 实体墓碑、4587f9cc 恢复删除与核对不变量、30c2f3fc 加固瞬态故障恢复、52df169a 隔离受损 legacy owners。
+- **数据完整性**：e1405a4c 保留 desktop 消息字段、91c9a86b 校验 history source 证据、006f2260 恢复被核对的 topic 时序、42250d42 对齐 C2 消息提交语义、ea9ffc07 关闭 C1 提交可见性、a4a2b013 恢复消息级 LWW 仲裁、4b9222a4 对齐配置哈希时钟。
+- **性能**：ba186996/60a23e84 摄取管线与索引刷新提速、b94fc94c 统一消息哈希摄取。
+- **基础设施**：core/db.js +66 行、index.js +89、sync/message.js +38；配套 tests/mobile-sync-sqlite-delete.test.js 新增。
+
+# 四、使用注意（1.2→1.4 硬切）
+
+- 手机端 VCPMobile 必须同样升级到协议 1.4 版本，旧版本将被 VERSION_CHECK 直接拒绝（无兼容层）。
+- 桌面端旧数据在首次同步时走 legacy state 清理/规范化链（f4f9a96a、192ec595、e6d0573c），耗时可能变长。
+
+
+
 - 插件类型：`service`（无 AI 可见调用命令，纯基础设施）
 - 通信协议：`direct`
-- 版本：1.2.0（Wire 协议 1.2 硬切）
+- 版本：1.4.0（Wire 协议 1.4 硬切，2026-09-02 第13次上游合并）
 - 作者：Nova
 
 # 二、同步范围
@@ -74,4 +97,5 @@ MobileSyncUseCentralIndex=true（可选）
 
 VCPChat 插件管理器启用（需分布式服务器开启），手机端设置→同步设置填写令牌+地址+端口。
 
-Tag: VCP架构, VCPChat, 分布式服务器, VCPMobileSync, Wire协议, 双向增量同步, Merkle指纹, NDJSON, 移动端同步, 第12次上游合并
+
+Tag: VCP架构, VCPChat, 分布式服务器, VCPMobileSync, Wire协议1.4, 复合身份, 墓碑, LWW仲裁, Merkle指纹, NDJSON, 移动端同步, VCP-CDS, 第13次上游合并

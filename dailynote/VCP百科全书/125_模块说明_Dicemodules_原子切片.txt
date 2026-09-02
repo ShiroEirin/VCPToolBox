@@ -1,6 +1,13 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 ⚠️ VCPChat前端模块，2026-03后新增了大量模块（Desktopmodules/Agenttaskmodules等），以下内容可能不完整
 [VCP百科全书] Dicemodules - 超级骰子模块
+
+【2026-09-02 第13次上游合并大重构】7ba301f6"重构骰子系统"+9f219b9c"重构骰子的ui"+配套：
+- Dicemodules/dice.js +807 行级重构、dice.css +1014 行、dice.html +133 行
+- 新增 dice-soundscape.js（353行）骰子音景引擎
+- 新增 dice-box 主题资产：smooth/wooden 两套主题（smoothDice.json 707行各一套 + normal/diffuse/specularity 贴图 + theme.config.json），新增 dicehit_coin1~6.mp3 硬币音效
+- modules/ipc/diceHandlers.js +136 行 IPC 扩展
+- 职能：3D 物理骰子投掷 UI（three.js dice-box）+ 表达式解析 + AI 集成调用，本轮重构聚焦 UI 与音效体验
 
 一、模块基本信息
 1. 模块名称：Dicemodules / 超级骰子模块

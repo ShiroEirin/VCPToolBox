@@ -1,4 +1,4 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] 插件说明——VSearch联网搜索（使用规范）
 版本：1.1.0 | pluginType: synchronous | protocol: stdio | timeout: 300000ms
 
@@ -15,6 +15,7 @@
 
 二、核心能力
 - 一个极简、高效的语义级并发搜索引擎。支持多种搜索后端（Grounding、Grok、Tavily、KimiSearch），针对特定主题和关键词进行深度检索，返回高质量的参考资料。
+- 【2026-09-02 第13次上游合并修复】commit 8459a6a0 + a45eba0e（PR#461）：dotenv v17 会在 stdout 打印 banner，污染 stdio JSON 协议输出导致调用方解析失败；修复为 `dotenv.config({ path: configPath, quiet: true })`。VSearch.js 仅此 1 行变化。
 
 三、命令与参数
 命令 `VSearch`，参数如下：

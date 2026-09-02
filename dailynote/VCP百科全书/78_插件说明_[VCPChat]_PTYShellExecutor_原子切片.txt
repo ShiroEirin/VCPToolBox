@@ -1,6 +1,13 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] PTYShellExecutor / PTY Shell 执行器 [VCPChat分布式插件]
 ⚠️ 前端分布式插件，manifest定义在VCPChat仓库
+
+【2026-09-02 第13次上游合并行为变更】50c5cb68"fix(PTYShellExecutor): isolate stdin and chain boundary in subshell to prevent sync timeouts"+a2da94af：
+- **同步执行模式重写**：execute 不再复用 PTY 会话，改用独立 POSIX Shell 子进程（bash/sh），**stdin 固定隔离**，适合短命令与 ssh/docker exec 等非交互命令——修复同步执行超时问题；不再保持跨命令目录/环境状态
+- 异步模式（async）仍托管长任务（codex/编译等），保留 node-pty；shell 参数（fish/zsh/bash）现在只对 async 模式有效，execute 固定 bash/sh
+- newSession 参数标记为已废弃（"execute模式不复用PTY会话"）
+- GUI 终端镜像：agent 命令与原始输出并存，保留 PTY 可视化能力
+- PTYShellExecutor.impl.js 本轮 +278 行级重写；manifest description 全文更新
 
 一、插件基本信息
 1. 插件名称：PTYShellExecutor / PTY Shell 执行器

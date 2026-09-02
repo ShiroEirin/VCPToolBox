@@ -1,5 +1,15 @@
-[2026-07-22] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] VCPChat——前端架构与渲染体系
+
+【2026-09-02 第13次上游合并架构级更新】（0330670c..668b232b，680文件 +103740/-18572）：
+- **聊天内核深度解耦**（详见切片226）：modules/chat/ 25个新模块（singleChatRequestOrchestrator/streamCoordinator/chatEventContract 等），流式渲染器 v4（streamManager.js 1442行级重写），docs/contracts/ 事件契约证据体系
+- **引导启动器体系**（详见切片225）：bootstrap/ 恢复UI + scripts/vcpchat-*.mjs 诊断命令 + launchers/ 图形入口 + apps/bootstrap-installer Tauri 安装器 + StartVCPchat.exe
+- **vchat 滚动器重构**（8c664bdc）：modules/ui-helpers.js +156、styles/chat.css +17
+- **next-shell 壳层迭代**：next-shell-controller.js +213、escape-dispatcher.js 新增、app-tab-host.js +62；modules/ui-system 新增 interactive-chat-app.js(99行)、ask-nova-modal.js +118、settings-bridge.js(46行)
+- main.js 853 行级改写；modules/ipc/ 全线扩展（voiceHandlers +600、canvasHandlers +234、diceHandlers +136、tavernHandlers +125）
+- settingsManager.js +336、tavernRulesEngine.js +234、topicListManager.js +165、ui-helpers.js +263、uiManager.js +169
+- 资产：assets/E*.jpg 示例图替换为中文主题命名图（V桌面/Web播放器/仪表盘与日志/调色板系统等），移除约12MB旧示例图
+- AppData/VCPChatTarven.official.json（104行官方配置）新增
 
 一、定位
 VCPChat是VCP官方前端，负责把后端“工具结果、记忆注入、流式输出、多模态资产”可视化呈现为可交互聊天界面。

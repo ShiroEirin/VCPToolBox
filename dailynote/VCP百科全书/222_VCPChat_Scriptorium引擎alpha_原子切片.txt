@@ -1,12 +1,15 @@
-[2026-08-12] - 哈雷酱
+[2026-09-02] - 哈雷酱
 [VCP百科全书] Scriptorium 共笔文坊 - VDOCX/VPPTX 文档工程引擎 alpha（VCPChat）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-08-12（第11次同步+合并，上游commit ced62fc "引擎alpha落地啦"）
+最后核验：2026-09-02（第13次上游合并：流式渲染器v4联动迭代 + fe0535ef 修复pretext迭代和electron迭代引发的兼容问题）
 适用范围：`D:\github\VCP\VCPChat\ScriptoriumModules\` 当前源码
 事实来源：
 - 源码：`ScriptoriumModules/`（47个文件：39个js + scriptorium.css 4811行 + scriptorium.html 949行 + README.md 383行 + AGENT.md 7行 + 3个font诊断json）
 - 上游commit: `ced62fc` 引擎alpha落地啦！(2026-08-12, 68文件+87207行)
+- 本轮（0330670c..668b232b）变化：6文件 +218/-27——scriptorium-lineage-ui.js +31、scriptorium-navigation.js +13、vdoc-hybrid-compiler.js +144（e1dbc98d 流式渲染器v4 适配：流式文档编译管线与 chat 流事件对齐）、scriptorium-deck-export.js/renderer.js 微调；fe0535ef 修复 pretext 迭代与 Electron 迭代兼容问题
+
+【本轮要点】vdoc-hybrid-compiler.js 的 144 行变化是配合聊天内核流式渲染器 v4（切片226）的文档流式编译适配：Scriptorium 文档渲染与聊天流式管线共用一套事件消费模型。
 
 一、项目定位与现状
 1. Scriptorium（共笔文坊）是 VCPChat 的下一代文档工程引擎：让 AI 与人类在同一份文档上共笔协作，格式为自研 VDOCX（连续流文稿）/ VPPTX（逐页演示），非 OOXML。
