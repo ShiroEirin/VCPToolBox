@@ -1,6 +1,8 @@
-[2026-09-02] - 哈雷酱
+[2026-09-03] - 哈雷酱
 [VCP百科全书] 插件说明——RAGDiaryPlugin（原子切片）修正版
-最后核验：2026-09-02（第13次上游合并：7a05b29e 兼容反转义净化器 + 05552bfd fix）
+最后核验：2026-09-03（第14次上游合并：全链路search统一Rust化，检索主链下沉 rust-vexus-lite；465678da/c8354111/6045a0f4）
+
+【2026-09-03 检索架构变更】RAGDiaryPlugin.js +96 行（465678da）+74 行（6045a0f4）适配原生 River 检索路径：日记检索默认走 KNOWLEDGEBASE_NATIVE_RIVER_QUERY_ENABLED=true 的 Rust 一体检索（多索引ANN+合并+hydrate+语义去重+TopologyV3 一次 N-API 任务完成），失败自动回退 JS 兼容路径（FALLBACK_TO_LEGACY）。DirectDiaryTextProcessor.js +9 行配合。详见切片207。
 
 一、插件身份
 - manifest 名称：`RAGDiaryPlugin`

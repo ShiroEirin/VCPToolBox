@@ -1,5 +1,7 @@
-[2026-07-22] - 哈雷酱
+[2026-09-03] - 哈雷酱
 [VCP百科全书] 插件原子切片——DailyNote（日记统一插件）修正版
+
+【2026-09-03 第14次上游合并】PR#462（b055a129 + 01054699）：fix(dailynote) align filenames with explicit time prefixes——日记文件名与显式时间前缀对齐修复，Plugin/DailyNote/dailynote.js +30/-8。
 
 一、插件身份与运行方式
 - manifest 名称：`DailyNote`

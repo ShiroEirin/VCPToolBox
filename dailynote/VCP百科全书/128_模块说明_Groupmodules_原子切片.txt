@@ -1,6 +1,13 @@
-[2026-07-22] - 哈雷酱
+[2026-09-03] - 哈雷酱
 ⚠️ VCPChat前端模块，2026-03后新增了大量模块（Desktopmodules/Agenttaskmodules等），以下内容可能不完整
 [VCP百科全书] Groupmodules - 群聊模块
+
+【2026-09-03 第14次上游合并】a7383afb"新增顺序聊天顺序控制器"：
+- Groupmodules 新增**顺序模式控制器（sequentialMode）**：群聊按配置顺序依次让各 Agent 发言，groupchat.js +112、modes/sequentialMode.js +19 扩展
+- grouprenderer.js +215 行（顺序模式渲染/状态指示）、groupSettingsMarkup.js +6（设置项入口）、styles/setting/settings-group-sections.css +110~139 行
+- 配套测试 tests/group-sequential-mode.test.js（78行）新增
+- 后续 ee1c31c8"潜在修复" + 4b86d063/a6f3d5ba"fix" 跟进修补；5b9bb920 修 VCPChat 侧 FileOperator.js 2行
+- merge dc100067 时 modules/chatManager.js +11（chat-manager-selection-race.test.js 30行——聊天选择竞态修复）、styles/ui-system/notifications.css +10
 
 一、模块基本信息
 1. 模块名称：Groupmodules / 群聊模块

@@ -1,9 +1,23 @@
-[2026-08-04] - 哈雷酱
+[2026-09-03] - 哈雷酱
 # RiverMemoEngine 与 Topology V3 生产构型
 
 状态：CURRENT_VERIFIED
-最后核验：2026-08-04（第8次上游合并后重新核验，新增查询河网形态Softmax环节）
-适用范围：`RiverMemoEngine.js`（839行）+ `rust-vexus-lite/src/rivermemo_topology_v3.rs`（2813行）当前源码
+最后核验：2026-09-03（第14次上游合并：全链路search统一Rust化完工，465678da→c8354111→27a2a36f）
+适用范围：`RiverMemoEngine.js` + `rust-vexus-lite/src/rivermemo_topology_v3.rs` + `rust-vexus-lite/src/memo_pipeline.rs` 当前源码
+
+【2026-09-03 第14次上游合并·重大架构变更】全链路 search 统一 Rust 化：
+- **检索主链下沉 rust-vexus-lite**：多索引 ANN、候选合并、SQLite 向量批量读取(hydrate)、语义去重、Topology V3 收敛全部合并为一次 N-API 后台任务（memo_pipeline.rs +122 行级重构，rivermemo_topology_v3.rs 不变量退行修正 +15/-6，vexus-lite.win32-x64-msvc.node 二进制更新）
+- **RiverMemoEngine.js -364 行、modules/knowledgeBase/searchService.js -292 行**——JS 侧检索管线大幅瘦身，职能移交 Rust
+- **新增 5 个 env 配置**（config.env.example "Rust 原生 RiverMemo 一体检索（默认生产范式）"段）：
+  - KNOWLEDGEBASE_NATIVE_RIVER_QUERY_ENABLED=true（保持 true 即可；仅原生联合路径紧急兼容问题才临时 false）
+  - KNOWLEDGEBASE_NATIVE_RIVER_QUERY_FALLBACK_TO_LEGACY=true（联合 ABI/索引/观测句柄/SQLite/Topology 阶段失败时自动回退"JS提供候选+原生Topology V3"兼容路径）
+  - KNOWLEDGEBASE_NATIVE_RIVER_QUERY_PER_INDEX_K=300（每个物理日记索引 ANN 候选上限）
+  - KNOWLEDGEBASE_NATIVE_RIVER_QUERY_CANDIDATE_K=300（跨索引合并后进入批量 hydrate 和语义去重的全局候选池上限）
+  - KNOWLEDGEBASE_NATIVE_RIVER_QUERY_SEMANTIC_THRESHOLD=0.92（Rust 语义近重复抑制阈值 [-1,1]）
+- **浪潮管线内存加速**（6045a0f4）：KnowledgeBaseManager.js -177 行重构、RAGDiaryPlugin.js +74、DirectDiaryTextProcessor.js +9、lib.rs/memo_pipeline.rs 配合——管线对象复用降低分配压力
+- KnowledgeBaseManager.js 累计 +351 行承担新编排职责；indexRepository.js +148、ingestionPipeline.js 精简
+- 配套测试：tests/nativeRiverDefaultMode.test.js（46行）新增；RAGDiaryPlugin.js +96 行适配原生 River 检索路径
+
 事实来源：
 - `D:\github\VCP\VCPToolBox\RiverMemoEngine.js`（36KB，839行）
 - `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\rivermemo_topology_v3.rs`（99KB，2813行）
