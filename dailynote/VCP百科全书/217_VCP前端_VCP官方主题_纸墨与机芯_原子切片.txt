@@ -1,6 +1,12 @@
 [2026-09-04] - 哈雷酱
 [VCP百科全书] VCP 官方主题 "纸墨与机芯" (Industrial Core / Editorial Ink)
 
+【2026-09-04 第16次上游合并】ab2c3bff "更新主题"（VCPChat 壁纸微调，3文件）：
+- `assets/wallpaper/ayanami_dark.png` 体积优化（499KB→444KB，重压缩）
+- 新增 `assets/wallpaper/ayanami_light.png`（525KB，绫波浅色壁纸补全一对）
+- `styles/themes/themes赤与白昼.css` 1 行微调（第15次合并引入的赤与白昼主题的跟进修正）
+- 纯资源更新，不涉及任何 JS 逻辑，无需重装依赖
+
 【2026-09-04 第15次上游合并】d1aff78c "增加2个官方主题"：官方主题家族扩至4个——
 - 新增 "赤与白昼"（styles/themes/themes赤与白昼.css，434行，配 assets/wallpaper/vcp_sterile_lab_light.jpg 暖光浅色壁纸）
 - 新增 "酸性玄武"（styles/themes/themes酸性玄武.css，配 assets/wallpaper/vcp_acid_basalt_dark.jpg 深色壁纸）

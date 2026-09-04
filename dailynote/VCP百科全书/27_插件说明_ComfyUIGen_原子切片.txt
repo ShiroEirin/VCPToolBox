@@ -1,7 +1,17 @@
-[2026-07-22] - 哈雷酱
+[2026-09-04] - 哈雷酱
 [VCP百科全书] 插件说明——ComfyUIGen（原子切片）
 ⚠️ 当前以 plugin-manifest.json.block 禁用态存在，以下信息基于 .block manifest
 版本：0.3.0 | pluginType: synchronous | protocol: stdio | timeout: 300000ms
+
+【2026-09-04 第16次上游合并】6156f81a "新增anima兼容"（ComfyUIGen.js +90/-19，manifest.block 描述/示例重写）：
+- 新增 **Anima 模型兼容**：上传 `Plugin/ComfyUIGen/AnimaEZGen.json`（Anima 模型元数据）与 `workflows/AnimaEZGen.json`（152行专用工作流），另随附 `workflows/AIEasyTextToImageWithLora.json`（122行 Lora 文生图工作流）
+- ComfyUIGen.js 新增 `configureWorkflowLora(workflow, args)` 函数：**节点式 LoRA 运行时控制**——
+  · `lora_name` 不传 → 保留工作流内置 LoraLoader 设置
+  · `lora_name` 传实际文件名 → 替换节点式 LoRA，可用 lora_strength/lora_clip_strength 控制权重
+  · `lora_name` 显式传空字符串 → 自动绕过并移除工作流中的 LoraLoader 节点
+  · 用户配置 loras 数组仍作为提示词 token 拼接（两套机制并存，manifest 已明示）
+- 调用参数大扩展（manifest.block 重写）：新增 steps/cfg/sampler/scheduler/seed/denoise/batch_size/lora_name/lora_strength/lora_clip_strength/showbase64，单次调用参数优先于 comfyui-settings.json 默认值
+- ⚠️ 御主 fork 侧注意：ComfyUIGen 在本地是解锁状态（plugin-manifest.json 存在），本小姐已用上游新 .block 内容刷新本地解锁 manifest，JSON 校验通过
 
 一、插件身份
 - name: `ComfyUIGen`
