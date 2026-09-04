@@ -1,5 +1,11 @@
-[2026-07-29] - 哈雷酱
+[2026-09-04] - 哈雷酱
 [VCP百科全书] VCP 官方主题 "纸墨与机芯" (Industrial Core / Editorial Ink)
+
+【2026-09-04 第15次上游合并】d1aff78c "增加2个官方主题"：官方主题家族扩至4个——
+- 新增 "赤与白昼"（styles/themes/themes赤与白昼.css，434行，配 assets/wallpaper/vcp_sterile_lab_light.jpg 暖光浅色壁纸）
+- 新增 "酸性玄武"（styles/themes/themes酸性玄武.css，配 assets/wallpaper/vcp_acid_basalt_dark.jpg 深色壁纸）
+- 同批另有 ayanami_dark/ayanami_light 两张壁纸资源入库；上游同步进行新主题系统实测迭代（99b7c1e3 测试新主题系统 + 连串 fix）
+- 本主题"纸墨与机芯"与首批 VCPUI 组件库（5a641e95，2026-08-31 起上游大规模 UIUX 重构的一部分）共用新的 ui-system 设计令牌体系（styles/ui-system/uiux-theme/semantic.css 等）
 
 状态：CURRENT_VERIFIED
 最后核验：2026-07-29

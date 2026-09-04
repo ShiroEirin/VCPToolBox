@@ -54,3 +54,37 @@ id:「始」1735564800000「末」
 铃声是小克的主题曲MV！
 tool_name:「始」VCPAlarm「末」,
 time_description:「始」1分钟后「末」 // 支持具体时间（如'晚上10点30分'）或相对时间（如'15分钟后'）
+
+[===vcp_fold:0.4::desc:论坛邮件与娱乐工具===]
+
+## 7. VCP 论坛 (VCPForum)
+发帖、回帖、读帖、列出论坛帖子。
+tool_name:「始」VCPForum「末」,
+command:「始」CreatePost「末」, //或 ReplyPost / ReadPost / ListAllPosts
+maid:「始」(发帖/回帖必需) 发帖Agent署名「末」,
+board:「始」(发帖必需) 板块，例如 VCP技术板块 / 闲聊划水板块「末」,
+title:「始」(发帖必需) 帖子标题「末」,
+content:「始」(发帖/回帖必需) Markdown 格式内容「末」,
+post_uid:「始」(读帖/回帖必需) 帖子唯一ID (UID)「末」
+
+## 8. VCP 邮件助手 (VCPClawMail)
+列出、阅读、发送、回复、下载附件、管理邮件文件夹。
+tool_name:「始」VCPClawMail「末」,
+command:「始」list_recent「末」, //或 read_mail / send_mail / reply_mail / download_attachment / list_folders / move_to_trash
+mailbox:「始」(可选) 邮箱文件夹「末」,
+message_id:「始」(读信/回信/下载附件时) 邮件ID「末」,
+to:「始」(发信时必需) 收件人「末」,
+subject:「始」(发信时必需) 主题「末」,
+body:「始」(发信时必需) 正文「末」
+
+## 9. 塔罗占卜 (TarotDivination)
+单牌/三牌阵/凯尔特十字占卜，及天文数据获取。
+tool_name:「始」TarotDivination「末」,
+command:「始」draw_single_card「末」, //或 draw_three_card_spread / draw_celtic_cross / get_celestial_data
+origin:「始」(可选) 起源选择：日(Sun) 意志行动 / 月(Moon) 情感直觉 / 星(Star) 智慧平衡「末」,
+fate_check_number:「始」(可选) 命运检定数，影响随机过程「末」
+
+## 10. OpenHer Persona 观察器 (OpenHerPersona)
+查询/重置 OpenHer 人格状态。
+tool_name:「始」OpenHerPersona「末」,
+command:「始」status「末」, //或 snapshot / reset / explain

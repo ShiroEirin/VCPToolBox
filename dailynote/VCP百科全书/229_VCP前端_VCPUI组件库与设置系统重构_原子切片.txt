@@ -1,0 +1,47 @@
+[2026-09-04] - 哈雷酱
+[VCP百科全书] VCPChat 设置系统 VCPUI 化重构与自包含 VCPUI 组件库（原子切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-04（第15次上游合并：2026-08-31起 375 提交 UIUX 大重构落库）
+上游commit起点：5a641e95 "feat(uiux): 引入自包含 VCPUI 组件库（modules/uiux）" (2026-08-31)
+上游commit收尾：d1aff78c "增加2个官方主题" + fd55c958 "微调" (2026-09-04)
+
+一、概述
+上游 lioensky 自 2026-08-31 起在 VCPChat 进行了为期4天的大规模 UIUX 重构（本仓库第15次合并实收 375 提交，248 文件 +36830/-10891，142 个新文件）。核心是三件事：
+1. 引入自包含 VCPUI 组件库（modules/uiux/），WebAwesome Web Components 的 vendored 运行时
+2. 全局设置页与 Agent 设置页的"schema 驱动渲染"彻底重构（modules/settings/）
+3. 新主题系统实测 + 2 个新官方主题
+
+二、VCPUI 组件库（modules/uiux/ + vendor/webawesome-runtime/）
+- vendor/webawesome-runtime/：@awesome.me/webawesome 3.11.0 的 vendored 本地运行时（vcp-runtime-manifest.json 带 sha256 校验清单，locale zh-CN），含 button/card/input/textarea/select/option/checkbox/switch/tab/tab-panel/tab-group/dialog/tooltip 共13个组件的 dist-cdn 产物——上游为避免 CDN 依赖把组件库直接搬进仓库
+- modules/uiux/：自包含 VCPUI 封装层（theme-presenter、settings-adapter、primitives、dom-renderer、service-registry 等，tests/uiux-*.test.mjs 共10个测试文件）
+- npm scripts 新增：check:uiux:artifacts / check:uiux / build:uiux / test:uiux / check:settings-ownership / audit:settings-layout / guard:ui-interaction / guard:ui-async-state / guard:ui-task-journeys / guard:theme-provenance / test:settings-wa-electron
+
+三、设置系统 schema 驱动重构（modules/settings/ 新增 23 文件）
+- modules/settings/schema/：设置分区 schema 定义（kernel.js/appearance-settings.js/voice-settings.js/server-connection.js/user-identity.js/quick-actions.js/advanced-features.js/render-settings.js/selection-assistant.js）
+- modules/settings/render/：canonical-row.js / field-renderer.js / widgets.js / shared.js 分层渲染器
+- modules/settings/store.js + value-semantics.js + schema-surface.js：设置存储与值语义
+- 配套文档：docs/global-settings-section-ownership.md、docs/research/settings-schema-render-plan.md、docs/settings-autosave-coordinator-*.md（自动保存协调器的开发计划/验收/交接三件套）
+- 目标：全局设置页各分区权责清晰（check-global-settings-section-ownership.mjs 门禁脚本固化），schema 单一事实来源，渲染层薄化
+
+四、ui-system 适配层扩展（modules/ui-system/）
+- 新增 agent-settings-bridge.js / appearance-profile-runtime.js / material-runtime.js / settings/agent-disclosures.js 等
+- 新样式底座：styles/ui-system/settings-portal.css、settings-primitives.css、settings-shell.css、settings-stream-animation.css、settings-template.css、motion.css、uiux-theme/semantic.css、uiux-theme/static-scale.css
+- Agent 设置页卡片化：styles/setting/agent/agent-card-base|controls|layout|uiux.css、agent-prompt-editor.css
+
+五、新官方主题（d1aff78c）
+- "赤与白昼"（styles/themes/themes赤与白昼.css，434行，配 vcp_sterile_lab_light.jpg 壁纸）
+- "酸性玄武"（styles/themes/themes酸性玄武.css，配 vcp_acid_basalt_dark.jpg 壁纸）
+- 官方主题家族至此 4 个（纸墨与机芯/赤与白昼/酸性玄武/玄武），另 ayanami_dark/ayanami_light 壁纸入库
+- modules/ui-system/theme-runtime.js 与 modules/uiux/generated/providers/theme.js 构成新主题运行时
+
+六、依赖影响（御主侧红线）
+- package.json 本轮无 dependencies 变化（只加 scripts）；node_modules 无需 npm install 即可运行
+- ⚠️ 但上游按 Electron 44 开发，本机 Electron 41.10.4 运行此批 UI 改造的稳定性需冒烟验证（重点：设置页打开、主题切换、Agent 卡片）
+
+七、关联切片
+- 217（VCP官方主题）：主题家族扩容与新主题运行时
+- 128（Groupmodules）/ 125/124（Assistantmodules）：ui-system 改造波及面
+- 162（前端架构）：VCPUI 是继 ui-system 之后的第二套组件化尝试，注意架构归位
+
+Tag: VCPChat, VCPUI, WebAwesome, uiux, 设置系统, schema驱动渲染, 官方主题, 赤与白昼, 酸性玄武, webawesome-runtime, 第15次上游合并

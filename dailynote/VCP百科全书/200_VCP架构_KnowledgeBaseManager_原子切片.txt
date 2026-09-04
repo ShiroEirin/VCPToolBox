@@ -1,5 +1,11 @@
-[2026-07-22] - 哈雷酱
+[2026-09-04] - 哈雷酱
 [VCP百科全书] KnowledgeBaseManager 知识库管理器 - 原子切片
+
+【2026-09-04 第15次上游合并】冷知识存储链升级（806f44af + 95eb196b + 74ba3417）：
+- triviumdb 0.7.5 → **0.8.5**（package.json/package-lock.json 同步，95eb196b 修复依赖链）
+- `TDBKnowledge.js` +99 行 flush 生命周期硬化：_runQueueWorker 队列排空时新增 drain flush，确保 ingest 后 .tdb 文件立即落盘（processedSinceFlush / processedSinceTextIndexBuild 计数器触发 _safeFlush，批处理收尾立即 flush + 文本索引构建）
+- 新增 `tests/tdbKnowledge085.test.js`（127行）作为 0.8.5 升级的回归护栏
+- 本地已实测：npm install 后 require('triviumdb') 加载 0.8.5 正常（TriviumDB 导出OK），TDBKnowledge.js 语法校验通过
 
 一、模块基本信息
 1. 模块名称：KnowledgeBaseManager

@@ -1,6 +1,12 @@
-[2026-09-02] - 哈雷酱
+[2026-09-04] - 哈雷酱
 [VCP百科全书] 插件说明——ChromeBridge（原子切片）
-最后核验：2026-09-02（第13次上游合并：496d04a4 浏览器生命周期管理强化）
+最后核验：2026-09-04（第15次上游合并：3fc6ef96 ChromeBridge健壮性修复+冒烟测试护栏）
+
+【2026-09-04 第15次上游合并】3fc6ef96：
+- `modules/browserRuntimeManager.js` +134/-120 重构：浏览器运行时管理器健壮性强化
+- `Plugin/ChromeBridge/VCPChrome/background.js` +70/-70：扩展后台脚本同步修复
+- `Plugin.js` +38/-20：插件系统级适配
+- 新增 `tests/chromeBridge/smoke-check.js`（78行冒烟测试护栏，可独立 node 运行验证桥接链路）
 
 一、插件身份
 - name: `ChromeBridge`

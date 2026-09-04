@@ -134,3 +134,63 @@ search_path:「始」(可选) 指定搜索的相对路径「末」,
 case_sensitive:「始」(可选) true/false，默认false「末」,
 whole_word:「始」(可选) true/false，默认false「末」,
 context_lines:「始」(可选) 匹配行前后显示的上下文行数，默认2「末」
+
+[===vcp_fold:0.5::desc:开发调试与插件管理工具===]
+
+## 9. 插件源码查询器 (PluginSourceViewer)
+查询指定 VCP 插件在本地的源码。自动扫描 Plugin 目录下启用的 plugin-manifest.json，按 manifest.name 匹配并返回主代码文件内容与目录树（忽略 node_modules/target/dist 等）。
+tool_name:「始」PluginSourceViewer「末」,
+command:「始」ViewPluginSource「末」,
+targettool:「始」(必需) 插件工具名，必须对应 manifest.name，例如 AnySearch、DigitalOracle、AgentAssistant、ServerFileOperator「末」
+
+## 10. 插件管理器 (PluginManager)
+查询/启停 VCP 插件注册表。
+tool_name:「始」PluginManager「末」,
+command:「始」ListPlugins「末」, //或 GetPluginDetail / EnablePlugin / DisablePlugin / ReloadPlugins
+pluginName:「始」(详情/启停时必需) 插件唯一英文名「末」,
+requireAdmin:「始」(必需) 用户提供的6位管理员验证码「末」 //仅可启停 synchronous/asynchronous/static 类型插件
+
+## 11. 工具调用记录查询 (ToolCallRecordQuery)
+查询 VCP 工具调用记录，默认返回 AI 友好的 Markdown 报告，自动摘要嵌套 JSON 并把 base64 图片迁移为可访问 URL。
+tool_name:「始」ToolCallRecordQuery「末」,
+id:「始」(可选) 记录ID，detail 为 true 时返回单条详情「末」,
+from/to:「始」(可选) 起始/结束时间（ISO 或可解析时间）「末」,
+caller:「始」(可选) 调用者署名模糊查询「末」,
+toolName:「始」(可选) 工具名模糊查询「末」,
+success:「始」(可选) true/false「末」
+
+## 12. AI 代码工程 Worker (AICodeWorker)
+把耗 Token 的代码读写任务交给本地免费的 opencode 执行，VCP 模型只需下命令和看结果。
+tool_name:「始」AICodeWorker「末」,
+command:「始」run_and_wait「末」,
+preset:「始」index / read / scan / bug...「末」, //内置预设：index(函数索引) read(读全文) scan(扫目录树) bug(找bug)等
+targetPath:「始」(必需) 文件或目录的绝对路径「末」,
+projectPath:「始」(可选) 项目路径，不填时从 targetPath 自动推导「末」
+
+## 13. Magi 三贤者会议 (MagiAgent)
+启动多个 AI 角色组成的会议讨论特定主题，异步或同步获取结果。
+tool_name:「始」MagiAgent「末」,
+command:「始」start_meeting「末」,
+topic:「始」(必需) 会议讨论主题「末」,
+rounds:「始」(可选) 讨论轮次，默认5「末」,
+wait_for_result:「始」(可选) false 时立即返回会议ID供后续查询「末」
+
+查询会议:
+command:「始」query_meeting「末」,
+meeting_id:「始」(必需) 会议ID「末」,
+summary_only:「始」(可选) true 只返回最终总结以节省token「末」
+
+## 14. Linux Shell 安全执行器 (LinuxShellExecutor)
+在安全沙箱中执行 Linux Shell 命令，支持本地和远程 SSH 执行。
+tool_name:「始」LinuxShellExecutor「末」,
+command:「始」要执行的 Shell 命令，或 preset:预设名?参数 格式「末」,
+hostId:「始」(可选) 目标主机ID，默认 local「末」,
+isLongRunning:「始」(可选) 是否为长待机指令「末」,
+requireAdmin:「始」(可选) 管理员验证码，可授权灰名单/未知命令「末」 //分号;、后台&、子shell $() 被硬护栏禁止且不可绕过
+
+## 15. 占位符管理命令 (PlaceholderExplorerCommand)
+扫描、定位、编辑、预览 VCP 占位符，检查死链。
+tool_name:「始」PlaceholderExplorerCommand「末」,
+command:「始」Scan「末」, //或 Locate / Edit / Preview / CheckDeadLinks
+placeholder:「始」(必需) 占位符名「末」,
+newValue:「始」(Edit时必需) 新定义值或文件内容「末」

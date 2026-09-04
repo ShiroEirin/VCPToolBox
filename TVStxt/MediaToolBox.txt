@@ -59,3 +59,137 @@ video_url:「始」(可选) 用于视频续写「末」
 command:「始」concat「末」,
 video_url1:「始」[第一个URL]「末」,
 video_url2:「始」[第二个URL]「末」
+
+[===vcp_fold:0.5::desc:更多生图与视频模型===]
+
+## 5. Agnes 绘图 (AgnesGen)
+Agnes Image 2.1 Flash。对高信息密度图像、复杂视觉细节、丰富构图和清晰语义对齐进行了优化，适合创意设计、营销素材、海报草图、复杂场景生成、风格迁移、重新打光和背景转换。无图片自动文生图；提供 image/image_url/image_1/image_base64_1 等字段自动进入图生图或多图参考模式。
+tool_name:「始」AgnesGen「末」,
+command:「始」generate / edit / compose「末」,
+prompt:「始」(必需) 自然语言描述，支持中英文。建议结构：[主体]+[场景/环境]+[风格]+[光线]+[构图]+[质量要求]。图生图时明确需要改变什么、保持什么不变。「末」,
+size:「始」(可选) 统一尺寸字段，兼容 resolution 和 image_size，如 1024x1024「末」,
+image:「始」(编辑/合成时) 图片 URL/base64，或数组 ["url1","url2"]「末」,
+showbase64:「始」(可选) false「末」 //是否在结果中附带 base64 图片数据
+
+## 6. Agnes 视频生成 (AgnesVideoGen)
+文生视频/图生视频/多图视频/关键帧动画。提交后秒级返回 task_id，1-5 分钟出片；过 1-2 分钟后用 query 查询。
+tool_name:「始」AgnesVideoGen「末」,
+command:「始」submit「末」,
+prompt:「始」(必需) 视频内容描述，建议英文：主体+动作+场景+镜头+光线+风格「末」,
+image:「始」(可选) 单张图片URL（图生视频）「末」,
+images:「始」(可选) 多张图片URL的JSON数组，如 ["url1","url2"]「末」,
+mode:「始」(可选) 填 keyframes 启用关键帧动画（需同时提供 images）「末」,
+num_frames:「始」(可选) 帧数，必须 8n+1 且≤441。121≈5秒、241≈10秒、441≈18秒（24fps）「末」,
+frame_rate:「始」(可选) 帧率，默认24「末」,
+negative_prompt:「始」(可选)「末」
+
+查询结果:
+tool_name:「始」AgnesVideoGen「末」,
+command:「始」query「末」,
+task_id:「始」submit 返回的 task_id「末」
+
+视频拼接(同步):
+tool_name:「始」AgnesVideoGen「末」,
+command:「始」concat「末」,
+video_url1:「始」第一个视频链接「末」,
+video_url2:「始」第二个视频链接「末」 //或数组写法 videos:「始」["url1","url2"]「末」
+
+## 7. Flux 风格图片 (FluxGen)
+通过 SiliconFlow API 的 FLUX.1-schnell 模型生成图片。
+tool_name:「始」FluxGen「末」,
+prompt:「始」(必需) 用于图片生成的详细【英文】提示词。「末」,
+resolution:「始」(必需) 可选值：「1024x1024」、「960x1280」、「768x1024」、「720x1440」、「720x1280」。「末」,
+seed:「始」(可选) 整数种子「末」
+
+## 8. Gemini 图像生成与编辑 (GeminiImageGen)
+tool_name:「始」GeminiImageGen「末」,
+command:「始」generate「末」,
+prompt:「始」(必需) 用于生成的详细英文提示词「末」
+
+编辑图片:
+tool_name:「始」GeminiImageGen「末」,
+command:「始」edit「末」,
+prompt:「始」(必需) 编辑指令「末」,
+image_url:「始」(必需) 图片URL，http/https 或 file:// 本地「末」
+
+## 9. 通义千问图片生成 (QwenImageGen)
+文生图使用 Qwen/Qwen-Image，图生图使用 Qwen-Image-Edit-2509。
+tool_name:「始」QwenImageGen「末」,
+command:「始」GenerateImage「末」,
+prompt:「始」(必需) 详细提示词「末」,
+image_size:「始」(可选) 推荐 "1328x1328"(1:1)、"1664x928"(16:9)、"928x1664"(9:16)、"1472x1140"(4:3)「末」,
+negative_prompt:「始」(可选) 负向提示词「末」,
+cfg:「始」(可选) 0.1-20，官方推荐4.0「末」,
+seed:「始」(可选)「末」,
+num_inference_steps:「始」(可选) 1-100，默认20「末」
+
+修图:
+tool_name:「始」QwenImageGen「末」,
+command:「始」EditImage「末」,
+prompt:「始」(必需) 修改指导「末」,
+image:「始」(必需) https URL 或 file:/// 本地路径「末」,
+image2/image3:「始」(可选) 更多参考图「末」
+
+## 10. Doubao 图片生成 (DoubaoGen)
+通过 DMXAPI 使用 doubao-seedream-4-0-250828 模型。
+tool_name:「始」DoubaoGen「末」,
+command:「始」DoubaoGenerateImage「末」,
+prompt:「始」(必需) 详细提示词「末」,
+resolution:「始」(必需) 宽x高，推荐「1024x1024」(1:1)、「864x1152」(3:4)、「1152x864」(4:3)、「1280x720」(16:9)「末」,
+seed:「始」(可选)「末」
+
+修图:
+command:「始」DoubaoEditImage「末」,
+prompt:「始」(必需)「末」,
+image:「始」(必需) https URL 或 file:/// 路径「末」,
+resolution:「始」(必需) 可设 adaptive 自适应原图「末」,
+guidance_scale:「始」(可选) 0-10，值越小越相似「末」
+
+多图融合:
+command:「始」DoubaoComposeImage「末」,
+prompt:「始」(必需) 融合指导「末」,
+image_1:「始」(必需) 第1张图「末」,
+image_2:「始」(可选) 第2张图「末」,
+resolution:「始」(必需) 可设 adaptive「末」
+
+## 11. Wan2.1 视频生成 (VideoGenerator)
+文生视频/图生视频，生成需要几分钟到几十分钟，提交后耐心等待并用 query 查询。
+tool_name:「始」Wan2.1VideoGen「末」,
+command:「始」submit「末」,
+mode:「始」(必需) 't2v' 或 'i2v'「末」,
+prompt:「始」(t2v必需) 视频描述「末」,
+resolution:「始」(t2v必需) '1280x720' / '720x1280' / '960x960'「末」,
+negative_prompt:「始」(可选)「末」,
+image_url:「始」(i2v必需) 图片链接「末」 //i2v时prompt可选
+
+查询:
+tool_name:「始」Wan2.1VideoGen「末」,
+command:「始」query「末」,
+request_id:「始」submit 返回的 requestId「末」
+
+## 12. HTML/SVG 媒体渲染器 (MediaRenderer)
+将 HTML/SVG 渲染为 PNG/JPG/WebP 静态图片、确定性逐帧动画（GIF/MP4/WebM），或执行 JS 合成代码生成音乐（WAV/PCM16）。
+tool_name:「始」MediaRenderer「末」,
+command:「始」RenderImage「末」,
+html:「始」HTML/SVG 源码（推荐素材用 URL 直接引用）「末」,
+width/height:「始」(可选) 输出尺寸「末」
+
+动画:
+command:「始」RenderAnimation「末」,
+durationMs:「始」动画时长毫秒「末」,
+fps:「始」帧率「末」,
+readyMode:「始」signal「末」 //配合 window.__MEDIA_RENDERER__ 页面协议
+
+音乐(强制管理员授权):
+command:「始」GenerateAudio「末」,
+code:「始」声明 function synthesize(api) 的 JS 合成代码「末」,
+requireAdmin:「始」用户提供的6位管理员验证码「末」
+
+## 13. 画师匹配查询 (ArtistMatcher)
+tool_name:「始」ArtistMatcher「末」,
+command:「始」FindArtist「末」,
+query:「始」画师名/风格关键词「末」 //另有 GetRandomArtistString 随机画师串
+
+## 14. 金融数字全球监控 (DigitalOracle)
+tool_name:「始」DigitalOracle「末」,
+command:「始」DigitalOracleListProviders「末」 //查看可用数据源；或 DigitalOracleFetchMarketData 取行情 / DigitalOracleGlobalMacroDashboard 宏观看板
