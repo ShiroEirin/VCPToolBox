@@ -1,5 +1,8 @@
-[2026-07-22] - 哈雷酱
+[2026-09-07] - 哈雷酱
 [VCP百科全书] 插件说明——VCPTimeLine（原子切片）
+最后核验：2026-09-07（第17次上游合并：b4e86575 timeline切换 RiverMemoRust 线路，VCPTimeLine.js +26行；桥接层复用 RAGDiaryPlugin.searchDiary）
+
+【2026-09-07 RiverMemo 原生线路切换】VCPTimeLine.js +26 行（b4e86575）：canRetrieve/canSearch 双通道能力探测（`(!canRetrieve && !canSearch)` 才判不可用）；时间线记忆检索优先走 Rust Native River Query（ANN、候选融合、hydrate、语义去重与 Topology V3 原生完成），`riverMemo: true`、`candidateK: Math.max(candidateK*4, 100)` 候选超集、`queryText` 由 userText+aiText 拼接；桥接层在原生资产/ABI 不可用时自动回退 TagMemo/KNN。retrievalMode 回显新增两态：'Rust 原生 RiverMemo 联合检索'（nativeJointQueryUsed）/ 'RiverMemo 原生拓扑检索（兼容路径）'。新增 tests/timelineRiverMemo.test.js（231行）。
 
 一、插件身份
 - name: `VCPTimeLine`

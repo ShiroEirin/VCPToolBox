@@ -1,0 +1,33 @@
+[2026-09-07] - 哈雷酱
+[VCP百科全书] VCP前端——话题标题手动重生成体系（原子切片）
+状态：CURRENT_VERIFIED
+最后核验：2026-09-07（第17次上游合并：d5baf919 新增重新生成话题的功能）
+适用范围：`VCPChat\Groupmodules\topicTitleManager.js` + `modules\ipc\chatHandlers.js` + `modules\ipc\groupChatHandlers.js` + `modules\topicListManager.js` + `Groupmodules\groupchat.js` + `preloads\chat.js`
+事实来源：git show d5baf919 --stat（8文件 +359/-152）+ 源码
+
+# 一、功能定位
+
+话题列表的手动"重新生成标题"入口：用户可对任意 Agent/群聊话题手动触发 AI 重新命名，不再受自动摘要的触发条件限制。标题生成基于最新最多两轮对话（MIN_MESSAGES_FOR_SUMMARY 窗口）。
+
+# 二、topicTitleManager.js 新增 generateTitleForHistory（+28行）
+
+- 导出 `generateTitleForHistory(groupHistory, globalVcpSettings)`：手动重新生成时**不受原话题名称和消息数量阈值限制**；过滤 `role==='system'` 与 `isThinking===true` 后取最近 MIN_MESSAGES_FOR_SUMMARY 条构建摘要内容，调 `generateTitleFromAI` → `cleanSummarizedTitle`。
+- 无有效消息返回 null；AI 返回兜底名"AI总结话题"时视为失败返回 null（防止把占位符当标题存库）。
+
+# 三、chatHandlers.js 新增 IPC regenerate-agent-topic-title（+84行）
+
+- `ipcMain.handle('regenerate-agent-topic-title', (event, agentId, topicId))`：读 Agent config 定位话题 → 读 `history.json` 计算有效消息数（过滤 system/isThinking）→ 0 条则报"该话题还没有可用于生成标题的对话" → 读 settings.json 组装 globalVcpSettings（vcpUrl/vcpApiKey/userName/topicSummaryModel）→ 无 vcpUrl 报"请先在全局设置中配置 VCP 服务器 URL" → `topicTitleManager.generateTitleForHistory` → 通过 agentConfigManager.updateAgentConfig 原子改话题 name → 返回 `{success, newTitle, topics, sourceMessageCount}`。
+- 引入新依赖：`const topicTitleManager = require('../../Groupmodules/topicTitleManager')`。
+
+# 四、配套链路
+
+- `modules/ipc/groupChatHandlers.js`（58行改）：群聊侧同名重生成 handler（group topic）。
+- `modules/topicListManager.js`（287行重构）：话题列表管理器吸收重生成入口与列表刷新语义。
+- `Groupmodules/groupchat.js`（+46行）：群聊渲染层接入重生成按钮。
+- `preloads/chat.js`（+4行）：renderer 侧暴露 regenerateTopicTitle 桥。
+
+# 五、相关上游动态
+
+- 同批 c2c1ba6a "强化模型列表多种搜索模式"：settingsManager.js + popup-select.js 支持多模式搜索（settingsManager -29/+26 重构）。
+- RoxyAsahi 系列 PR（#196 settings-sidebar-alignment、agent/group settings 布局与 tooltip 体系 3ca4f032）与 PR #198（exp/settings-schema）合并后在 09-06 被作者 Revert（99510e9e）——设置 schema 大重构暂未落地，slice 229 中"设置系统 schema 驱动重构"仍以 09-04 VCPUI 状态为准。
+- 本仓库两个 PR 已被上游采纳：#195 hasUserParticipation（473282de）、#197 终端 Nerd Font（2fd38db6），ShiroEirin 提交 63b181b6/fac4c053 进入上游主线。

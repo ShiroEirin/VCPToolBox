@@ -1,9 +1,11 @@
-[2026-09-02] - 哈雷酱
+[2026-09-07] - 哈雷酱
 [VCP百科全书] VCPChat 引导启动器体系（bootstrap + scripts + launchers + Tauri 安装器）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-02（第13次上游合并，VCPChat 0330670c..668b232b，引导体系首次成体系落地）
+最后核验：2026-09-07（第17次上游合并：e09248fb NativeSpalash Rust 启动器新增图标，build.rs +12/main.rs +9/Cargo.toml +3，StartVCPchat.exe 重编译 13.4MB→13662720 bytes）
 适用范围：`VCPChat\bootstrap\`、`VCPChat\scripts\vcpchat-*.mjs`、`VCPChat\launchers\`、`VCPChat\apps\bootstrap-installer\`、`VCPChat\NativeSpalash\` 当前源码
+
+【2026-09-07 更新】e09248fb "新增启动图标"：NativeSpalash Rust 原生启动器（注意上游目录名拼写即为 NativeSpalash）补上应用图标——build.rs 新增图标嵌入构建步骤（+12行）、src/main.rs 窗口设置（+9/-2）、Cargo.toml 依赖（+3）；StartVCPchat.exe 重编译（Bin 13380096→13662720 bytes）。该 exe 为 Tauri 托管启动器二进制，御主机器 bootstrap handoff 目录从未存在＝一直走 npm start 直启路线，不受影响。
 事实来源：目录清单 + 各文件行数实测 + apps/bootstrap-installer/README.md + docs/vcpchat-launcher-user-guide.md + docs/vcpchat-managed-launch-architecture.md (803行) + package.json scripts 块
 
 # 一、定位

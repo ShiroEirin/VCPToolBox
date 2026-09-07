@@ -1,9 +1,11 @@
-[2026-09-02] - 哈雷酱
-[VCP百科全书] VCPMobileSync 移动端双向增量同步服务（Wire 协议 1.2 → 1.4）
+[2026-09-07] - 哈雷酱
+[VCP百科全书] VCPMobileSync 移动端双向增量同步服务（Wire 协议 1.2 → 1.4 → 2.0.0）
 状态：CURRENT_VERIFIED
-最后核验：2026-09-02（第13次上游合并，plugin-manifest 1.2.0→1.4.0，Wire 协议硬切 1.4，同步引擎大规模重构约 50 提交）
+最后核验：2026-09-07（第17次上游合并：版本 1.4.0→2.0.0，MRiecy 错误契约1-2系列约25提交+lioensky修复，README 2.0.0 全量重写 fb7e61f6，PR #192 合并 9611842d）
 适用范围：`VCPChat\VCPDistributedServer\Plugin\VCPMobileSync\` 当前源码
-事实来源：plugin-manifest.json + README.md + index.js + sync/ + transport/ 目录结构 + git log 0330670c..HEAD（27文件 +6001/-2948）
+事实来源：plugin-manifest.json + README.md + index.js + sync/ + transport/ 目录结构 + git log（1.4.0→2.0.0 错误契约系列）
+
+【2026-09-07 版本 2.0.0（Error Contract 1-2）】MRiecy 提交系列（08-31~09-05，PR #192，约25提交）确立同步错误契约：preserve committed wire state / preserve topic config versions / make message content hashes symmetric（哈希对称化）/ reject stale topic validation snapshots（拒绝陈旧校验快照）/ use real sqlite for topic validation / replace version handshake contract（版本握手契约重构）/ skip unchanged avatar hashing（头像哈希跳过优化）/ trim redundant topic sync work / preserve complete diagnostics / remove diagnostic policy assertions / preserve desktop backend readiness（桌面后端就绪上报）/ reduce CDS memory during large transfers（大传输内存优化）/ merge: integrate upstream CDS startup flow。lioensky 侧 fix 41933981/8430c4de 收尾。README 2.0.0 release notes 重写（fb7e61f6）。注意：御主机器未配置 MobileSyncToken，插件 init 会继续报错但不影响服务器运行（预期行为）。
 
 # 一、定位
 

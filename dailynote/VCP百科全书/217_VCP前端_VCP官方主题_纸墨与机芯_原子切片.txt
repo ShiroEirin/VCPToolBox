@@ -1,5 +1,12 @@
-[2026-09-04] - 哈雷酱
+[2026-09-07] - 哈雷酱
 [VCP百科全书] VCP 官方主题 "纸墨与机芯" (Industrial Core / Editorial Ink)
+
+【2026-09-07 第17次上游合并】主题动态（8f25907f/6771cffc/46b1cc50 等）：
+- 8f25907f "恢复默认主题"：styles/themes.css 大幅回滚（148+/175-）——上游把 themes.css 从 RoxyAsahi 定制状态恢复为默认主题基线；**注意：御主本地 themes.css 是自定义"夜樱猫语"主题（未跟踪定制，stash pop 已完整还原，不受上游改动影响）**
+- 6771cffc（RoxyAsahi）"第一适格者 (The First Children)" 定稿为新独立主题；ebf25d9f 把原高分辨率版"赤与白昼"保留为独立主题——官方主题家族继续扩张
+- 2b4aafe1 fix布局冲突、46b1cc50/#196 settings-sidebar-alignment、30f3d97e/70813ccb/267fd184 agent/group 设置布局与 tooltip 体系（RoxyAsahi 系列）——uiux 层面持续打磨
+- e09248fb "新增启动图标"：NativeSpalash Rust 启动器加图标（Cargo.toml/build.rs/main.rs + StartVCPchat.exe 13.4MB 重编译，见切片225）
+- PR #198（RoxyAsahi exp/settings-schema）09-06 合并后旋即被作者 Revert（99510e9e）——设置 schema 重构未落地，切片229 相关描述不受影响
 
 【2026-09-04 第16次上游合并】ab2c3bff "更新主题"（VCPChat 壁纸微调，3文件）：
 - `assets/wallpaper/ayanami_dark.png` 体积优化（499KB→444KB，重压缩）
