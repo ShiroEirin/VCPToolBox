@@ -10,6 +10,11 @@
 - 持久化目标链路：`modules/loom/webcore/web-agent-page-runtime-core.js` +66（现1922行）新增 createPersistentTarget 与 Locator Hints 近似恢复（TARGET_AMBIGUOUS 多候选报错、SKILL_TARGET_UNSUPPORTED 拒绝 Shadow DOM/iframe 固化）；b84dd966 再优化 +66/-13。
 - `modules/loom/VCPLoomManager.js` +23（现2139行）。
 - 测试护栏：tests/loom-skill.test.js（286行）、tests/loom-persistent-target.test.js（100+68行）、loom-controller.test.js +33。
+
+【2026-09-10 LoomController 一级命令范式（8788c05f "loom迭代的开始"）】LoomControllerService.js +56、plugin-manifest.json +49、VCPLoomManager.js +16、web-agent-protocol.js +2、tests/loom-controller.test.js +95：确立"一级命令 + 平铺参数"交互范式——click / type / send_keys / scroll / hover / check / ExecuteAction 等命令**无需 actionId 与 params JSON**，appId/target/text/keys 等参数直接平铺；文档描述同步重写为"供 Agent 创建、感知、打开、关闭、查询、编辑并通过 appId + 自然页面命令安全操作 VCP LoomAPP 的直接业务适配器"。manifest v1.7.0 最终命令清单：CreateSkill / ManageSkill / EditSkill / ExecuteSkill / GetSkillTask / ListApps / ListOpenApps / CreateApp / OpenApp / CloseApp / GetAppSources / GetRuntimeSource / GetRenderedText / GetPageInfo / GetPageImage / click / type / scroll / hover / check / ExecuteAction / EditAppSources。
+
+【2026-09-10 Loom 技能管理器入口（635a3ff9 "强化交互便利性"）】Loommodules/manager.html +89 新增 "管理 LoomSkill" 按钮（.skill-manager-footer），点击调用 api.openSkillManager() 在 Canvas 中打开 LoomSkills 工作区（toast 反馈）；modules/ipc/canvasHandlers.js +56 抽出 refreshCanvasSession(sender, preferredFilePath) 统一 Canvas 会话刷新；modules/loom/VCPLoomManager.js +23、preloads/loom.js +1；测试 tests/loom-manager-skill-button.test.js（49行）。
+
 适用范围：`modules/loom/` 当前源码（VCPChat）
 事实来源：
 - `modules/loom/VCPLoomManager.js`（1900 非空行 / 总行数 2080，含 180 空行；PowerShell 核实）

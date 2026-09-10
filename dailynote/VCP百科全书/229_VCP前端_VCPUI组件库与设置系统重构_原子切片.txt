@@ -12,6 +12,7 @@
 - **测试规模**：tests/settings-elements-interaction.test.mjs（1878行新增）、uiux-settings-bridge-modules.test.mjs 405行改。
 - **主题侧**：d0196b94 revert 将 styles/themes.css 恢复上游默认（对上游为净零）；prompt modules/regex 样式在重构中保留（952e4296）。
 - 其他同批 UI 打磨：图标一致性修复（4b11c523/30cafad6）、桌面部分优化（e3a5f853）、播放器布局微调（d294247c）、布局冲突修复（8a818eb3/2b4aafe1）。
+- **侧边栏布局收尾**（1aaf8fc5，styles/ui-system/settings-sidebar.css +14/-2）：容器改 flex 纵向布局（display:flex / flex:1 0 auto / flex-direction:column / min-height:100%），并新增级联层规则——非折叠态下 `.agent-settings-section-summary` / `.group-settings-section-summary` 一律 `display:none`（摘要只是折叠态投影，不参与展开编辑器），该规则刻意放在**未分层的 sidebar owner** 中，避免被上层 cascade-layer 的 summary 类型规则覆盖。
 上游commit起点：5a641e95 "feat(uiux): 引入自包含 VCPUI 组件库（modules/uiux）" (2026-08-31)
 上游commit收尾：d1aff78c "增加2个官方主题" + fd55c958 "微调" (2026-09-04)
 

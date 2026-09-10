@@ -7,7 +7,7 @@
 - **PasteInteractiveText**：经 xterm bracketed-paste 语义粘贴文本（最多 100000 字符，不覆盖系统剪贴板），submit 控制是否立即 Enter。
 - **RunInteractiveSequence**：全局编号步骤串行操纵 snow/codex/claude/vim 等 TUI——commandN（输入命令后按 Enter）/ waitN（50ms、1s 或毫秒数字；单步≤60000ms、累计≤300000ms）/ keyN / pasteN（xterm 粘贴语义，不自动 Enter）/ queryVisibleN（≤2000行）；编号唯一可不连续；仅 wait 的序列被拒绝；commandN 走 forbiddenCommands/authRequiredCommands 检查，pasteN 按交互文本处理。
 - **实现机制**：INTERACTIVE_SEQUENCE_LIMITS 限额表 + TERMINAL_KEY_SEQUENCES 键位表 + requestId 请求-响应配对（visibleTextResolvers/terminalPasteResolvers + responseTimeoutMs 超时清理）；GUI 侧经 'query-visible-text'（{requestId, maxLines}）/'terminal-paste-request'（{requestId, text}）IPC 与 xterm term.paste 单链路输入——修复旧 Ctrl+V 手动剪贴板双发问题，支持 TUI bracketed-paste（DECSET 2004）状态机。
-- 测试护栏：test_interactive_sequence.js（140行）。
+- 测试护栏：test_interactive_sequence.js（140行）。粘贴链路最终收敛于 5e23a279（-9/+3）：彻底删除 Ctrl+V / Ctrl+Shift+V 的手动剪贴板分支，统一走 xterm 原生 paste 事件 → term.onData → PTY，杜绝同一内容双发。
 ⚠️ 前端分布式插件，manifest定义在VCPChat仓库
 
 【2026-09-02 第13次上游合并更新】fc3b81f1"修复重复的ipc定义"：PowerShell GUI 专属窗口控制不再复用应用级 minimize-window/maximize-window/close-window 通道——ipcMain 是全局事件总线，通用通道会让日志中心等其它窗口的操作误落到此 guiWindow，且 PowerShell 自身消息与应用级处理器重复执行（最大化切换两次等于没变）。新增 isPowerShellGuiSender(event) 判定（event/guiWindow 存活校验）；PowerShellExecutor.js +44、gui/preload.js +9。

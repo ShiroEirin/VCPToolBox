@@ -1,0 +1,39 @@
+[2026-09-10] - 哈雷酱
+[VCP百科全书] VCPChat 渲染管线——表情 URL 修正器（emoticonUrlFixer）（原子切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-10（第18次上游合并：a3b59319 "fix"，emoticonUrlFixer.js +172/-32（现306行）+ tests/emoticon-url-fixer.test.js +116行）
+适用范围：`VCPChat\modules\renderer\emoticonUrlFixer.js` 当前源码
+事实来源：源码（导出与函数清单实测）+ git show a3b59319 + 使用方引用核查
+
+# 一、定位
+
+将 AI 写出的表情图片 URL 修正映射到表情库内真实条目——AI 常写出"xx表情包/文件名.jpg"这类与实际库内路径/包名不完全一致的地址，直接渲染必然裂图；本模块负责在渲染前把 URL 修正为库内可用的真实地址。
+
+- 单文件工厂：`export function createEmoticonUrlFixer()`（文件头注释原文："Creates one emoticon catalog owner for one renderer or viewer."）——每个渲染器/查看器一个独立实例，持自己的 emoticonLibrary 与初始化状态。
+- 初始化：`initialize(api)`（经 electronAPI 拉取表情目录，含 initializationPromise 防并发；isInitialized 标记）。
+
+# 二、核心函数（实测清单）
+
+- `getSimilarity(s1, s2)` / `editDistance(s1, s2)`：基于编辑距离的归一化相似度（0~1）。
+- `getFilenameStem(filename)`：取文件主名。
+- `normalizePackageName(packageName)`：包名归一化。
+- `extractEmoticonInfo(url)`：从库条目 URL 中抽取 {filename, filenameStem, packageName} 等身份信息。
+- `fixEmoticonUrl(originalSrc)`：对外的 URL 修正入口（streamManager / ask-nova-modal 调用点）。
+
+# 三、a3b59319 修正语义（+172/-32）
+
+- **Unicode 归一化**：`filename.trim().normalize('NFC')` 后再匹配。
+- **表情身份=文件主名**：扩展名不参与匹配；分类（表情包）只用于同名表情消歧。
+- **多级匹配链**：① 主名精确命中（exactNameMatches）→ 包名精确匹配（normalizePackageName 后比对）优先于相似度打分；② 主名未命中但分类精确命中时，先锁定该表情包，再在**包内**找最相似文件（filenameScore + packageScore 加权）；③ 明确包含"表情包"的 URL 必须兜底到库内项目，**不设最低相似度门槛**（库内有效图片优先于保留必然裂图的原地址）。
+- 匹配范围标记：matchScope = 'same package' / 'library fallback'（测试与调试可辨）。
+
+# 四、使用方（渲染管线嵌入点）
+
+- `modules/renderer/streamManager.js`（流式渲染器 v4，切片226）：L290/295/300 内联表情修正、L1362 img src 修正、L1375 容器级修正守卫（`!refs.emoticonUrlFixer || !container` 早退）——refs.emoticonUrlFixer 由流式渲染器注入。
+- `modules/ui-system/ask-nova-modal.js`：L1 import createEmoticonUrlFixer → L5 实例化 → L144 fixEmoticonUrl（AskNova 模态内的表情渲染）。
+
+# 五、与其他切片的关系
+
+- 与切片 40（EmojiListGenerator，ToolBox 侧）：40 是表情库列表的**生成端**（扫描 image/ 目录输出 .txt 列表），本切片是**消费端**（渲染时把 AI 写出的 URL 修正到库内真实条目），两者共同构成表情包系统的两端。
+- 与切片 232/226：同属 modules/renderer 渲染管线；本模块专注表情 URL 域，232 专注 HTML/Markdown 规范化域。
