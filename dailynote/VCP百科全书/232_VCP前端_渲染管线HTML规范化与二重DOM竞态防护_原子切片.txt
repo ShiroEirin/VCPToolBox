@@ -1,0 +1,34 @@
+[2026-09-10] - 哈雷酱
+[VCP百科全书] VCPChat 渲染管线——HTML 规范化与二重 DOM 竞态防护（原子切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-10（第18次上游合并：4d0d160e "修复一个很极端的归一化二重dom竞态"，modules/renderer/contentProcessor.js +67/-10）
+适用范围：`VCPChat\modules\renderer\contentProcessor.js`（现1485行）
+事实来源：git show 4d0d160e + 源码
+
+# 一、修复对象
+
+独立 raw HTML `<img>` 行与后续 Markdown 之间的边界规范化（api 名：ensureBlankLineAfterStandaloneImageTag）。
+
+# 二、旧实现的问题（被替换）
+
+旧逻辑在 `<img>` 与后继代码块围栏（```）之间插入"双换行 + HTML 注释"作为强制分隔——对 CommonMark 是 type-6 raw HTML block 的粗暴打断方式；注释哨兵在归一化与 DOM 更新二重流程下会形成竞态（同一文本被重复规范化/重复插入分隔符）。
+
+# 三、新实现语义（4d0d160e）
+
+- **CommonMark 语义正确**：type-6 raw HTML block 只有在空行处才闭合；新实现保证独立 `<img>` 行后存在空白行边界，使后续反引号、列表、强调被正确解析为 Markdown 而非 raw HTML 文本。
+- **围栏域逐字节不变**：``` 与 ~~~ 围栏（缩进≤3、长度匹配、闭合尾空）区域内的文本一律原样透传，不插入任何分隔。
+- **幂等**：已有空行不再叠加——只能补齐一次，天然可重复执行（消除二重规范化的竞态源）。
+- 不再插入 HTML 注释哨兵。
+
+# 四、实现要点（源码级）
+
+- 快速返回：`if (typeof text !== 'string' || !/<img\b/i.test(text)) return text;`——无 `<img` 的文本零开销透传。
+- 逐行状态机：以 `\n` 切分后单遍扫描，围栏判定正则 `/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/`；用 activeFence {char,length} 记录当前围栏，闭合条件为同字符、长度≥开启长度、尾部空白。
+- 围栏内的行直接 push 原行并 continue，保证"代码域逐字节不变"。
+- 输出结果行数组 join('\n') 返回，不引入额外换行或注释。
+
+# 五、与其他切片的关系
+
+- 本修复位于渲染管线的预处理器（contentProcessor.js），供聊天流式渲染器 v4（切片226）与消息渲染路径共用。
+- 本批 42 提交中 contentProcessor.js 仅此一处改动（git log d5baf919..upstream/main 验证）。

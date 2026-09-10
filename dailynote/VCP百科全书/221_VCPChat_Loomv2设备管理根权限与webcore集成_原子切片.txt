@@ -1,8 +1,15 @@
-[2026-08-07] - 哈雷酱
+[2026-09-10] - 哈雷酱
 [VCP百科全书] VCPChat——Loom v2 设备管理根权限与 webcore 集成（原子切片）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-08-07（第10次上游合并：5506383 大工程的开始 / d803a5a 升级loomv2 / 9c0cc72 实现完整的loom设备管理根权限 / 339a6f3 竟态加固）
+最后核验：2026-09-10（第18次上游合并：VCPLoomSkill V1 上架 c423713d + 链路优化 b84dd966；LoomController manifest v1.3.0→v1.7.0）
+
+【2026-09-10 VCPLoomSkill V1】持久化技能系统（c423713d，10文件）：
+- 新增 `VCPDistributedServer/Plugin/LoomController/LoomSkillService.js`（348行）：skillId 校验 `/^[a-z0-9][a-z0-9_-]{1,63}$/`、占位符 `{{变量}}` 声明与 collectVariables 提取、MAX_FILE 256KB / MAX_RESULT 4MB 限额；validationMode 三态——current（仅读当前 DOM，可解析 vcp ID 固化为来源+唯一选择器+元素签名，不可解析则返回 validated=false、fallback=raw-vcp-id）/ trial（实际执行整链验证，失败不创建）/ none。
+- `LoomControllerService.js` +260（现938行）；manifest v1.7.0 新增 CreateSkill / ManageSkill（list/get/delete）/ EditSkill 命令（重名拒绝覆盖、编辑不影响已启动任务；输入可写 {{变量名}} 并在 placeholders JSON 声明）。
+- 持久化目标链路：`modules/loom/webcore/web-agent-page-runtime-core.js` +66（现1922行）新增 createPersistentTarget 与 Locator Hints 近似恢复（TARGET_AMBIGUOUS 多候选报错、SKILL_TARGET_UNSUPPORTED 拒绝 Shadow DOM/iframe 固化）；b84dd966 再优化 +66/-13。
+- `modules/loom/VCPLoomManager.js` +23（现2139行）。
+- 测试护栏：tests/loom-skill.test.js（286行）、tests/loom-persistent-target.test.js（100+68行）、loom-controller.test.js +33。
 适用范围：`modules/loom/` 当前源码（VCPChat）
 事实来源：
 - `modules/loom/VCPLoomManager.js`（1900 非空行 / 总行数 2080，含 180 空行；PowerShell 核实）

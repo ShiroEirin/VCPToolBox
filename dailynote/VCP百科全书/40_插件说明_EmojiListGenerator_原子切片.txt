@@ -1,5 +1,11 @@
-[2026-07-22] - 哈雷酱
+[2026-09-10] - 哈雷酱
 [VCP百科全书] 插件说明——EmojiListGenerator（原子切片）
+最后核验：2026-09-10（第18次上游合并：6788be75 "升级表情包系统"，emoji-list-generator.js +53、messageProcessor.js +65、routes/admin/emojis.js +33）
+
+【2026-09-10 表情包系统升级】三项改进：
+- 确定性排序（emoji-list-generator.js）：表情包目录与图片文件均改用 compareText = localeCompare('zh-Hans-CN', {numeric:true, sensitivity:'base'}) 排序——中文数字自然排序，输出列表稳定可复现。
+- 幂等写入（emoji-list-generator.js + routes/admin/emojis.js）：新增 writeFileIfChanged/writeTextFileIfChanged——先读旧内容比对，相同则跳过写入，返回 updatedCount/unchangedCount 统计；避免无意义磁盘写与 mtime 抖动。
+- 提示词压缩（messageProcessor.js formatEmojiListForPrompt）：将 generated_lists 的 `文件名.ext|文件名.ext` 压缩为扩展名分组格式（如 `.jpg表情:开心|难过`），仅减少提示词中重复扩展名产生的 token；磁盘格式与前端 API 契约保持不变。
 
 版本：1.0.0 | pluginType: static
 

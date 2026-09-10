@@ -1,8 +1,17 @@
-[2026-09-04] - 哈雷酱
+[2026-09-10] - 哈雷酱
 [VCP百科全书] VCPChat 设置系统 VCPUI 化重构与自包含 VCPUI 组件库（原子切片）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-04（第15次上游合并：2026-08-31起 375 提交 UIUX 大重构落库）
+最后核验：2026-09-10（第18次上游合并：设置侧边栏现代化 PR #200 合入 69577e84，75文件 +10301/-9596；#198 作用域错误修复 3f8c04b9）
+
+【2026-09-10 设置侧边栏现代化（PR #200 / RoxyAsahi，约24个 settings/uiux 提交）】
+- **schema surfaces 与 owned slots**：agent/group 侧边栏全面迁移到 schema surface 渲染（170b3fc1）；modules/ui-system 现69文件、styles/ui-system 25文件、styles/setting 5文件。
+- **设计令牌收敛**：侧边栏样式统一并入 design tokens、退役遗留 CSS（147129ae、18847244）。
+- **交互组件**：Agent 模型选择器浮动面板恢复（90ac73ed）、TTS 语音选择器升级 popup select + 搜索（c3cf5d2c/9c6cfc6e）、语速胶囊徽标（8c11c2ea）、超椭圆连续曲率恢复（ae2ff38e）、用户头像圆形悬浮上传遮罩（b4f8d262）。
+- **缺陷修复链**：dirty 状态 flushing/切换前落盘（26c1c02a）、解绑数据丢失/null 引用/IPC 误报保存（30c76fab）、模型 ID 不匹配+自动保存序列化+群组删除风险弹窗（8263f85d）、对抗性测试补强（62e30b98）；3f8c04b9 由 lioensky 修复 #198 PR 多个关键作用域错误（agent-settings-bridge.js +76、Flowlockmodules/flowlock.js +47、main.html 等）。
+- **测试规模**：tests/settings-elements-interaction.test.mjs（1878行新增）、uiux-settings-bridge-modules.test.mjs 405行改。
+- **主题侧**：d0196b94 revert 将 styles/themes.css 恢复上游默认（对上游为净零）；prompt modules/regex 样式在重构中保留（952e4296）。
+- 其他同批 UI 打磨：图标一致性修复（4b11c523/30cafad6）、桌面部分优化（e3a5f853）、播放器布局微调（d294247c）、布局冲突修复（8a818eb3/2b4aafe1）。
 上游commit起点：5a641e95 "feat(uiux): 引入自包含 VCPUI 组件库（modules/uiux）" (2026-08-31)
 上游commit收尾：d1aff78c "增加2个官方主题" + fd55c958 "微调" (2026-09-04)
 
