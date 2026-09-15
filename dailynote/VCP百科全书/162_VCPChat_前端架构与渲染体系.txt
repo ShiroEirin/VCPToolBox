@@ -1,6 +1,16 @@
 [2026-09-02] - 哈雷酱
 [VCP百科全书] VCPChat——前端架构与渲染体系
 
+【2026-09-16 第19次上游合并：Pixi v8 渲染引擎接入】（上游 68 提交 / 207 文件 +59147/-9233；本轮上游 main 被 force-push 重写历史，合并基线回退到 1aaf8fc5，本地侧与上游侧分别分叉 88 / 68 提交）：
+- **vendor 新增 Pixi v8**（aff97131「引入pixiv8引擎」）：`vendor/pixi.min.js`（802KB）+ `vendor/pixi-unsafe-eval.min.js`（15.4KB）；`main.html` 与 `modules/text-viewer.html` 引入，`modules/renderer/animation.js` +124、`modules/renderer/visibilityOptimizer.js` +156、`modules/text-viewer.js` +68。
+- **V 桌面接入 Pixi**（9f1c777d）：`Desktopmodules/core/widgetManager.js` +66、`visibilityFreezer.js` +24、`desktop.html` 2 行；挂件侧以 Proxy 包装 `PIXI.Application` 并登记 `_pixiApps`，冻结/恢复/销毁三条路径统一管理 Application 与 Ticker（详见切片 202）。
+- **V 音乐 GPU 管线**：传统 canvas 动画迁至 Pixi（`Musicmodules/music-ambient-pixi.js` 476行 + music-stage 全套），详见切片 130。
+- **原生音频引擎**：`rust_audio_engine/`（Rust crate `vcp_audio_engine` v2.0.0，src 下 61 个 .rs）成为音乐播放与 DSP 底座，详见切片 235。
+- **渲染管线修补**（c31f6af9「加强代码块围栏」）：`modules/renderer/animation.js` +23/-6、`contentPipeline.js` +15/-4、`contentProcessor.js` +7/-3（详见切片 232 / 226）。
+- **基础设施**：`main.js`（1edc7389 核心同步事务收纳）、新增 `modules/services/pluginAgentOperationService.js`，详见切片 226 / 223。
+- **目录重构**：分布式插件从仓库根 `gui/` 迁入 `VCPDistributedServer/Plugin/<插件>/gui/`，旧 PowerShell 插件被归档为 `VCPDistributedServer/Plugin/OldPowerShellExecutor/`（详见切片 74）。
+- **主题层**：`styles/themes/` 实测 21 个主题文件（夜樱猫语、纸墨与机芯、第一适格者、赤与白昼、瓷与锦、酸性玄武、星渊雪境、月影春信、CodeIDE、Eva 等）；本轮 `git log --diff-filter=A 1aaf8fc5..HEAD -- styles` 未列出新增主题文件；`styles/themes.css` 在工作区含未提交的本地夜樱猫语定制（426 行差异），本次 stash 还原零冲突。
+
 【2026-09-02 第13次上游合并架构级更新】（0330670c..668b232b，680文件 +103740/-18572）：
 - **聊天内核深度解耦**（详见切片226）：modules/chat/ 25个新模块（singleChatRequestOrchestrator/streamCoordinator/chatEventContract 等），流式渲染器 v4（streamManager.js 1442行级重写），docs/contracts/ 事件契约证据体系
 - **引导启动器体系**（详见切片225）：bootstrap/ 恢复UI + scripts/vcpchat-*.mjs 诊断命令 + launchers/ 图形入口 + apps/bootstrap-installer Tauri 安装器 + StartVCPchat.exe

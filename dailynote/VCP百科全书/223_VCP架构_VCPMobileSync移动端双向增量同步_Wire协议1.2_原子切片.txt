@@ -1,7 +1,13 @@
 [2026-09-07] - 哈雷酱
 [VCP百科全书] VCPMobileSync 移动端双向增量同步服务（Wire 协议 1.2 → 1.4 → 2.0.0）
 状态：CURRENT_VERIFIED
-最后核验：2026-09-07（第17次上游合并：版本 1.4.0→2.0.0，MRiecy 错误契约1-2系列约25提交+lioensky修复，README 2.0.0 全量重写 fb7e61f6，PR #192 合并 9611842d）
+最后核验：2026-09-16（第19次上游合并：1edc7389「核心同步事务收纳」，sync/entity.js +114/-66、transport/routes.js +15/-3、index.js +6/-1、main.js +8/-0）
+
+【2026-09-16 核心同步事务收纳】（1edc7389）：
+- `VCPDistributedServer/Plugin/VCPMobileSync/sync/entity.js` 大幅改写（+114/-66），把同步实体的写入收拢为事务化提交。
+- `transport/routes.js`（+15/-3）与 `VCPMobileSync/index.js`（+6/-1）配合调整。
+- 同提交还包含 `main.js`（8 行）与新增 `modules/services/pluginAgentOperationService.js`（75 行）+ `tests/plugin-agent-operation-service.test.cjs`（37 行）；该服务与 MobileSync 事务语义是否共用同一提交路径未逐行核对（详见切片 226）。
+- 本切片上方的目录结构（core/ dto/ fixtures/ sync/ transport/ utils/）、Wire 协议版本与 config.env 说明均未变；错误契约系列（2.0.0）仍以第 8 行记录为准。
 适用范围：`VCPChat\VCPDistributedServer\Plugin\VCPMobileSync\` 当前源码
 事实来源：plugin-manifest.json + README.md + index.js + sync/ + transport/ 目录结构 + git log（1.4.0→2.0.0 错误契约系列）
 

@@ -2,7 +2,15 @@
 [VCP百科全书] VCPChat 渲染管线——HTML 规范化与二重 DOM 竞态防护（原子切片）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-10（第18次上游合并：4d0d160e "修复一个很极端的归一化二重dom竞态"，modules/renderer/contentProcessor.js +67/-10）
+最后核验：2026-09-16（第19次上游合并：c31f6af9「加强代码块围栏」，modules/renderer/animation.js +23/-6、contentPipeline.js +15/-4、contentProcessor.js +7/-3）
+
+# 六、2026-09-16 代码块围栏加强（三处同步）
+
+- `modules/renderer/animation.js`：+23/-6——动画渲染路径增加围栏判定，避免代码块内容被当作动画/HTML 处理。
+- `modules/renderer/contentPipeline.js`：+15/-4——内容管线在进入渲染前同步加固围栏边界。
+- `modules/renderer/contentProcessor.js`：+7/-3——与上文第三节的 CommonMark 空行边界语义配套微调。
+- 语义定位：本次是"加强"而非重写，第三节列出的两条不变式（围栏域逐字节不变、幂等）继续成立，改动集中在围栏识别与边界判定的边界条件。
+- 未验证：三处围栏判定是否已抽为共享函数（本次只在三个文件各自看到改动，未核对是否复用同一实现）。
 适用范围：`VCPChat\modules\renderer\contentProcessor.js`（现1485行）
 事实来源：git show 4d0d160e + 源码
 

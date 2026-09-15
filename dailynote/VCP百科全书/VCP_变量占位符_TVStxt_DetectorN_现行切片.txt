@@ -2,9 +2,19 @@
 [VCP百科全书] VCP 变量占位符、TVStxt 与 DetectorN（现行切片）
 
 状态：CURRENT_VERIFIED / PARTIALLY_STALE（源码确认；旧四级优先级已替代）
-最后核验：2026-07-22
+最后核验：2026-09-16（第19次上游合并：99d8a203 / PR #467「Detector/SuperDetector 的文本替换功能支持正则，允许替换为空字符串」）
 适用范围：VCPToolBox main 分支 modules/messageProcessor.js、modules/tvsManager.js、server.js
 证据等级：SOURCE_BODY
+
+【2026-09-16 Detector/SuperDetector 支持正则替换】（99d8a203，合并提交 12ccc394，来源 PR #467 Wooden-Gear/feat）：
+- 新增 `applySingleDetectorRule(text, rule)`（messageProcessor.js:608）——`rule.detector` 必须为非空字符串、`rule.output` 必须为字符串，否则原样返回文本。
+- detector 支持 `/pattern/flags` 正则字面量语法：由 `rule.detector.match(/^\/(.+)\/([dgimsuvy]*)$/s)` 拆解（:614），`new RegExp(body, flags)` 编译（:617）；编译抛错时打印 `[Detector] 无效的正则表达式: ...，回退为普通字符串替换` 并退回普通替换路径。
+- 普通字符串路径仍为 `text.replaceAll(rule.detector, rule.output)`（:624）。
+- 两个调用点统一收敛到该函数：system 角色的 detectors、全角色的 superDetectors（`applyDetectorRules`，:627）。
+- **output 允许为空字符串**：校验仍要求 detector 非空且 output 为 string，但不再禁止零长度 output，因此可借正则实现「删除命中文本」语义。
+- 同批配套改动：`server.js`（4 行）、`config.env.example`（4 行）、`docs/CONFIGURATION.md`（+12/-4）。
+- 行为边界：未带 `g` 标志时 `String.replace` 只替换首个匹配，要全量替换须显式写 `/pattern/g`；正则体不做转义，写错会命中上述 warn 回退分支。
+- 行号漂移提示：本切片下方「执行逻辑见 messageProcessor.js:552-599」为改动前行号，当前 `applyDetectorRules` 位于 :627。
 
 一、现行解析顺序
 - messageProcessor.js:601-812 的 replaceOtherVariables 实际顺序为：

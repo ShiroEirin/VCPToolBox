@@ -1,6 +1,14 @@
 [2026-09-07] - 哈雷酱
 [VCP百科全书] 插件说明——RAGDiaryPlugin（原子切片）修正版
-最后核验：2026-09-07（第17次上游合并：timeline切rivermemorust线路，b4e86575/dc50fbb0/b13428a5；RAGDiaryPlugin.js +117行 searchDiary桥接，VCPTimeLine.js +26行，schemaManager +39行，ingestionPipeline -30行）
+最后核验：2026-09-16（第19次上游合并：d9301bc9「迭代Associate基建层」，RAGDiaryPlugin.js +126/-13（合计 139 行变化），modules/associativeDiscovery.js +126/-55（合计 181 行变化），tests/associativeDiscoveryRiverMemo.test.js +292；现 RAGDiaryPlugin.js 5903 行）
+
+【2026-09-16 Associate 二次联想接入 RiverMemo】（d9301bc9）：
+- `_applyAssociativeDiscovery(...)`（RAGDiaryPlugin.js:3463）新增引擎选择：`options.useRiverMemo === true` 且 `this.vectorDBManager.executeNativeRiverQuery` 为函数时走 Rust 原生联合查询；条件成立却不具备原生接口时抛错，错误码 `RIVERMEMO_ASSOCIATE_UNAVAILABLE`（文案「RiverMemo 联想需要原生联合查询接口」）。
+- 日记本语法新增 `::RiverMemo::Associate`：二次联想同样进入 Rust RiverMemo（ANN、候选合并、hydrate、语义去重、Topology V3）；普通 `::Associate` 保留既有 KNN / 动态 TagMemo 权重路径。两条路径共享相同的跨种子逻辑，并共享原 `associateTagWeight` 参数（RiverMemo 分支传 null，避免与原生 boost 叠加）。
+- 候选规模：`candidateK = max(KnowledgeBaseManager.riverMemo.candidateSuperset.queryK(默认100), maxUnionCandidates(默认300))`；`riverBaseTagBoost` 由调用方传入，缺省取 `defaultTagWeight`。
+- RiverMemo 结果逐条标注 `_associateEngine: 'rivermemo'` 与 `_associateRiverMemo`（artifactSig / queryId / riverRegime，缺失时回退 `riverResult.omega.regime`）。
+- 同批：`Agent/Nova.txt` 的日记本检索修饰符由 `TagMemo+` 改为 `RiverMemo`（三处，c4149b8b，合并提交 db088d33 / PR #470），即 Nova 主记忆线路正式切到 RiverMemo 修饰符。
+- 执行层细节见切片 234（关联发现引擎 associativeDiscovery）。
 
 【2026-09-07 searchDiary 桥接层与 RiverMemo 原生线路】RAGDiaryPlugin.js +117 行（b4e86575）新增 `searchDiary` 结构化日记检索桥接（BRIDGE_VERSION='1.2'）：优先 Rust 原生 RiverMemo（`vectorDBManager.executeNativeRiverQuery`），不可用自动回退 TagMemo/KNN。参数：`riverMemo`(默认false)、`candidateK`（原生候选超集大小）、`queryText`、`tagMemo`/`geodesicRerank`/`deduplicate`（回退路径开关）。返回 `meta` 含 `riverMemoUsed`/`tagMemoUsed`/`fallbackReason`（'search-unavailable'/'empty-diary-scope'）。回显 retrievalMode 三态：'Rust 原生 RiverMemo 联合检索'（nativeJointQueryUsed）/ 'RiverMemo 原生拓扑检索（兼容路径）'/ TagMemo 浪潮。
 

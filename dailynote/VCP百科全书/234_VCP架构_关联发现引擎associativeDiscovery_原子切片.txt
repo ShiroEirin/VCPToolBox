@@ -1,0 +1,46 @@
+[2026-09-16] - 哈雷酱
+[VCP百科全书] 关联发现引擎 associativeDiscovery（RiverMemo 原生联想）（原子切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-16（第19次上游合并：d9301bc9「迭代Associate基建层」，modules/associativeDiscovery.js +126/-55（合计 181 行变化），现 260 行；tests/associativeDiscoveryRiverMemo.test.js +292）
+适用范围：`VCPToolBox\modules\associativeDiscovery.js` 当前源码
+事实来源：源码实测 + git show d9301bc9 + 调用方 RAGDiaryPlugin.js:3463
+
+# 一、定位
+
+把一条已有记忆/日记片段当作种子，反向找出语义上有关联的其它片段——即 Associates（二次联想）的执行层。调用方是 RAGDiaryPlugin 的 `_applyAssociativeDiscovery`，对外由日记本语法 `::Associate` / `::RiverMemo::Associate` 触发（详见切片 83）。
+
+# 二、类与入口（实测）
+
+- `class AssociativeDiscovery`（:10），`constructor()`（:11）持有 `kbm`（KnowledgeBaseManager）等依赖。
+- 对外入口 `async discover(params)`（:23）。
+- 能力前置探测（:30）：`this.kbm.db` 存在且 `typeof this.kbm.executeNativeRiverQuery === 'function'` 二者缺一不可，否则抛「Rust RiverMemo 尚未初始化或原生联合查询接口不可用」。
+- 种子向量来源 `_getFileVectorFromDb(relPath)`（:207）：按路径变体去重取文件向量，必要时回退按 chunk 取 `getVectorByChunkId`。
+
+# 三、RiverMemo 联合查询参数（实测）
+
+- `seedText = content.substring(0, 2000)`：种子文本截断到 2000 字符。
+- `diaryNames`：由 `range` 参数解析出允许检索的日记本集合；为空时抛「没有可用于 RiverMemo 联想的已索引日记本」。
+- 规模换算：`safeK = clamp(Number(k) || 10, 1, 200)`（对外 k 上限 200）；`searchK = min(600, max(safeK, safeK * 3))`——候选超采 3 倍，再由 RiverMemo 原生管线收敛。
+- `tagBoost` 解析：`Number.parseFloat(String(tagBoost).replace(/\+$/, ''))`，仅当结果为有限数值时才作为 `baseTagBoost` 传入（兼容 `TagMemo+` 式带加号写法）。
+- 随后调用 `this.kbm.executeNativeRiverQuery(...)`，读取 `riverResult.results`。
+
+# 四、结果整形
+
+- 文件名取 `res.fullPath || res.sourceFile`，反斜杠归一化为 `/`（Windows 路径兼容）。
+- 同一文件多次命中合并：分数更高者胜出（`> existing.score`），每个文件最多保留 3 个 chunk（`existing.chunks.length < 3`），`matchedTags` 去重合并。
+- 命中片段回表读原文（`this.kbm.db.prepare(...)` 查询 chunk）。
+- 返回结果交给 RAGDiaryPlugin 打 `_associateEngine: 'rivermemo'` 标记（切片 83）。
+
+# 五、与既有切片的关系
+
+- 调用方与语法：切片 83（RAGDiaryPlugin 原子切片）、`RAGDiaryPlugin_现行检索主链与日记本语法_切片.txt`。
+- 底层引擎：切片 207（RiverMemoEngine 与 Topology V3）、切片 212（rust-vexus-lite 统一 Memo 运行时）、切片 209（记忆管线 Rust 下沉）。
+- 测试护栏：`tests/associativeDiscoveryRiverMemo.test.js`（292 行，本轮新增）。
+
+# 六、未验证边界
+
+- `discover` 的完整返回对象字段（未逐字段核对，仅确认文件级合并结构与 matchedTags）；
+- 与 KnowledgeBaseManager 侧 `riverMemo.candidateSuperset` 配置项的联动细节（切片只读到 RAGDiaryPlugin 侧的消费点）。
+
+Tag: associativeDiscovery, 关联发现, Associate, 二次联想, RiverMemo, executeNativeRiverQuery, KnowledgeBaseManager, 日记本语法, matchedTags, 语义去重, 第19次上游合并

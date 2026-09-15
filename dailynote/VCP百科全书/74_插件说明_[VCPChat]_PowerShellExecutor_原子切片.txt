@@ -1,6 +1,12 @@
 [2026-09-10] - 哈雷酱
 [VCP百科全书] PowerShellExecutor - PowerShell命令执行器
-最后核验：2026-09-10（第18次上游合并：42383c60 "升级cli指令交互功能范式"，manifest v1.1.0→v1.2.0；PowerShellExecutor.js +405、PowerShellViewer.js +22、test_interactive_sequence.js +140）
+最后核验：2026-09-16（第19次上游合并：目录整体迁移——GUI 与主文件随插件移入 `VCPDistributedServer/Plugin/PowerShellExecutor/`，旧目录被上游归档为 `OldPowerShellExecutor/`）
+
+【2026-09-16 目录迁移与路径更正】（第19次上游合并，随上游 force-push 后的 429a9682 落地）：
+- **插件在 VCPChat 中已整体迁入分布式插件目录**：现路径为 `VCPChat\VCPDistributedServer\Plugin\PowerShellExecutor\`。本切片此前引用的 `VCPChat\gui\PowerShellViewer.js` 等仓库根 gui/ 路径已失效。
+- 实测结构（2026-09-16）：`PowerShellExecutor.js` 1850 行、`plugin-manifest.json` 53 行、`AdminConfirm.py` 349 行、`config.env` 4 行、`test_interactive_sequence.js` 140 行、`test_security_check.js` 224 行；GUI 子目录含 `gui\PowerShellViewer.js` 370 行、`gui\PowerShellViewer.css` 246 行、`gui\PowerShellViewer.html` 74 行、`gui\preload.js` 52 行。
+- 旧版归档为同级 `VCPDistributedServer\Plugin\OldPowerShellExecutor\`（仅 PowerShellExecutor.js / plugin-manifest.json / AdminConfirm.py），对应既有切片 72。
+- 功能口径未变：v1.2.0 的 SendInteractiveKey / PasteInteractiveText / RunInteractiveSequence 与 xterm 原生粘贴链路（见本切片上方第 5-10 行）仍为当前实现。
 
 【2026-09-10 CLI 指令交互功能范式升级】新增三条一级命令 + xterm 原生粘贴链路（42383c60，manifest v1.2.0）：
 - **SendInteractiveKey**：发送单个按键/连击（enter/return、up/down/left/right、esc/escape、tab、shift+tab/backtab、backspace、delete、home/end、pageup/pagedown、space、ctrl+c/d/z/l/a/e/u/k/w），`ctrl+c*2` 连击最多 10 次；可选 newSession 重建 PTY。

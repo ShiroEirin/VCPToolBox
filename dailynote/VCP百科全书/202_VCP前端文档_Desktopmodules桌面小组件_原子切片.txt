@@ -1,6 +1,13 @@
 [2026-07-22] - 哈雷酱
 [VCP百科全书] Desktopmodules 桌面小组件系统 - 原子切片
 
+【2026-09-16 Pixi 挂件生命周期管理】（9f1c777d「v桌面接入pixi」，Desktopmodules/core/widgetManager.js +66、core/visibilityFreezer.js +24、desktop.html 2 行）：
+- 挂件沙箱内使用 Pixi 时，通过 `_createPixiFacade()` 以 Proxy 包装 `_realWindow.PIXI`，并用 `Reflect.construct` 派生 `SandboxedPixiApp` 包装 `PIXI.Application`；每次实例化都把 app 登记进该挂件的 `_pixiApps` 数组（widgetData 初始化时置为 `[]`）。
+- 冻结/恢复：窗口不可见时（visibilityFreezer 路径）暂停挂件内全部 Pixi Application 与 Ticker，恢复时重新启动。
+- 销毁：挂件销毁路径逐个 `destroy` Pixi Application，释放 WebGL 上下文与 Ticker，随后清空 `_pixiApps`；失败时打印 `[Desktop] Failed to clean up Pixi app for widget <widgetId>`。
+- 关联：Pixi v8 本体由 `vendor/pixi.min.js`（802KB）提供，引入背景见切片 162；音乐侧 GPU 管线见切片 130。
+- 未验证：`SandboxedPixiApp` 的完整代理面（本切片只核对了 Application 构造登记与三条生命周期路径）。
+
 一、模块基本信息
 1. 模块名称：Desktopmodules
 2. 模块类型：VCPChat 前端桌面画布系统

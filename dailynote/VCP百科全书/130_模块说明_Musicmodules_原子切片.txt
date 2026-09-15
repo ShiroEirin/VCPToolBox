@@ -2,6 +2,16 @@
 ⚠️ VCPChat前端模块，2026-03后新增了大量模块（Desktopmodules/Agenttaskmodules等），以下内容可能不完整
 [VCP百科全书] Musicmodules - 音乐播放器模块
 
+【2026-09-16 第19次上游合并：vmusic 全量重构 + music-stage 多模式舞台 + Pixi GPU 管线】（本轮上游 68 提交中 Musicmodules 占 34 个文件，是这一轮的主线之一）：
+- **UI 层全量重构**（a92781b4「vmusic全量重构ui层」）新增 `music-stage/` 子系统：`music-stage-host.js`（1204行）宿主、`music-stage-runtime.js`（505行）、`music-stage-modes.js`（226行）、`music-stage-config.js`（326行）、`music-stage.css`（2979行）、`music-stage-advanced-modes.js`（29行），以及 `modes/` 下的 diorama-manager（1503行）/ diorama-stations（465行）/ sonnet-manager（107行）+sonnet-pixi-core（342行）/ tempera-manager（115行）+tempera-pixi-core（465行）/ fume-manager（383行）/ cadenza-manager（183行）/ luminous-manager（63行）/ partita-manager（71行）/ stage-pixi-effects（1190行）/ stage-lyric-layout（170行）/ stage-lyric-performance（376行）。当前 `music.css` 2906 行、`music.html` 877 行、`music.js` 1224 行。
+- **传统 canvas 动画迁移到 GPU 管线**（b016793a）：新增 `music-ambient-pixi.js`（476行）；同批 `music.css` -117 行、`music.html` -59 行（旧 canvas 层下线），`music.js` 4 行接线。
+- **歌词链路增强**（0c0fc7e0「增强歌词下载功能」）：`Musicmodules/music-lyrics.js` 现 506 行；配套 `modules/lyrics/` 新增/扩展 `lyricFetcherUnified.js`（656行，多源统一获取）、`parserCore.js`（501行）、`matchScore.js`（179行）、`krcDecrypt.js`（96行）、`qrcDecrypt.js`（346行）；`modules/lyricFetcher.js`（244行）作为兼容入口保留。
+- **Pixi 调度器内存泄漏优化**（6e6dfb72）：`sonnet-pixi-core.js` / `tempera-pixi-core.js` / `music-visualizer.js`（396行）/ `music-ui.js`（201行）/ `music.js` 集中修正 Application 与 Ticker 生命周期。
+- **性能与交互迭代**：93091fee（列表滚动性能 + pixi 避让）、181d8148（播放运行时）、88cd2da3（特效深化）、35a01e52（主题层识别增强）、429a9682/4ff1bc37（智能主题层与 diorama 站点模块）。
+- **主进程侧**：`modules/ipc/musicHandlers.js`（957行）提供音乐相关 IPC。
+- **测试护栏**：`tests/music-stage-lifecycle.test.js`、`tests/lyric-cross-provider-audit.test.js`、`tests/music-lyrics-auto-candidate.test.js`、`tests/diorama-stations-smoke.cjs`。
+- 说明：本切片下方"主要文件结构（music.js / music.html / music.css / socket.io.min.js）"仍成立，但已不足以描述当前体系；所述行数均为 2026-09-16 实测值。
+
 一、模块基本信息
 1. 模块名称：Musicmodules / 音乐播放器模块
 2. 模块类型：前端UI模块

@@ -1,6 +1,16 @@
 [2026-07-22] - 哈雷酱
 [VCP百科全书] 插件说明——VCPTaskAssistant（原子切片）
 
+【2026-09-16 持久化原子性与熔断保护】（cf60e620，合并提交 cdc3e5e1，来源 PR #466 infinite-vector/fix/task-assistant-atomic-persistence；vcp-task-assistant.js +96/-14，现 936 行）：
+- 新增镜像备份文件 `task-center-data.json.bak`（BAK_FILE，:177）。
+- `saveDisabled` 熔断安全锁（:178）：主文件与备份都无法有效解析时不再降级为空壳数据，直接抛错并锁死写盘（:232-233）；锁生效期间 `saveData()` 立即返回并打印告警（:239）。
+- `tryParse(filePath)`（:182）：文件不存在或内容为空返回 null；**体积异常拦截**——文件大于 1KB 但解析后 tasks 数量为 0 时抛「文件体积异常(...B)但无有效任务，触发安全拦截」。
+- 读取顺序改为：主文件解析失败 → 打印损坏日志 → 尝试 `.bak` 恢复；主备皆不存在才创建默认数据并落盘，主备皆存在却都无法解析则抛错保护。
+- 写入侧改为 FIFO 串行队列 `saveQueue = saveQueue.then(...)`（:245），同一时刻仅一个写事务，消除并发写撕裂；提交标题自述手段为 atomic rename + save queue。
+- 临时文件 `task-center-data.json.<时间戳>_<随机串>.tmp`（:247），随机后缀避免多次写入互相踩踏。
+- **空壳反向覆写拦截**（:253-259）：磁盘原文件大于 10KB 而当前待写内容小于 1KB 且无任务时判定为恶性覆写，拒绝写入并置 `saveDisabled = true`。
+- 其他加固：读取恢复旧脏状态时改为 `if (task.runtime && task.runtime.running)`，容忍 runtime 字段缺失。
+
 一、插件身份
 - name: `VCPTaskAssistant`
 - displayName: `VCP任务派发中心`

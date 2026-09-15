@@ -1,6 +1,15 @@
 [2026-07-22] - 哈雷酱
 [VCP百科全书] AdminPanel-Vue 管理面板 - 原子切片
 
+【2026-09-16 SarPrompt 排除模式 + 内置 Pixi 资源】（00a31fc4，合并提交 9deadda6 / PR #471 Wooden-Gear/feat；dist 重新构建、src 侧 28 行、docs/CONFIGURATION.md +33）：
+- 模型匹配新增两种排除模式：`exactExclude`（精确命中即**不**生效）与 `includesExclude`（包含命中即**不**生效）。实现在 `modules/sarPromptManager.js:115-124`（现 159 行）：先算 `matched`（`isIncludeMode = includes|includesExclude` 用子串包含，否则用数组精确匹配），再按 `isExcludeMode = exactExclude|includesExclude` 取反；关键词列表过滤后为空（filtered.length === 0）直接返回 false。
+- 面板侧：`AdminPanel-Vue/src/views/SarPromptEditor.vue` 新增 `exactExclude` / `includesExclude` 两个下拉选项与 `getMatchModeDescription(matchMode)` 四态文案映射（includes / exactExclude / includesExclude / exact）；模型列表输入框说明改为「多个模型用英文逗号分隔；排除模式下表示要排除的模型或关键词」。
+- 类型与 API：`AdminPanel-Vue/src/api/sarPrompt.ts` 同步（8 行）。
+- 后端侧：`modules/messageProcessor.js`（6 行）SarPrompt 注入分支随匹配模式调整；`docs/CONFIGURATION.md` +33 行补文档。
+- 测试护栏：`tests/sarPromptManager.test.js` 随同批提交新增 115 行。
+- 构建产物：dist 资源哈希重命名（index / SarPromptEditor / useMarkdownRenderer 等），并新增 `vendor/pixi.min.js` 与 `vendor/pixi-unsafe-eval.min.js`（被 MediaRenderer 作为内置库引用，详见切片 215）。
+- 历史遗留：旧注释仅描述 exact / includes 两态，现已由 `getMatchModeDescription` 取代。
+
 一、模块基本信息
 1. 模块名称：AdminPanel-Vue
 2. 模块类型：前端管理面板 (Vue 3 SPA)

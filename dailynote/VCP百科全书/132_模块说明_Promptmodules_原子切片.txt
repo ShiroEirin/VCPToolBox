@@ -2,6 +2,14 @@
 ⚠️ VCPChat前端模块，2026-03后新增了大量模块（Desktopmodules/Agenttaskmodules等），以下内容可能不完整
 [VCP百科全书] Promptmodules - 提示词模块
 
+【2026-09-16 积木块复制动作】（f43c3e19「feat: add prompt block copy actions」，合并提交 6443019b / PR #204；`Promptmodules/modular-prompt-module.js` +47，上游外部贡献者提交）：
+- 编辑区积木块右键菜单新增『复制到小仓』，调用 `copyBlockToWarehouse(index)`：先用 `areBlocksEqual` 对当前小仓 `hiddenBlocks[this.currentWarehouse]` 查重（重复则直接返回），再 `structuredClone(block)` 深拷贝并重新 `generateId()`，推入小仓后 `save()` + `renderWarehouse()`。
+- 小仓积木块右键菜单新增『复制到编辑区』，调用 `copyBlockToEditor(index)`：从 `hiddenBlocks[this.currentWarehouse]?.[index]` 取块，`structuredClone` + 新 id 后推入 `blocks`，随后 `save()` + `renderBlocks()`。
+- 语义要点：复制一律生成新 id，复制体与原块不共享引用；跨仓库（编辑区 ↔ 小仓）复制不会污染来源侧；重复内容按结构相等判定被拒。
+- 与既有能力的关系：小仓（hiddenBlocks）体系见本切片第三节"模块化积木块模式"，本轮只是补齐了双向复制的入口。
+
+【2026-09-16 核心中央配置权重写（1b7d8162）】同轮另有 4 个本模块文件被改动（提交标题为"核心中央配置权重写"，具体语义未逐行核对，故只登记改动范围）：`prompt-manager.js`（124 行变化）、`modular-prompt-module.js`（65 行变化）、`preset-prompt-module.js`（63 行变化）、`original-prompt-module.js`（19 行变化）。同批还改了 `Groupmodules/grouprenderer.js`（2151 行变化）、`VCPDistributedServer/Plugin/PromptSponsor/prompt-sponsor-service.js` +21 与 `TopicSponsor/topicsponsor-service.js` +21，以及两个插件 manifest（各 6 行）。
+
 一、模块基本信息
 1. 模块名称：Promptmodules / 提示词模块
 2. 模块类型：前端UI模块

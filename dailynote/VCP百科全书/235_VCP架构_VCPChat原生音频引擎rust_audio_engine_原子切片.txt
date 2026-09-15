@@ -1,0 +1,52 @@
+[2026-09-16] - 哈雷酱
+[VCP百科全书] VCPChat 原生音频引擎 rust_audio_engine（Rubato/DSP 实验线）（原子切片）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-16（第19次上游合并：实验分支经 ea461e1d「Merge PR #202 from lioensky/experiment/rubato-vchatcore-ab」并入；src 下 61 个 .rs、目录内 git 跟踪文件 69 个）
+适用范围：`VCPChat\rust_audio_engine\` 当前源码（VCPChat 侧）
+事实来源：Cargo.toml / src/lib.rs / src/main.rs / README - 副本.md / 目录实测 + git show ea461e1d
+
+# 一、定位
+
+VCPChat 的独立 Rust 音频服务：解码、重采样、DSP 链、响度分析与播放输出全部在 Rust 侧完成，JS 前端（vmusic / music-stage）通过 WebSocket/HTTP 与之通信。lib.rs 注释明确「Python bindings 已移除，引擎现在直接与 JS 前端通过 WebSocket/HTTP 通信」，即该引擎是"前后端同机常驻服务"形态，而非 Python 扩展。
+
+# 二、构建与产物
+
+- Crate：`vcp_audio_engine` v2.0.0，edition 2021，`description = "VCP Hi-Fi Audio Engine - Full Rust Native"`。
+- 双产物：`[lib] crate-type = ["cdylib", "rlib"]`（可作库内嵌）+ `[[bin]] name = "audio_server" path = "src/main.rs"`（独立服务）。
+- 构建链：`build.rs`（构建脚本）、`build-runtime.js`、`scripts/build_all.ps1`（双 CPU 构建）、仓库根 `编译并部署音频引擎.bat`（部署）；README 给出标准命令 `cargo build --release --locked --bin audio_server --no-default-features --features rubato,loudness-db`。
+- 构建要求（README）：Rust stable + Windows MSVC target；**不需要 vcpkg、不需要 pkg-config、不链接 libsoxr**。
+- 运行产物目录 `VCPChat\audio_engine\`：`audio_server`（7.5MB，无扩展名）、`audio_server.exe`、`audio_server_rubato.exe`、`audio_server_x86兼容版.exe`、`audio_server.old.soxR.exe`、`.env`——保留 SoXR 基线产物以便 A/B 对照，rubato 线输出文件名不覆盖基线。
+- 依赖要点（Cargo.toml）：symphonia 0.5(all) 解码、cpal 0.15 输出、rubato 4.0（optional）、actix-web 4 + actix-ws 0.3 + tokio 作 HTTP/WS 服务、rustfft 6.2 + realfft 3.5 频谱、ebur128 0.1 响度测量、rusqlite 0.32(bundled) 响度元数据持久化、arc-swap 1.7 + atomic_float 1.0 锁自由参数传递、assert_no_alloc 1.1 回调零分配审计、reqwest 0.12(blocking) + quick-xml 0.36 + sha2/hex/crc32fast、Windows 专属 wasapi 0.22。
+- features：`default = ["rubato", "loudness-db"]`；`soxr = []` 为**占位空特性**（注释声明本实验不提供 SoXR 实现、永不启用）；`python = ["pyo3","numpy"]`（可选回退通道）。
+- release profile：`lto = "fat"`、`codegen-units = 1`、`panic = "abort"`、`opt-level = 3`；README 建议 `RUSTFLAGS=-C target-cpu=native` 做本机优化。
+
+# 三、模块架构（src 实测 61 个 .rs）
+
+- 根模块（lib.rs）：`channel_layout`、`decoder`、`player`、`processor`、`runtime`、`server`、`config`、`webdav`、`settings`，Windows 下额外 `wasapi_output`。
+- `player/`：audio_thread（音频线程）、callback、gapless（无缝播放）、spectrum（频谱）、state。
+- `processor/`：resampler（五种后端：rubato_backend / polyphase_backend / contiguous_polyphase_backend / halfband_backend / spectral_backend）、eq 与 fir_eq + fir_design、convolver（含 adapters/convolver 的 control 与 handoff 子模块）、crossfeed、dynamic_loudness、loudness（atomic_state / info / limiter / meter / normalizer）、loudness_db、output_chain、dsp 与 dsp_chain、saturation、spectrum、traits、atomic_f64、lockfree_params。
+- `server/`：effects、playback、settings_handlers、webdav_handlers（HTTP/WS 面）。
+- 对外再导出（lib.rs）：`StreamingDecoder`；`AudioPlayer` / `PlayerState` / `AudioDeviceInfo` / `SharedState`；processor 侧 `Resampler`、`StreamingResampler`、`Equalizer`、`NoiseShaper`、`SpectrumAnalyzer`、`FFTConvolver`、`LoudnessMeter`、`LoudnessNormalizer`、`PeakLimiter`、`LoudnessInfo`、`AtomicLoudnessState`、`LoudnessDatabase`、`TrackLoudness`、`DatabaseStats`、`CURRENT_SCAN_VERSION`、`TruePeakDetector`；`config::{LoudnessConfig, NormalizationMode}`；`pub const VERSION = env!("CARGO_PKG_VERSION")`。
+
+# 四、运行契约（main.rs 实测）
+
+- `#[actix_web::main] async fn main()` 为服务入口；启动日志含引擎版本、`Audio route: resampler={} stages={}`（读 `processor::RESAMPLER_BACKEND_NAME` 与 `callback_stage_order_csv()`）以及 `Built with: Symphonia + Rubato f64 + cpal/WASAPI + actix-web`。
+- 端口：`--port` 命令行参数覆盖，**默认 63789**。
+- 配置：`config::AppConfig::load()`；设置持久化目录取环境变量 `VCP_APP_DATA`。
+- 回调零分配审计在 `player/audio_thread.rs` 内以 `assert_no_alloc::assert_no_alloc()` 包裹实现；main.rs 明确**不替换全局分配器**（会破坏 env_logger 初始化）。
+
+# 五、与既有切片的关系
+
+- 前端消费层：切片 130（Musicmodules / music-stage 舞台与可视化）、切片 162（前端架构与渲染体系，Pixi v8）。
+- Rust 侧对照：切片 216（VCP-CDS 中央聊天数据服务 rust_chat_data_service）、切片 227（原生语音输入引擎 rust_voice_input_engine）——三者同属 VCPChat 的 Rust 原生组件族。
+- 播放控制与歌词：`modules/ipc/musicHandlers.js`（957行）是前端与音频链路之间的 IPC 面。
+
+# 六、未验证边界
+
+- HTTP/WS 的具体路由与消息 schema（只确认 `server/*` 四个文件与 actix-web/actix-ws 依赖，未逐条核对路由表）；
+- `webdav` 模块的完整职责（按文件名与 reqwest/quick-xml/sha2/crc32fast 依赖推测为 WebDAV 音源读取，未读实现）；
+- 五种 resampler 后端的运行时选择规则（仅确认 `processor::RESAMPLER_BACKEND_NAME` 会出现在启动日志）；
+- `audio_engine/` 下各 exe 的构建时刻与对应 commit（本轮只确认文件与体积）。
+
+Tag: rust_audio_engine, vcp_audio_engine, VCPChat, Rust音频引擎, Rubato, DSP, Symphonia, cpal, WASAPI, actix-web, actix-ws, rubato_backend, FFTConvolver, crossfeed, 响度, EBU R128, TruePeakDetector, assert_no_alloc, 零分配回调, audio_server, 第19次上游合并

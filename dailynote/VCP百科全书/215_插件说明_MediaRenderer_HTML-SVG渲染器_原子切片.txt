@@ -2,7 +2,16 @@
 [VCP百科全书] MediaRenderer - HTML/SVG/程序音乐媒体生成器
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-02（第13次上游合并，e2762e4d 新增鼠标主题生成器功能，v2.2.0→v2.3.0）
+最后核验：2026-09-16（第19次上游合并：e34acb52「插件新增pixi模式」，MediaRenderer.js +19/-3、README.md +44/-7、config.env.example +1/-1、plugin-manifest.json +2/-2；manifest 版本仍为 2.3.0）
+
+【2026-09-16 内置库新增 Pixi.js（v8）】（e34acb52，合并提交 9deadda6 / PR #471）：
+- 本地内置库表新增两个别名（MediaRenderer.js:82-88）：`pixi` 与 `pixijs` → `AdminPanel-Vue/vendor/pixi.min.js`，暴露全局 `PIXI`。
+- 内置库名解析改为三分支（:248-252）：`three*` → three、`pixi*` → pixi，其余归 anime；未知库报错文案更新为「当前支持 anime、three、pixi」。
+- CDN 标签识别新增 Pixi 正则（:288-291）：`/(?:^|\/)pixi(?:\.js)?(?:@[^/]+)?(?:\/dist)?\/pixi(?:\.min)?\.js$/` 与 `/(?:^|\/)pixi(?:\.min)?\.js$/`，命中即判定为内置库并改注入本地文件。
+- 禁止外部脚本的报错文案同步为「仅允许通过可信 CDN script 标签引用 Anime.js/Three.js/Pixi.js」（:769）。
+- 同批新增内置资源：`AdminPanel-Vue/vendor/pixi.min.js`（+2340 行）与 `AdminPanel-Vue/vendor/pixi-unsafe-eval.min.js`（+22 行，unsafe-eval 变体）。
+- 文档侧：README.md 的「内置脚本库（Anime.js / Three.js / Pixi.js）」章节改写，manifest description 同步改写（版本号未升）。
+- 使用注意：Pixi 走本地注入后不使用 CDN 网络请求，但仍要求 `allowJavaScript`（源码引用受支持内置库时插件自动开启）。
 适用范围：`Plugin/MediaRenderer/` 当前源码
 事实来源：
 - `Plugin/MediaRenderer/plugin-manifest.json` (v2.3.0, manifestVersion 1.0.0)
