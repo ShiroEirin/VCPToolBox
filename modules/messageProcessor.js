@@ -605,6 +605,25 @@ async function resolveDynamicFoldProtocol(foldObj, context, placeholderKey) {
     }
 }
 
+function applySingleDetectorRule(text, rule) {
+    if (typeof rule?.detector !== 'string' || rule.detector.length === 0 || typeof rule?.output !== 'string') {
+        return text;
+    }
+
+    // 支持 /pattern/flags 正则表达式语法
+    const regexMatch = rule.detector.match(/^\/(.+)\/([dgimsuvy]*)$/s);
+    if (regexMatch) {
+        try {
+            const regex = new RegExp(regexMatch[1], regexMatch[2]);
+            return text.replace(regex, rule.output);
+        } catch (e) {
+            console.warn(`[Detector] 无效的正则表达式: ${rule.detector}，回退为普通字符串替换`);
+        }
+    }
+
+    return text.replaceAll(rule.detector, rule.output);
+}
+
 function applyDetectorRules(text, role, context = {}) {
     const { detectors = [], superDetectors = [] } = context;
     if (text == null) return '';
@@ -613,16 +632,12 @@ function applyDetectorRules(text, role, context = {}) {
 
     if (role === 'system') {
         for (const rule of detectors) {
-            if (typeof rule.detector === 'string' && rule.detector.length > 0 && typeof rule.output === 'string') {
-                processedText = processedText.replaceAll(rule.detector, rule.output);
-            }
+            processedText = applySingleDetectorRule(processedText, rule);
         }
     }
 
     for (const rule of superDetectors) {
-        if (typeof rule.detector === 'string' && rule.detector.length > 0 && typeof rule.output === 'string') {
-            processedText = processedText.replaceAll(rule.detector, rule.output);
-        }
+        processedText = applySingleDetectorRule(processedText, rule);
     }
 
     return processedText;
@@ -681,7 +696,7 @@ async function replaceOtherVariables(text, model, role, context) {
             if (group && group.models && group.content) {
                 const modelList = group.models.map(m => m.trim().toLowerCase());
                 const matchMode = group.matchMode || 'exact';
-                // 检查当前模型是否匹配（支持exact/includes两种模式）
+                // 检查当前模型是否匹配（支持正向和排除模式）
                 if (model && sarPromptManager.isModelMatch(modelList, model.toLowerCase(), matchMode)) {
                     let promptValue = group.content;
                     // 模型匹配，准备注入的文本
