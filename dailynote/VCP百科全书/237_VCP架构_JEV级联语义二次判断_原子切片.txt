@@ -33,5 +33,5 @@
 - 依赖：从 `./jevScorer` 引入 `readBool/readNumber/truncate/askNouls/probabilityOf`。
 
 ## 五、未验证
-- `modules/jevRiverReranker.js`（159 行）与 021fbd1a 的轮询调度策略未逐行核对。
+- `modules/jevRiverReranker.js`（159 行）与 021fbd1a 的轮询调度策略未逐行核对；但三个级联开关的**安全语义已按 config.env.example 原文核对**：折叠「未配置 JEV_API_KEY、超时、网络失败、响应异常一律原样保留 embedding 的结果」；剪枝「未超预算时一条不删、也不发任何请求；未配 key / 超时 / 打分全失败一律回退原位置规则」；river 重排「候选数不超过 N 时不发请求；请求失败保留 embedding 的 Top-N；重排异常不会冒泡到外层 catch」。
 - `contextManager.js` +129/-10 的具体接入位置与回退分支未逐行核对。

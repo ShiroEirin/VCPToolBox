@@ -2,7 +2,13 @@
 [VCP百科全书] VCPChat 聊天内核深度解耦（modules/chat/ 事件契约 + 流式渲染器 v4）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-22（第20次上游合并：9bccdee0 显存泄露修复 / 44db00a6 工具展开简化 / d898fe59 PR #207 群聊看门狗 / 6dac0fae JEV 工具渲染）
+最后核验：2026-09-22（第21次上游合并：a5997449「适配迭代升级」——JEV 被确立为协议身份；前次：9bccdee0 显存泄露修复 / 44db00a6 工具展开简化 / d898fe59 PR #207 / 6dac0fae JEV 工具渲染）
+
+【2026-09-22 第21次上游合并：JEV 字段升级为“协议身份”】（a5997449，--numstat 实测）：
+- `modules/renderer/jevToolUse.js` +2/-4：删除“缺少能力花括号或显式工具名即视为畸形、回退旧工具渲染器”的守卫；注释改为「JEV 本身就是协议身份。即使内容是完全自由的自然语言，没有能力花括号或显式工具名，也仍应生成 JEVToolUse；此时 displayName 留空即可」。
+- `modules/messageRenderer.js` +6/-2、`modules/text-viewer.js` +8/-3：标签改为按有无 displayName 切换——有名时 `JEVToolUse: <能力>`，无名时仅 `JEVToolUse`（主渲染与阅读模式两处一致）。
+- `tests/jev-tool-use-rendering.test.js` +8/-4。
+- 意义：承接 ToolBox 侧 8bb49395 允许“省略能力目录”的新写法——纯自由自然语言的 JEV 块不再被降级成普通工具卡片。
 
 【2026-09-22 第20次上游合并 渲染与流式侧】（--numstat 实测）：
 - 9bccdee0「修复一个blur样式冲突引发的全局显存泄露」：`modules/messageRenderer.js` +44/-8、`styles/chat.css` +31/-19、`styles/messageRenderer.css` +88/-41、新增 `tests/stream-manager-terminal-cleanup.test.js` +28。
