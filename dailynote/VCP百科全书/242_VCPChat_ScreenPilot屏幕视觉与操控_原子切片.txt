@@ -1,0 +1,39 @@
+[2026-09-22] - 哈雷酱
+# VCPChat——ScreenPilot 屏幕视觉与操控（CUIA 控制能力增强）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-22（第20次上游合并：82ce4251「巨幅增强CUIA控制能力」）
+适用范围：`VCPChat\VCPDistributedServer\Plugin\ScreenPilot\` 当前源码
+事实来源：git show --numstat 82ce4251 + `plugin-manifest.json`（100 行）与 `ScreenPilotService.js`（391 行）磁盘源码
+
+## 一、本轮改动量（--numstat 实测）
+- `VCPDistributedServer/Plugin/ScreenPilot/ScreenPilotService.js` +391/-0（现 391 行，Node 常驻协调器）。
+- `VCPDistributedServer/Plugin/ScreenPilot/README.md` +232/-0。
+- `VCPDistributedServer/Plugin/ScreenPilot/plugin-manifest.json` +27/-7（版本推进到 2.0.0）。
+- `VCPDistributedServer/Plugin/ScreenPilot/requirements.txt` +2/-0（Python Worker 依赖）。
+- `VCPDistributedServer/Plugin.js` +21/-2、根 `.gitignore` +9/-0。
+
+## 二、插件身份（manifest 实测）
+- manifestVersion 1.0.0，name `ScreenPilot`，version `2.0.0`，displayName `屏幕视觉与操控`，author `VCPToolBox`。
+- pluginType `hybridservice`；entryPoint `nodejs` → `ScreenPilotService.js`；protocol `direct`；timeout `180000` ms。
+
+## 三、能力边界（manifest description 实测）
+- 面向分布式 Windows 设备的常驻 Computer Use 执行引擎。
+- **兼容保留**：ScreenCapture、ClickAt、ClickText、ClickVisual、InspectUI、ScrollAt、TypeText、QueryWindows 的原有调用方式与返回结构。
+- **新增**：UI Automation 原生 Pattern 动作；统一 `Interact` 自动降级；等待与操作后验证。
+- 架构：Node.js 常驻协调器管理 Python 能力 Worker，使 RapidOCR 识别、UIA 元素引用与截图策略可跨调用复用。
+- 图生图局部编辑定位能力完整保留。
+
+## 四、ScreenPilotService.js 结构（头部实测）
+- 常量：`DEFAULT_TIMEOUT_MS = 180000`、`STARTUP_TIMEOUT_MS = 15000`、`MAX_STDERR_CHARS = 32000`。
+- 常驻状态：`worker`、`workerGeneration`（代际号，防旧句柄回声）、`stdoutBuffer` / `stderrBuffer`、`startPromise`（启动去重）、`requestQueue = Promise.resolve()`（请求串行化）、`disposed`、`pending`（Map：请求 id → 待决项）。
+- 配置读取：自带 `parseEnvFile`（读插件目录下 env 文件）。
+
+## 五、configSchema（manifest 实测片段）
+- `SCREENSHOT_DIR`：截图持久化目录绝对路径，留空则保存到插件目录 `screenshots/`。
+- `VISION_API_FORMAT`：`chat`（Gemini/OpenAI 的 /v1/chat/completions）或 `images`（SiliconFlow/Qwen 的 /images/generations）。
+- `VISION_API_BASE_URL` / `VISION_EDIT_MODEL` / `VISION_API_KEY`：ClickVisual 所用图像编辑 API 的基础地址（示例 `gemini-3-pro-image-preview` / `Qwen/Qwen-Image-Edit`）、模型与密钥。
+
+## 六、未验证
+- Python Worker 侧（RapidOCR / UIA Pattern / 截图策略复用）的实现文件与协议未核对。
+- `VCPDistributedServer/Plugin.js` +21/-2 的注册接线未逐行核对；`README.md`（232 行）未逐条摘录。

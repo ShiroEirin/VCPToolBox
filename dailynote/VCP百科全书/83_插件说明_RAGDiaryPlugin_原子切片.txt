@@ -1,6 +1,11 @@
 [2026-09-07] - 哈雷酱
 [VCP百科全书] 插件说明——RAGDiaryPlugin（原子切片）修正版
-最后核验：2026-09-16（第19次上游合并：d9301bc9「迭代Associate基建层」，RAGDiaryPlugin.js +126/-13（合计 139 行变化），modules/associativeDiscovery.js +126/-55（合计 181 行变化），tests/associativeDiscoveryRiverMemo.test.js +292；现 RAGDiaryPlugin.js 5903 行）
+最后核验：2026-09-22（第20次上游合并：13a14940「新增全量jev管线」）
+
+【2026-09-22 第20次上游合并 RAGDiaryPlugin 接入 JEV 轨道】13a14940（--numstat 实测）：
+- `Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js` +175/-2、`Plugin/RAGDiaryPlugin/config.env.example` +16/-1、`Plugin/RAGDiaryPlugin/plugin-manifest.json` +21/-0。
+- 语义：RAGDiaryPlugin 检索链新增 JEV 决策精排轨道（与 LightMemo 同批接入，见切片 211）；JEV 管线本体与级联配置见切片 236/237。
+- 第19次合并的 Associate/RiverMemo 结论（本切片既有内容）本轮未变。
 
 【2026-09-16 Associate 二次联想接入 RiverMemo】（d9301bc9）：
 - `_applyAssociativeDiscovery(...)`（RAGDiaryPlugin.js:3463）新增引擎选择：`options.useRiverMemo === true` 且 `this.vectorDBManager.executeNativeRiverQuery` 为函数时走 Rust 原生联合查询；条件成立却不具备原生接口时抛错，错误码 `RIVERMEMO_ASSOCIATE_UNAVAILABLE`（文案「RiverMemo 联想需要原生联合查询接口」）。

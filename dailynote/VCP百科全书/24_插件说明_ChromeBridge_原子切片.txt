@@ -1,6 +1,12 @@
 [2026-09-04] - 哈雷酱
 [VCP百科全书] 插件说明——ChromeBridge（原子切片）
-最后核验：2026-09-04（第15次上游合并：3fc6ef96 ChromeBridge健壮性修复+冒烟测试护栏）
+最后核验：2026-09-22（第20次上游合并：6f1443f2「新增内核全套comfy解析器」+ 39c7937b「同步函数」+ 7889a358「增强」）
+
+【2026-09-22 第20次上游合并 内核全套 comfy 解析器与页面运行时】（--numstat 实测）：
+- 6f1443f2：新增 `VCPChrome/webcore/comfyui-main-world-bridge.js` +248、`VCPChrome/webcore/comfyui-page-adapter.js` +293；`webcore/web-agent-page-runtime-core.js` +64/-8；`background.js` +36/-22、`popup.js` +43/-22、`manifest.json` +15/-1。
+- 39c7937b：`webcore/web-agent-page-runtime-core.js` +106/-0（同步函数）。
+- 7889a358：`comfyui-main-world-bridge.js` +65/-7、`web-agent-protocol.js` +2/-0。
+- 语义（依据路径与文件名）：把 ComfyUI 页面适配与 main-world 桥接复用进扩展 webcore，形成「页面适配器 + 主世界桥 + 页面运行时核心」三层；Chat 侧同源实现见 `VCPChat/modules/loom/webcore/`（2dba780e 同批 +248/+293/+64-8，见切片 221）。
 
 【2026-09-04 第15次上游合并】3fc6ef96：
 - `modules/browserRuntimeManager.js` +134/-120 重构：浏览器运行时管理器健壮性强化

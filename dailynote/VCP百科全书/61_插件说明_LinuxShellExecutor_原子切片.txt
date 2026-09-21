@@ -2,6 +2,13 @@
 [VCP百科全书] 插件说明——LinuxShellExecutor（原子切片）
 版本：1.2.0 | pluginType: hybridservice | protocol: direct | timeout: 60000ms
 
+【2026-09-22 第20次上游合并 夜间排障后定稿状态】37ca9833（commit 标题自述：2026-09-14/15 夜间排障后的最终状态）：
+- `Plugin/LinuxShellExecutor/LinuxShellExecutor.js` +50/-46。
+- `Plugin/LinuxShellExecutor/config.env` +52/-52。
+- `Plugin/LinuxShellExecutor/plugin-manifest.json` +2/-2。
+- 变更要点（依 commit 标题）：RLIMIT_AS 8G、TIMEOUT 300s、甲案 interactionBlock guard、Ubuntu merged-usr bwrap 兼容。
+- 说明：本仓库 `Plugin/LinuxShellExecutor/config.env` 属本地未提交定制，第20次合并未纳入暂存；上面 config.env 行数来自上游提交统计。
+
 一、插件身份
 - name: `LinuxShellExecutor`
 - displayName: `Linux Shell 安全执行器`

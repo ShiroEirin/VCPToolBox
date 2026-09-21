@@ -9,6 +9,10 @@
 4. 所属项目：VCPChat
 5. 功能一句话总结：提供Agent日记管理中心，支持文件夹组织、日记编辑、搜索、批量操作
 
+【2026-09-22 第20次上游合并 改名保存与启动不阻塞】344162ad（PR #208 / Merge 73908cd6，--numstat 实测）：
+- `Memomodules/memo.js` +17/-3：保存时支持改名（rename on save）；发生错误时不再 blockStartup。
+- 同源后端修复见切片 32（`routes/dailyNotesRoutes.js` 改名保存 + 扩展名白名单，9f47f25b）。
+
 二、功能定位
 Memomodules是VCPChat的记忆管理中心，为Agent提供日记管理功能。支持按文件夹组织日记、Markdown编辑、实时预览、全局/文件夹搜索、批量编辑、隐藏文件夹管理等功能。
 

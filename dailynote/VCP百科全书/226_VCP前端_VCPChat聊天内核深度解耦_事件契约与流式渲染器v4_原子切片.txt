@@ -2,7 +2,14 @@
 [VCP百科全书] VCPChat 聊天内核深度解耦（modules/chat/ 事件契约 + 流式渲染器 v4）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-16（第19次上游合并：1edc7389「核心同步事务收纳」新增 modules/services/pluginAgentOperationService.js；c31f6af9「加强代码块围栏」修补渲染管线）
+最后核验：2026-09-22（第20次上游合并：9bccdee0 显存泄露修复 / 44db00a6 工具展开简化 / d898fe59 PR #207 群聊看门狗 / 6dac0fae JEV 工具渲染）
+
+【2026-09-22 第20次上游合并 渲染与流式侧】（--numstat 实测）：
+- 9bccdee0「修复一个blur样式冲突引发的全局显存泄露」：`modules/messageRenderer.js` +44/-8、`styles/chat.css` +31/-19、`styles/messageRenderer.css` +88/-41、新增 `tests/stream-manager-terminal-cleanup.test.js` +28。
+- 44db00a6「简化工具展开」：`modules/messageRenderer.js` +10/-1、`styles/messageRenderer.css` +3/-11。
+- d898fe59（PR #207 / Merge 099d28fc）：`Groupmodules/groupchat.js` +50/-13（分阶段流式看门狗）、`modules/renderer/messageContextMenu.js` +49/-38（右键菜单顺序还原）、`modules/renderer/nonStreamingEventConsumer.js` +11/-1（静默收敛观测）。
+- 6dac0fae「实验性激进迭代的开始」：新增 `modules/renderer/jevToolUse.js` +45、`modules/messageRenderer.js` +15、`styles/messageRenderer.css` +27、`modules/text-viewer.js` +13/-4、`tests/jev-tool-use-rendering.test.js` +94（JEV 工具调用过程的前端渲染）。
+- 内核 25 分片结构与事件契约（本切片既有主体）本轮未变。
 
 【2026-09-16 内核周边补强】（第19次上游合并 / 68 提交 / 207 文件）：
 - **新增 `modules/services/pluginAgentOperationService.js`（75行）+ `tests/plugin-agent-operation-service.test.cjs`（37行）**（1edc7389）：把"插件代 Agent 执行操作"抽成独立服务层；同批改动还包含 `main.js`（8 行）与 VCPMobileSync 的事务收纳（详见切片 223）。该服务与内核事件契约的接线方式未逐行核对。

@@ -1,7 +1,12 @@
 [2026-09-07] - 哈雷酱
 [VCP百科全书] VCP架构——知识库派生计算鲁棒性强化（原子切片）
 状态：CURRENT_VERIFIED
-最后核验：2026-09-07（第17次上游合并：dc50fbb0 增强派生库计算鲁棒性定义 + b13428a5 增强新派生算法可视化日志）
+最后核验：2026-09-22（第20次上游合并：ed3ffbf9「invoke rivermemo artifact prune after native build and clean on tag reset」，PR #473 / Merge 2b3b9ec0）
+
+【2026-09-22 第20次上游合并 RiverMemo 制品清理与 tag reset 清理】（--numstat 实测）：
+- `KnowledgeBaseManager.js` +14/-0：原生构建完成后调用 rivermemo artifact prune（清理过期/残留产物）。
+- `modules/knowledgeBase/tagConsistencyService.js` +1/-0：tag reset 时同步 clean。
+- 归属：与切片 212（rust-vexus-lite 原生 Artifact 构建器与统一 Memo 运行时）同一制品管理面。
 适用范围：`VCPToolBox\modules\knowledgeBase\ingestionPipeline.js` + `schemaManager.js` + `tests\newTagIngestionDerivedInvalidation.test.js`
 事实来源：git show dc50fbb0 / b13428a5 + 磁盘源码
 

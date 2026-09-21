@@ -2,7 +2,12 @@
 # PluginManager｜PluginManager｜VCP 元插件：查询、启用、禁用和重载本地插件
 
 状态：CURRENT_VERIFIED
-最后核验：2026-07-22
+最后核验：2026-09-22（第20次上游合并：16948a4e「优化plugin管理器多个管线和能力边界」+ ab777656「消息管线迭代升级」）
+
+【2026-09-22 第20次上游合并 能力边界与消息管线】（--numstat 实测）：
+- 16948a4e：`Plugin.js` +84/-176（净删 92 行）；新增 `modules/pluginBridgeRegistry.js` +396、`modules/toolLifecycleVcpInfo.js` +247；`docs/VCP同步异步插件开发手册.md` +91/-7——插件依赖注入/执行改走桥接注册表管线，类与常量细节见切片 239。
+- ab777656：`Plugin.js` +35/-4、`modules/chatCompletionHandler.js` +45/-25、`modules/messageProcessor.js` +82/-36、`preprocessor_order.json` +2/-0。
+- 说明：`Plugin/PluginManager/` 插件本体本轮未见改动，上面改动均在宿主 Plugin.js 与管线模块。
 适用范围：`Plugin/PluginManager/` 当前源码
 事实来源：
 - 源码/manifest：`Plugin/PluginManager/plugin-manifest.json`

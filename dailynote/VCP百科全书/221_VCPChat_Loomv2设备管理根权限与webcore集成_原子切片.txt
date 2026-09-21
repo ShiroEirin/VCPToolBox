@@ -2,7 +2,13 @@
 [VCP百科全书] VCPChat——Loom v2 设备管理根权限与 webcore 集成（原子切片）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-10（第18次上游合并：VCPLoomSkill V1 上架 c423713d + 链路优化 b84dd966；LoomController manifest v1.3.0→v1.7.0）
+最后核验：2026-09-22（第20次上游合并：2dba780e「增强控制链」+ 81081b8c「继续loom迭代」+ 21fcf513「优化loom图标控制器」）
+
+【2026-09-22 第20次上游合并 Loom 控制链与图标控制器】（--numstat 实测）：
+- 2dba780e：`modules/loom/webcore/comfyui-main-world-bridge.js` +248、`webcore/comfyui-page-adapter.js` +293、`webcore/web-agent-page-runtime-core.js` +64/-8、`modules/loom/VCPLoomManager.js` +30/-1（与 ChromeBridge 侧 6f1443f2 同源，见切片 24）。
+- 81081b8c：`VCPDistributedServer/Plugin/LoomController/LoomControllerService.js` +46/-3、`plugin-manifest.json` +22/-2、`modules/loom/VCPLoomManager.js` +36/-5、`tests/loom-controller.test.js` +62。
+- 21fcf513：`modules/loom/VCPLoomManager.js` +212/-2、`Loommodules/manager.html` +19/-1、`LoomController/README.md` +51/-2、manifest +5/-5、`tests/loom-manager-runtime.test.js` +83/-1。
+- 一级命令范式与 webcore 目标固化机制（本切片既有内容）本轮未推翻。
 
 【2026-09-10 VCPLoomSkill V1】持久化技能系统（c423713d，10文件）：
 - 新增 `VCPDistributedServer/Plugin/LoomController/LoomSkillService.js`（348行）：skillId 校验 `/^[a-z0-9][a-z0-9_-]{1,63}$/`、占位符 `{{变量}}` 声明与 collectVariables 提取、MAX_FILE 256KB / MAX_RESULT 4MB 限额；validationMode 三态——current（仅读当前 DOM，可解析 vcp ID 固化为来源+唯一选择器+元素签名，不可解析则返回 validated=false、fallback=raw-vcp-id）/ trial（实际执行整链验证，失败不创建）/ none。

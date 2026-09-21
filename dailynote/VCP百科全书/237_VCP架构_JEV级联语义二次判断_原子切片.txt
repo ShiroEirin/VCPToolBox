@@ -1,0 +1,37 @@
+[2026-09-22] - 哈雷酱
+# JEV 级联语义二次判断（折叠 / 剪枝 / RiverMemo 三处）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-22（第20次上游合并：4d2faa9a「折叠/剪枝/river 三处加 Jev 语义二次判断（级联，默认关闭）」+ ca7febaa「折叠判定附带近期对话」+ 021fbd1a「新增jev轮询」）
+适用范围：`modules/jevClient.js` + `modules/jevScorer.js` + `modules/jevFoldFilter.js` + `modules/jevContextPruner.js` + `modules/jevRiverReranker.js` 当前源码
+事实来源：git show --numstat 上述三提交 + 四个模块头部注释与常量实测
+
+## 一、本轮改动量（--numstat 实测）
+- 4d2faa9a：`modules/jevContextPruner.js` +179/-0、`modules/jevFoldFilter.js` +304/-0、`modules/jevRiverReranker.js` +159/-0、`modules/jevScorer.js` +169/-0、`modules/contextManager.js` +129/-10、`modules/chatCompletionHandler.js` +1/-1、根 `config.env.example` +46/-0。
+- ca7febaa：`modules/jevFoldFilter.js` +65/-11、`modules/messageProcessor.js` +12/-0、`tests/jevFoldFilter.test.js` +113/-1、`config.env.example` +7/-0。
+- 021fbd1a：`modules/jevClient.js` +43/-16、`docs/jev调用文档.md` +333/-0、`tests/jevClient.test.js` +159/-0、`config.env.example` +3/-0。
+- 现文件行数：jevClient.js 424 / jevFoldFilter.js 359 / jevContextPruner.js 180 / jevScorer.js 169 / jevRiverReranker.js 159。
+
+## 二、jevClient.js（头部实测）
+- 供应商默认值：`typesafe` → `https://api.typesafe.ai/v1/systemone`（model `jev-latest`）；`openrouter` → `https://openrouter.ai/api/alpha/decisions`（model `~typesafe/jev-latest`）。
+- 可重试状态码集合：`{429, 500, 502, 503, 504, 529}`。
+- 问题类型白名单：`noul` / `choice` / `score`。
+- `parseApiKeys`：按 `,`、中文逗号 `，`、`|` 分隔并 trim、过滤空值 → 多 key 轮询基础（021fbd1a）。
+
+## 三、jevFoldFilter.js（工具箱折叠二次过滤，头部注释实测）
+- 定位：embedding 负责"别漏"，Jev 负责"别滥"——在 embedding 选出候选后加一道判断；不只管 TVStxt 工具箱，插件返回带折叠标记时 `Plugin.js` 走 `resolveDynamicFoldProtocol`，同样经过本模块。
+- 三条硬约束：只删不加（漏展开会让 Agent 不知道能力存在，多展开只浪费 token，两者不对称）；一次请求问全部区块（注释实测 1 题 331ms / 31 题 329ms / 70 题 372ms，批量比逐题省约 12 倍）；按送进 Jev 的文本哈希做每轮记忆化。
+- state 只放一个 `user_message` 字段（本轮请求 + 近若干轮对话，默认 1 轮）——刻意避免复制 69 份问题（约 +3.4K tokens）与新增字段的注意力成本；官方明确 Jev 有 context rot，故不灌整段历史。
+- 配置（根 config.env，默认关闭）：`JevFoldFilter`(默认 false)、`JevFoldGate=0.35`、`JevFoldIntentGate=0.15`、`JevFoldMinChars=1200`、`JevFoldTimeoutMs=4000`、`JevFoldDialogueRounds=1`(上限 6)、`JevFoldDialogueMsgChars=300`。
+
+## 四、jevContextPruner.js（上下文剪枝打分器，头部注释实测）
+- 原 `contextManager.pruneMessages` 是纯位置规则（保 system、保 `[系统提示:]` 前缀、保最后两条，然后从索引 0 往后删）——删的是"最老的"而非"最没用的"。
+- 本模块只给每条可删消息打"是否还有用"的 Noul 概率；删多少、删到哪、哪些绝对不能删仍留在 contextManager 内（预算是硬约束，模型只提供排序依据）。
+- 分块并发：每块独立一次请求，块间无依赖；受 `maxChunks` 上限保护，超限则该轮不打分。
+- 失败语义：单条打分失败视为"保留"（概率当 1）；整体失败返回 `applied=false`，调用方回退位置规则。
+- 配置：`JevContextPrune`(默认 false)、`JevContextPruneChunk=24`、`JevContextPruneMaxChunks=4`（24×4=96 条）、`JevContextPruneChars=400`、`JevContextPruneTimeoutMs=6000`。
+- 依赖：从 `./jevScorer` 引入 `readBool/readNumber/truncate/askNouls/probabilityOf`。
+
+## 五、未验证
+- `modules/jevRiverReranker.js`（159 行）与 021fbd1a 的轮询调度策略未逐行核对。
+- `contextManager.js` +129/-10 的具体接入位置与回退分支未逐行核对。

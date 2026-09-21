@@ -1,0 +1,36 @@
+[2026-09-22] - 哈雷酱
+# 插件桥接注册表与工具生命周期（Plugin.js 能力边界改造）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-22（第20次上游合并：16948a4e「优化plugin管理器多个管线和能力边界」）
+适用范围：`modules/pluginBridgeRegistry.js` + `modules/toolLifecycleVcpInfo.js` + `Plugin.js` 当前源码
+事实来源：git show --numstat 16948a4e + 两个新模块头部源码实测
+
+## 一、本轮改动量（--numstat 实测）
+- 新增 `modules/pluginBridgeRegistry.js` +396/-0（现 396 行）。
+- 新增 `modules/toolLifecycleVcpInfo.js` +247/-0（现 247 行）。
+- `Plugin.js` +84/-176（净删 92 行，能力从主文件下沉到注册表）。
+- `docs/VCP同步异步插件开发手册.md` +91/-7。
+- `Plugin/VCPSleep/plugin-manifest.json` +32/-0、`Plugin/VCPSleep/config.env.example` +5/-0（新能力边界的示范接入）。
+
+## 二、pluginBridgeRegistry.js（头部与类结构实测）
+- 顶部 `require('./jevClient')`。
+- `class PluginDependencyBridgeRegistry`：
+  - `register(bridge)` → `validateBridge(bridge, 'inject')` → 归一化后入数组 → `bridges.sort(compareBridges)`；返回 this（可链式）。
+  - `async buildDependencies(manifest, baseDependencies, context)` → 按序对每个 bridge 判 `await bridge.canHandle(manifest, context)`，命中则 `await bridge.inject(manifest, dependencies, context)`，最终返回合并后的依赖对象。
+  - `list()` → 回显 `{name, priority}` 清单。
+- `class PluginExecutionBridgeRegistry`：
+  - `register(bridge)` → `validateBridge(bridge, 'execute')` → 同样按 `compareBridges` 排序。
+  - `async execute(plugin, toolArgs, context)` → 按序命中即执行（执行管线桥接）。
+- 语义：依赖注入与执行两条管线各自独立注册、按优先级排序，插件本体不再硬编码具体桥接方。
+
+## 三、toolLifecycleVcpInfo.js（头部实测）
+- 依赖内置 `crypto`（事件标识生成）。
+- `SUPPORTED_PHASES = new Set(['start','success','error','timeout'])`——工具生命周期的四个可广播阶段。
+- `DEFAULT_EVENT_TYPE = 'TOOL_LIFECYCLE'`。
+- 模板求值：`getSingleTemplateValue(expression, context)` 支持 `args.xxx` 与 `plugin.xxx` 两种命名空间；`getCaseInsensitiveValue(object, key)` 先精确命中、再按小写归一化遍历（大小写不敏感取值）。
+- 与 VCPSleep 的 `vcpInfoLifecycle`（`type: VCP_SLEEP`）是同一套能力边界机制的两处使用者。
+
+## 四、未验证
+- `Plugin.js` 净删 92 行的具体迁移映射（哪些分支被注册表取代）未逐行核对。
+- `docs/VCP同步异步插件开发手册.md` +91/-7 的新增规范条款未逐条摘录。

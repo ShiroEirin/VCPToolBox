@@ -1,6 +1,10 @@
 [2026-07-22] - 哈雷酱
 [VCP百科全书] 插件原子切片——DailyNoteManager（日记整理器）
 
+【2026-09-22 第20次上游合并 日记改名与扩展名白名单】9f47f25b（PR #480 / Merge afd3be68，--numstat 实测）：
+- `routes/dailyNotesRoutes.js` +92/-16：保存时支持改名（note rename on save），扩展名走白名单回退（whitelist extension fallback）。
+- Chat 侧同源修复：344162ad「fix(memo): support rename on save and avoid blockStartup on error」→ `VCPChat/Memomodules/memo.js` +17/-3（见切片 129）。
+
 一、插件定位
 `DailyNoteManager` 是日记管理与整理混合插件，提供列出(list)、整理(organize)和联想(associate)三个功能。list 可按日期范围查看指定文件夹内的所有日记及其URL；organize 可将多篇旧日记归档到「已整理」文件夹并创建一篇新的合并日记；associate 可基于一篇或多篇日记通过向量语义搜索发现关联日记。
 

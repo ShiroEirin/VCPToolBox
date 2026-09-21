@@ -2,7 +2,12 @@
 # WebSocket 统一心跳功能
 
 状态：CURRENT_VERIFIED
-最后核验：2026-07-28
+最后核验：2026-09-22（第20次上游合并：c29b7fce「修复 WebSocket 握手 parsedUrl 未定义 + 加速优雅重启」）
+
+【2026-09-22 第20次上游合并 握手修复与优雅重启加速】c29b7fce（--numstat 实测）：
+- `WebSocketServer.js` +6/-6：握手阶段 `parsedUrl` 未定义问题修复。
+- `server.js` +28/-3：优雅重启链路加速。
+- 本切片既有的「统一心跳（heartbeatEnabled，默认关闭，60 秒 ping）」结论本轮未变，本轮改动落在握手段与重启段。
 适用范围：`WebSocketServer.js` 当前源码
 事实来源：
 - `D:\github\VCP\VCPToolBox\WebSocketServer.js`

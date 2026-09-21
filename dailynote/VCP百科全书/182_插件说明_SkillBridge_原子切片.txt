@@ -2,7 +2,12 @@
 # SkillBridge｜SkillBridge｜启动时扫描技能 SKILL.md 生成可折叠技能目录索引
 
 状态：CURRENT_VERIFIED
-最后核验：2026-07-22
+最后核验：2026-09-22（第20次上游合并：734df08b「feat(SkillBridge): Linux 特化」）
+
+【2026-09-22 第20次上游合并 Linux 特化】734df08b（--numstat 实测）：
+- `Plugin/SkillBridge/SkillBridge.js` +19/-5：auto 路径模式、正文直嵌折叠块、移除幽灵 Ink 指令。
+- `Plugin/SkillBridge/config.env.example` +6/-4。
+- 本切片「启动时扫描 SKILL.md 生成可折叠技能目录索引」的既有结论本轮未变。
 适用范围：`Plugin/SkillBridge/` 当前源码
 事实来源：
 - 源码/manifest：`Plugin/SkillBridge/plugin-manifest.json`

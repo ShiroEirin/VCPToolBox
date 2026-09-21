@@ -2,7 +2,12 @@
 # VCPBridgeServer｜VCPBridgeServer｜独立端口透明代理，拦截 CLI 工具请求并注入/替换 System Prompt
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-10（第18次上游合并：25981097 PR #465 (infinite-vector) 新增 /v1/models 探活路由，manifest v2.0.0）
+最后核验：2026-09-22（第20次上游合并：1586c325「Responses 格式对 function call 的支持」+ 65062c83「Responses 格式丢失系统提示词和思维链」）
+
+【2026-09-22 第20次上游合并 Responses 格式两连修】（--numstat 实测）：
+- 1586c325：`routes/protocolBridge.js` +264/-67，`tests/protocolBridgeResponses.test.js` +165/-0——Responses 格式对 function call 的支持。
+- 65062c83：`routes/protocolBridge.js` +296/-51，`tests/protocolBridgeResponses.test.js` +324/-7——修复 Responses 格式丢失系统提示词与思维链。
+- 与本切片既有 /v1/models 探活路由（25981097）同属 protocolBridge 侧。
 
 【2026-09-10 模型列表探活路由】bridgeserver.js +27 行（PR #465，Merge 096ac637）：
 - 新增 `app.get(['/v1/models', '/v1/:profile/models'])`（OpenAI 根端点与 Profile 前缀端点双挂载），供客户端连通性健康探测。

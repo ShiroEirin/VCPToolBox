@@ -1,6 +1,12 @@
 [2026-07-22] - 哈雷酱
 [VCP百科全书] Desktopmodules 桌面小组件系统 - 原子切片
 
+【2026-09-22 第20次上游合并 桌面离线推送丢失/死锁/布局重叠修复】ae2337a1（PR #206 / Merge 656e112a）+ fe1439ea（--numstat 实测）：
+- `Desktopmodules/core/widgetManager.js` +45/-5、`Desktopmodules/desktop.js` +16/-0（fe1439ea 再 -10）、`Desktopmodules/ui/globalSettings.js` +17/-12、`Desktopmodules/ui/sidebar.js` +15/-7。
+- `modules/ipc/desktopHandlers.js` +220/-8（fe1439ea 再 -21/-4）：修复离线推送丢失（offline push dropping）、死锁（deadlock）、布局重叠（overlapping layout）。
+- `modules/renderer/desktopPushConsumer.js` +7/-4。
+- fe1439ea 同时移除调试探针与 devtools 自动触发（chore）。
+
 【2026-09-16 Pixi 挂件生命周期管理】（9f1c777d「v桌面接入pixi」，Desktopmodules/core/widgetManager.js +66、core/visibilityFreezer.js +24、desktop.html 2 行）：
 - 挂件沙箱内使用 Pixi 时，通过 `_createPixiFacade()` 以 Proxy 包装 `_realWindow.PIXI`，并用 `Reflect.construct` 派生 `SandboxedPixiApp` 包装 `PIXI.Application`；每次实例化都把 app 登记进该挂件的 `_pixiApps` 数组（widgetData 初始化时置为 `[]`）。
 - 冻结/恢复：窗口不可见时（visibilityFreezer 路径）暂停挂件内全部 Pixi Application 与 Ticker，恢复时重新启动。

@@ -2,7 +2,12 @@
 # LightMemo v1.4.0 — RiverMemo Topology V3 适配
 
 状态：CURRENT_VERIFIED
-最后核验：2026-07-24
+最后核验：2026-09-22（第20次上游合并：13a14940「新增全量jev管线」）
+
+【2026-09-22 第20次上游合并 接入 JEV 决策精排轨道】13a14940（--numstat 实测）：
+- `Plugin/LightMemo/LightMemo.js` +419/-167、`Plugin/LightMemo/config.env.example` +13/-4、`Plugin/LightMemo/plugin-manifest.json` +20/-4。
+- 语义：LightMemo 检索链新增 JEV 决策精排轨道（`jev` 取值语义同 rerank，仅消费前 2×K 候选；与 rerank 同时启用时仅执行 Jev，避免双重费用）。
+- 同批 `Plugin/RAGDiaryPlugin/*` 一并接入（见切片 83）；JEV 管线本体见切片 236/237。
 适用范围：`Plugin/LightMemo/plugin-manifest.json`（v1.4.0）+ `Plugin/LightMemo/LightMemo.js`（4406行）当前源码
 事实来源：
 - `D:\github\VCP\VCPToolBox\Plugin\LightMemo\plugin-manifest.json`

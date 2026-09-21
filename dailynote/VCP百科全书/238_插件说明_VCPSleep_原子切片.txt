@@ -1,0 +1,38 @@
+[2026-09-22] - 哈雷酱
+# VCPSleep｜打盹小枕头｜让流式工具链主动睡眠一段时间
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-22（第20次上游合并：99741b62「新增agent主动睡眠功能」+ da1090ec「小优化」+ 16948a4e 能力边界改造）
+适用范围：`Plugin/VCPSleep/` 当前源码
+事实来源：git show --numstat 99741b62 / da1090ec / 16948a4e + `plugin-manifest.json`（72 行）与 `VCPSleep.js`（192 行）磁盘源码
+
+## 一、插件身份（manifest 实测）
+- manifestVersion 1.0.0，name `VCPSleep`，version `1.0.0`。
+- displayName：`VCPSleep 打盹小枕头`；author：`VCP`。
+- pluginType：`synchronous`；entryPoint：`nodejs` → `node VCPSleep.js`；protocol `stdio`；timeout `43500000` ms。
+- description：调用后让当前流式工具链安静地睡一会儿，时间到了再带着睡前留下的 tips 醒来继续工作。
+
+## 二、configSchema（manifest 实测）
+- `DEFAULT_TIMEZONE`（string）：醒来报时使用的 IANA 时区，例如 Asia/Shanghai。
+- `VCPSLEEP_DREAM_ENABLED`（boolean）：是否允许睡眠时联动已启用的 AgentDream 做一次梦，默认关闭。
+- `VCPSLEEP_DREAM_PROBABILITY`（number，0-1）：VCPSleep 额外的入梦概率门；通过后仍须满足 AgentDream 自身的时间窗、冷却与 `DREAM_PROBABILITY`。
+- `VCPSLEEP_VCPINFO_ENABLED`（boolean，默认开启）：是否由主进程向前端广播入睡、醒来、失败、超时状态。
+
+## 三、vcpInfoLifecycle（manifest 实测）
+- `enabledConfigKey: VCPSLEEP_VCPINFO_ENABLED`，`enabledByDefault: true`，事件 `type: "VCP_SLEEP"`。
+- 事件模板以 `{{args.maid|args.Maid|args.agent_name}}` 之类的候选别名插值（start 文案：「……抱着小枕头去睡 {{args.sleeptime|...}} 啦……」）。
+
+## 四、VCPSleep.js（头部实测）
+- 硬上限：`MAX_SLEEP_MS = 12 * 60 * 60 * 1000`（12 小时），与 manifest 的 43500000ms 超时（约 12.08 小时）匹配。
+- 默认时区常量 `DEFAULT_TIMEZONE = 'Asia/Shanghai'`。
+- 参数解析：`getArgument(args, ...names)` 先精确匹配、再小写归一化匹配（大小写不敏感）；缺失必填项抛「缺少必需参数：睡觉时间。」。
+- 时长解析 `parseSleepDuration`：数字按秒处理；字符串支持纯数字，以及带单位后缀 `ms|毫秒|s|秒|m|min|分钟|h|hr|小时`。
+
+## 五、同批联动改动（--numstat 实测）
+- 99741b62：`Plugin/VCPSleep/VCPSleep.js` +191/-0、`config.env.example` +14/-0、`plugin-manifest.json` +40/-0、`Plugin.js` +55/-0、`Plugin/AgentDream/AgentDream.js` +98/-11、根 `config.env.example` +2/-1。
+- da1090ec：VCPSleep.js +1/-0、manifest +1/-1。
+- 16948a4e：manifest +32/-0、config.env.example +5/-0（能力边界与工具生命周期声明）。
+
+## 六、未验证
+- 睡眠期间流式链路被暂停的具体实现（是否阻塞工具链队列、如何唤醒）未逐行核对。
+- 与 AgentDream 的联动握手（入梦概率门以外的调用细节）未逐行核对。

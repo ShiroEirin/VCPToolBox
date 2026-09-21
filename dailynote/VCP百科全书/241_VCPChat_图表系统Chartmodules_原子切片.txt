@@ -1,0 +1,44 @@
+[2026-09-22] - 哈雷酱
+# VCPChat——图表系统 Chartmodules（v图表 / 数据与展示分离）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-22（第20次上游合并：9be5b19e「上架v图表系统」；相关：3cf64151 智能楼层控制器同批触及设置侧边栏 schema）
+适用范围：`VCPChat\Chartmodules\` 当前源码
+事实来源：git show --numstat 9be5b19e + `Chartmodules/README.md`（54 行全文）与 `Chartmodules/chart.js`（621 行）头部源码
+
+## 一、模块身份与该轮新增（--numstat 实测）
+- 9be5b19e 新建目录 `Chartmodules/`：
+  - `README.md` +54/-0（54 行，全文已核对）
+  - `chart.css` +858/-0
+  - `chart.js` +0（本轮统计未列出，现 621 行，工作台/悬浮窗前端逻辑）
+  - `chart-runtime.js` +486/-0
+  - `chart-sandbox.js` +581/-0、`chart-sandbox.html` +35/-0
+  - `chart.html` +158/-0
+- `Chartmodules/chart.html` / `chart-sandbox.html` 为宿主页与沙箱页分离结构，沙箱页负责隔离渲染，宿主页负责工作台 UI。
+
+## 二、能力定位（README 全文核对的要点）
+- 面向 Agent 的图表系统，通过内置 **ChartController 插件** 创建、管理、展示图表；工作台内打开。
+- 定位不是一次性图表输出，而是可持续更新的数据看板 / 统计报表 / 监控面板。
+- 核心优势：展示代码与数据分离——首次创建由 Agent 生成结构、样式与渲染逻辑并给出初始数据；数据变化时可整份替换或仅做增量更新；已有图表复用展示，无需每次重新输出完整 HTML；需要改版时再改布局/样式/交互。
+- 明确边界（README 原文口径）：渲染逻辑需支持相应更新方式，数据与展示分离**不代表所有自定义图表都能自动适配任意数据结构**。
+
+## 三、数据源（README 实测）
+- 本地 JSON、文本与 CSV。
+- 本地 SQLite 数据库的**只读**查询。
+- 网络 JSON 接口。
+- 数据源读取由 VChat 图表数据源服务处理，实际可用范围以服务的访问校验与运行环境为准；接入数据源不等于自动监听变化，刷新逻辑需显式配置或由 Agent 主动调用更新。
+
+## 四、工作台与悬浮窗（README 实测）
+- 工作台：集中浏览与搜索图表，选中即展示；支持重新加载、在 Canvas 中编辑、删除。
+- 悬浮展示：工具栏「悬浮展示」或列表右键菜单，将图表独立放到桌面；多个图表可并行悬浮，支持拖动、缩放与置顶切换。
+- 避免重复渲染：图表分离后工作台显示「独立展示中」，并释放原图表运行实例；可「收回工作台」或从悬浮窗「回到工作台」。
+- 两种形态下图表都能继续接收数据更新。
+
+## 五、chart.js 前端结构（头部实测）
+- 入口读取 `window.chartAPI`；模式由 URL 参数 `?mode=` 决定（默认 `workbench`，`floating` 表示悬浮窗）。
+- 关键 DOM 锚点：`detachedState`、`detachChartButton`、`globalStatus`、`chartCount`、`chartList`、`chartSearchInput`、`chartFrame`（图表宿主）、`emptyState`、`runtimeOverlay`/`overlayTitle`/`overlayDescription`、`errorPanel`/`errorMessage`、`chartTitle`/`chartMeta`/`runtimeBadge`、`reloadChartButton`、`chartContextMenu`。
+
+## 六、未验证
+- `chart-runtime.js`（486 行）的数据源访问校验与沙箱隔离细节未逐行核对。
+- ChartController 插件本体的位置与工具说明未核对（README 只指向「当前 ChartController 的工具说明」）。
+- 图表数据源服务（主进程侧）的实现位置未核对。

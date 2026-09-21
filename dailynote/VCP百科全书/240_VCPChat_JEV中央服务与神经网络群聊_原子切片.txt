@@ -1,0 +1,34 @@
+[2026-09-22] - 哈雷酱
+# VCPChat——JEV 中央服务与 JEV 神经网络群聊
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-22（第20次上游合并：0d78b8f0「jev中央服务接入」+ 0290c95d「群聊引擎迭代基建」+ 0aad7828「上架JEV神经网络群聊模式」+ 3cf64151「新增智能楼层控制器」+ 3a414b7e「优化jev上下文可控性」+ d898fe59 PR #207 + 622cf9e4「新增多key轮询jev」）
+适用范围：`VCPChat\modules\services\`（jevClient / globalJevService）+ `VCPChat\Groupmodules\` 当前源码
+事实来源：git show --numstat 上述提交 + jevClient.js（418 行）/ globalJevService.js（93 行）/ jevGroupSessionOrchestrator.js（429 行）/ jevDecisionMode.js（285 行）磁盘源码
+
+## 一、改动量（--numstat 实测）
+- 0d78b8f0：`modules/services/jevClient.js` +397/-0（现 418 行）、`modules/services/globalJevService.js` +93/-0、`main.js` +43/-0、`main.html` +2/-1、`docs/jev调用文档.md` +333/-0。
+- 622cf9e4：`modules/services/jevClient.js` +32/-11、`modules/settings/schema/jev-service.js` +3/-2、`tests/jev-client.test.js` +148/-0。
+- 0290c95d：`Groupmodules/groupchat.js` +2199/-2086、`Groupmodules/grouprenderer.js` +43/-4、`Groupmodules/modes/baseChatMode.js` +20/-4、其余 modes 各 +3/-3。
+- 0aad7828：`Groupmodules/jevGroupSessionOrchestrator.js` +403/-0（现 429 行）、`Groupmodules/modes/jevDecisionMode.js` +285/-0、`groupchat.js` +242/-35、`grouprenderer.js` +104/-13、`modules/ipc/groupChatHandlers.js` +68/-6、`main.js` +2/-1。
+- 3cf64151：`Groupmodules/groupContextWindow.js` +47/-0、`grouprenderer.js` +41/-6、`modules/settings/schema/sidebar-surfaces.js` +29/-1、`VCPDistributedServer/Plugin/VCPMobileSync/config/defaults.js` +6/-0、`dto/group.dto.js` +2/-0。
+- 3a414b7e：`docs/JEV职能群聊试图.md` +365/-0、`tests/group-jev-decision-mode.test.js` +8/-0。
+- d898fe59：`groupchat.js` +50/-13、`jevGroupSessionOrchestrator.js` +27/-1、`modules/renderer/messageContextMenu.js` +49/-38、`modules/renderer/nonStreamingEventConsumer.js` +11/-1。
+
+## 二、中央服务（jevClient.js / globalJevService.js 头部实测）
+- `modules/services/jevClient.js` 与 VCPToolBox 侧同构：`PROVIDER_DEFAULTS` 为 `typesafe`（`https://api.typesafe.ai/v1/systemone`，model `jev-latest`）与 `openrouter`（`https://openrouter.ai/api/alpha/decisions`，model `~typesafe/jev-latest`）；`RETRYABLE_STATUS_CODES = {429,500,502,503,504,529}`；`QUESTION_TYPES = {noul, choice, score}`；`parseApiKeys` 支持 `,` / `，` / `|` 多 key（622cf9e4 多 key 轮询）。
+- `GlobalJevService`：构造要求注入 `settingsManager`（须有 `readSettings`），否则抛 `TypeError('GlobalJevService requires a settingsManager.')`；`normalizeProvider` 把未知供应商回落为 `typesafe`；配置来源即设置项（`settings.jevProvider` 等）。
+
+## 三、群聊编排（jevGroupSessionOrchestrator.js 头部实测）
+- 会话键：`sessionKey(groupId, topicId) = \`${groupId}\u0000${topicId}\``；会话表 `this.sessions = new Map()`。
+- 中止错误：`createAbortError` → `name='AbortError'`、`code='GROUP_QUEUE_ABORTED'`，默认文案「JEV 群聊会话已中止。」。
+- 构造依赖注入（缺一即抛 TypeError）：`jevService`、`loadGroupConfig`、`loadActiveMembers`、`readHistory`、`runAgent`；可选 `emitEvent`、`logger`、`random`（默认 Math.random，便于测试注入）。
+- 内部持有 `JevDecisionMode` 实例（来自 `./modes/jevDecisionMode`）。
+
+## 四、发言决策默认参数（jevDecisionMode.js 头部实测）
+- 默认导航员提示词要点：按最新内容、成员身份与各自发言触发风格判断谁最该继续发言；优先「被直接询问/点名、具备相关知识、能补充新信息、需回应误解或冲突、能自然承接话题」，降低「刚充分表达 / 只会重复 / 与话题无关 / 无推进价值」者优先级；话题已结束则优先选择结束群聊，不为了活跃而强行安排发言。
+- `DEFAULT_JEV_MODE_SETTINGS`：`speakerThreshold: 0.16`、`continueThreshold: 0.45`、`stopThreshold: 0.55`、`maxSpeakersPerRound: 3`、`maxAutonomousRounds: 12`、`historyWindow: 12`、`continueDebounceMs: 800`、`fallbackPolicy: 'stop'`、`memberStyles: {}`。
+
+## 五、未验证
+- `Groupmodules/groupchat.js` 本轮 +2199/-2086 的重构细节（分阶段流式看门狗、静默收敛观测）未逐行核对。
+- `modules/settings/schema/jev-service.js` 设置项全集与 `main.js` +43 行的接线未逐行核对。

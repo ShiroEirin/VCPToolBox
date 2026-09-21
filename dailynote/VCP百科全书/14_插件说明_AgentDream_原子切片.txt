@@ -1,6 +1,11 @@
 [2026-07-22] - 哈雷酱
 [VCP百科全书] 插件说明——AgentDream（原子切片）
 
+【2026-09-22 第20次上游合并 Dream 引擎迁 RiverMemo + 主动睡眠联动】（--numstat 实测）：
+- e3dbaccb「迁移dream引擎走rivermemo」：`Plugin/AgentDream/DreamWaveEngine.js` +124/-45——梦境波引擎检索/生成改走 RiverMemo。
+- 99741b62「新增agent主动睡眠功能」：`Plugin/AgentDream/AgentDream.js` +98/-11（配合新插件 VCPSleep：入梦需同时过 `VCPSLEEP_DREAM_PROBABILITY` 与 AgentDream 自身时间窗/冷却/`DREAM_PROBABILITY`，见切片 238）。
+- 本切片既有的 DiaryMerge / DiaryDelete / DreamInsight 命令与 manifest 版本本轮未见变更。
+
 一、插件身份
 - name: `AgentDream`
 - displayName: `梦系统插件`

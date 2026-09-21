@@ -1,0 +1,42 @@
+[2026-09-22] - 哈雷酱
+# JEV 语义工具调用实验体系（自然语言工具入口）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-09-22（第20次上游合并：a0ecfe7b「自然语言时代来临了。」）
+适用范围：`modules/jevToolCallExp.js` + `ToolConfigs/jev_tool_call_exp.json` + `TVStxt/JevToolCall.txt` + `TVStxt/JevToolCallDecision.txt` + `modules/vcpLoop/toolCallParser.js` 当前源码
+事实来源：git show --numstat a0ecfe7b + 上述文件磁盘源码（逐个头部核对）
+
+## 一、本轮新增文件（a0ecfe7b 实测行数）
+- `modules/jevToolCallExp.js` +556/-0（现 556 行）——实验编排器
+- `ToolConfigs/jev_tool_call_exp.json` +149/-0（现 149 行）——虚拟工具与类别映射配置
+- `TVStxt/JevToolCall.txt` +38/-0（现 38 行）——自然语言工具入口提示词
+- `TVStxt/JevToolCallDecision.txt` +7/-0——决策提示词
+- `docs/JEV_SEMANTIC_TOOL_CALL_EXPERIMENT.md` +690/-0——实验设计文档
+- `modules/vcpLoop/toolCallParser.js` +5/-0——解析侧接入
+- 根 `config.env.example` +3/-0
+
+## 二、jevToolCallExp.js 结构（头部实测）
+- 依赖：`fs` / `path` / `./jevClient`（默认客户端）。
+- 常量：`DEFAULT_CONFIG_PATH` → `ToolConfigs/jev_tool_call_exp.json`；`DEFAULT_DECISION_PROMPT_PATH` → `TVStxt/JevToolCallDecision.txt`。
+- 内容识别正则：`IMAGE_URL_RE`（`http://` / `file://` / `data:image/` 前缀）、`BILIBILI_RESOURCE_RE`（`bilibili.com/video/`、`b23.tv/`、裸 `BV...`（可带 `?p=`）、裸 `av...`）、`EXPLICIT_SIZE_RE`（`1234x567` / `×` / `:` 三形态尺寸）。
+- 工具函数族：`normalizeText`（trim）、`normalizeAlias`（小写 + 去掉空白/下划线/连字符）、`uniqueStrings`（去重保序）、`extractMarkedValues(text, open, close)`（区间标记提取）。
+
+## 三、虚拟工具配置（jev_tool_call_exp.json 头部实测）
+- `version: 1`，`virtualToolName: "JEV"`，`maxExpandedCalls: 5`（一次自然语言调用最多展开 5 次真实工具调用）。
+- `categories.web_search`：别名 `["联网搜索","搜索","搜搜"]`，`defaultTool: vsearch`。
+- `vsearch` → plugin `VSearch`，fixedArgs `{SearchMode:"grounding", ShowURL:"false"}`。
+- `google` → plugin `SerpSearch`，fixedArgs `{command:"google_search"}`。
+- `google_scholar` → plugin `SerpSearch`，fixedArgs `{command:"google_scholar_search"}`。
+
+## 四、自然语言入口契约（TVStxt/JevToolCall.txt 全文实测）
+- 调用块格式固定为 `JEV:「始」……「末」`，每个块只执行一个动作。
+- `{联网搜索}` 默认 VSearch，可选工具：谷歌搜索 / 谷歌学术 / Tavily / AnySearch / B站搜索 / B站获取。
+- `{图片生成}` 默认谷歌 NanoBanana2，可选工具：GPT生图 / ZImage / 豆包。
+- 标记语义：`【】` 标记主要搜索内容、视频地址或生图/修图指令；`[]` 标记次要范围、年份、地区、尺寸、画幅、截图时间或图片 URL。
+- 图片 URL 数量决定动作：0 个 = 生图；1 个 = 修图；多个 = 多图合成。
+- B站：`[搜视频]` / `[搜UP主]` 指定类型，`[UP主]`/`[用户]`/`[博主]` 自动归为搜 UP 主；输入 URL / BV 号 / av 号自动获取字幕、评论、弹幕；`[截图 30,120 秒]` 触发指定时间点截图。
+- 约束：不要填写真实插件字段、不要编造尺寸或复杂搜索参数。
+
+## 五、未验证
+- `docs/JEV_SEMANTIC_TOOL_CALL_EXPERIMENT.md`（690 行）与 `modules/jevToolCallExp.js` 的完整展开/降级分支未逐行核对（本切片只核对了头部常量、配置结构与提示词全文）。
+- 与 `modules/vcpLoop/toolCallParser.js` 的接线点（+5 行）未展开核对。

@@ -3,6 +3,11 @@
 ⚠️ 当前以 plugin-manifest.json.block 禁用态存在，以下信息基于 .block manifest
 版本：0.6.0 | pluginType: synchronous | protocol: stdio | timeout: 1800000ms
 
+【2026-09-22 第20次上游合并 UTF-8 字符边界与 SSE 尾巴修复】2b4b8c60（PR #474 / Merge 6a91ca5f）：
+- `Plugin/PaperReader/paperreader-rs/crates/paperreader-application/src/openai_client.rs` +9/-2：new-api SSE 尾部（tail）处理修复。
+- `Plugin/PaperReader/paperreader-rs/crates/paperreader-application/src/reading_usecases.rs` +5/-1：UTF-8 char_boundary panic 修复（按字符边界切断）。
+- 本切片的 `.block` 禁用态前提本轮未改变。
+
 一、插件身份
 - name: `PaperReader`
 - displayName: `超文本递归阅读器`
