@@ -52,6 +52,62 @@ JEV:「始」{联网搜索} 【最近美国土豆是不是打折】「末」
     assert.equal(calls[0].args.expression, '{联网搜索} 【最近美国土豆是不是打折】');
 });
 
+test('JEV 展开继承通用参数与调用级高级协议', async () => {
+    const { planner } = makePlanner();
+    const [virtualCall] = ToolCallParser.parse(`
+<<<[TOOL_REQUEST]>>>
+maid:「始」Nova「末」,
+JEV:「始」{联网搜索} 【未来发布会消息】「末」,
+timely_contact:「始」2027-07-05-14:00「末」,
+archery:「始」no_reply「末」,
+ink:「始」mark_history「末」,
+river:「始」last:3「末」,
+vref:「始」2「末」,
+tool_password:「始」123456「末」
+<<<[END_TOOL_REQUEST]>>>
+    `);
+
+    const [call] = await planner.plan(
+        virtualCall.args.expression,
+        virtualCall
+    );
+
+    assert.equal(call.name, 'VSearch');
+    assert.equal(call.args.maid, 'Nova');
+    assert.equal(call.args.timely_contact, '2027-07-05-14:00');
+    assert.equal(call.args.tool_password, '123456');
+    assert.equal(call.archery, true);
+    assert.equal(call.archeryNoReply, true);
+    assert.equal(call.markHistory, true);
+    assert.equal(call.river, 'last:3');
+    assert.equal(call.vref, '2');
+});
+
+test('JEV 字段支持 ESCAPE 包裹并保留协议字面量', async () => {
+    const { planner } = makePlanner();
+    const [virtualCall] = ToolCallParser.parse(`
+<<<[TOOL_REQUEST]>>>
+JEV:「始ESCAPE」{日用工具} 计算【字符串 "「始」" 与 <<<[TOOL_REQUEST]>>> 的长度】「末ESCAPE」
+<<<[END_TOOL_REQUEST]>>>
+    `);
+
+    assert.equal(virtualCall.name, 'JEV');
+    assert.equal(
+        virtualCall.args.expression,
+        '{日用工具} 计算【字符串 "「始」" 与 <<<[TOOL_REQUEST]>>> 的长度】'
+    );
+
+    const [call] = await planner.plan(
+        virtualCall.args.expression,
+        virtualCall
+    );
+    assert.equal(call.name, 'SciCalculator');
+    assert.equal(
+        call.args.expression,
+        '字符串 "「始」" 与 <<<[TOOL_REQUEST]>>> 的长度'
+    );
+});
+
 test('联网搜索默认使用 VSearch grounding 模板且不调用 Jev', async () => {
     const { planner, decisions } = makePlanner({ configured: true });
     const calls = await planner.plan(
@@ -461,6 +517,42 @@ test('LightMemo 支持全知识库、默认数量和显式索引前缀', async (
     assert.equal(call.args.folder, '地缘政治');
     assert.equal(call.args.k, '5');
     assert.equal(call.args.search_all_knowledge_bases, 'true');
+});
+
+test('LightMemo 将独立日期约束拼回 query，并保留多文件夹索引', async () => {
+    const { planner } = makePlanner();
+    const [rangeCall] = await planner.plan(
+        '主动回忆【美国军事动向】，检索[2025-04-11~2025-05-12]期间的[小吉的地缘政治|小吉的知识]并返回[3条]。'
+    );
+
+    assert.equal(rangeCall.name, 'LightMemo');
+    assert.deepEqual(rangeCall.args, {
+        k: '3',
+        search_all_knowledge_bases: 'false',
+        query: '[2025-04-11~2025-05-12] 美国军事动向',
+        folder: '小吉的地缘政治|小吉的知识'
+    });
+
+    const [singleDateCall] = await planner.plan(
+        '请使用 {日用工具} 检索记忆【美国军事动向】，限定[2026-02-14][索引:地缘政治]。'
+    );
+    assert.equal(singleDateCall.args.query, '[2026-02-14] 美国军事动向');
+    assert.equal(singleDateCall.args.folder, '地缘政治');
+});
+
+test('LightMemo 将独立音乐检索标记拼回 query，并优先于播放器路由', async () => {
+    const { planner, decisions } = makePlanner({ configured: true });
+    const [call] = await planner.plan(
+        '[音乐检索]【煮咖啡时适合听的歌】'
+    );
+
+    assert.equal(call.name, 'LightMemo');
+    assert.deepEqual(call.args, {
+        k: '5',
+        search_all_knowledge_bases: 'false',
+        query: '[音乐检索] 煮咖啡时适合听的歌'
+    });
+    assert.equal(decisions.length, 0);
 });
 
 test('AgentAssistant 支持未来通讯时间和委托查询字段', async () => {
