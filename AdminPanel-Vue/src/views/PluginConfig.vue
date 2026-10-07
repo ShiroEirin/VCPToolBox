@@ -282,6 +282,7 @@
                 v-model="commandDescriptions[getCommandIdentifier(cmd)]"
               />
               <UiButton
+                type="button"
                 @click="saveInvocationCommandDescription(cmd)"
                 variant="outline"
                 size="sm"
@@ -295,6 +296,100 @@
                 {{ commandStatuses[getCommandIdentifier(cmd)]?.message }}
               </UiBadge>
             </UiField>
+            <UiField label="调用示例（可选）" :for-id="`cmd-example-${index}`">
+              <p class="description">
+                {{ typeof cmd.example === 'string' ? '已设置调用示例。' : '未设置调用示例，可在下方添加。' }}
+                描述与示例分别保存；清空后保存会保留空字符串，“移除示例”才会删除字段。
+              </p>
+              <p v-if="isDistributedPlugin" class="description">分布式插件的调用示例需在所属节点侧编辑。</p>
+              <UiTextarea
+                :id="`cmd-example-${index}`"
+                v-model="commandExamples[getCommandIdentifier(cmd)]"
+                class="command-example-edit"
+                rows="7"
+                spellcheck="false"
+                placeholder="可粘贴完整工具调用示例，保留原始格式及换行。"
+                :disabled="isDistributedPlugin || !getCommandIdentifier(cmd) || commandExamplePending[getCommandIdentifier(cmd)]"
+              />
+              <div class="command-example-actions">
+                <UiButton
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  :disabled="isDistributedPlugin || !getCommandIdentifier(cmd) || commandExamplePending[getCommandIdentifier(cmd)]"
+                  @click="saveInvocationCommandExample(cmd)"
+                >{{ commandExamplePending[getCommandIdentifier(cmd)] ? '保存中…' : '保存此调用示例' }}</UiButton>
+                <UiButton
+                  v-if="typeof cmd.example === 'string'"
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  :disabled="isDistributedPlugin || !getCommandIdentifier(cmd) || commandExamplePending[getCommandIdentifier(cmd)]"
+                  @click="saveInvocationCommandExample(cmd, true)"
+                >移除示例</UiButton>
+              </div>
+              <UiBadge
+                v-if="commandExampleStatuses[getCommandIdentifier(cmd)]?.message"
+                class="command-status"
+                role="status"
+                :variant="getStatusVariant(commandExampleStatuses[getCommandIdentifier(cmd)]?.type)"
+              >{{ commandExampleStatuses[getCommandIdentifier(cmd)]?.message }}</UiBadge>
+            </UiField>
+          </div>
+        </div>
+
+        <div v-if="manifestJev" class="jev-declaration-section" aria-labelledby="jev-declaration-title">
+          <div class="plugin-metadata-heading">
+            <h3 id="jev-declaration-title">JEV 声明（实验，只读）</h3>
+            <UiBadge v-if="jevEntry" :variant="jevEntry.validation.status === 'valid' ? 'success' : 'danger'">
+              {{ jevEntry.validation.status === 'valid' ? '校验通过' : '校验未通过' }}
+            </UiBadge>
+            <UiBadge v-else-if="jevEntryError" variant="warning">{{ jevEntryError }}</UiBadge>
+          </div>
+
+          <dl class="jev-meta">
+            <div>
+              <dt>能力目录</dt>
+              <dd>{{ jevEntry?.categoryLabel || manifestJev.category || '未填写' }}</dd>
+            </div>
+            <div>
+              <dt>精确工具名</dt>
+              <dd><code>{{ jevEntry?.toolName || pluginName }}</code></dd>
+            </div>
+            <div v-if="jevEntry?.callTemplate">
+              <dt>调用模板</dt>
+              <dd><code>{{ jevEntry.callTemplate }}</code></dd>
+            </div>
+            <div v-if="jevEntry && !jevEntry.pluginEnabled">
+              <dt>状态</dt>
+              <dd>插件已禁用，不可通过 JEV 调用</dd>
+            </div>
+          </dl>
+
+          <div class="jev-prompt-block">
+            <h4>jevDescPrompt（发给 JEV：插件职责简介）</h4>
+            <pre>{{ displayPrompt(manifestJev.jevDescPrompt) }}</pre>
+          </div>
+          <div class="jev-prompt-block">
+            <h4>jevPrompt（发给 JEV：插件内部裁决规则）</h4>
+            <pre>{{ displayPrompt(manifestJev.jevPrompt) }}</pre>
+          </div>
+          <div v-if="manifestJev.agentPrompt" class="jev-prompt-block">
+            <h4>agentPrompt（给 Agent 的使用说明素材，不自动注入）</h4>
+            <pre>{{ displayPrompt(manifestJev.agentPrompt) }}</pre>
+          </div>
+
+          <div v-if="jevEntry && jevEntry.validation.errors.length > 0" class="jev-diagnostics" role="alert">
+            <h4>校验错误</h4>
+            <ul>
+              <li v-for="(error, index) in jevEntry.validation.errors" :key="`jev-err-${index}`">{{ error }}</li>
+            </ul>
+          </div>
+          <div v-if="jevEntry && jevEntry.validation.warnings.length > 0" class="jev-diagnostics jev-warnings">
+            <h4>提示</h4>
+            <ul>
+              <li v-for="(warning, index) in jevEntry.validation.warnings" :key="`jev-warn-${index}`">{{ warning }}</li>
+            </ul>
           </div>
         </div>
 
@@ -339,7 +434,7 @@
 import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
-import { pluginApi } from '@/api'
+import { pluginApi, jevRegistryApi, type JevRegistryEntry } from '@/api'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
@@ -366,6 +461,9 @@ const {
   sensitiveFields,
   commandDescriptions,
   commandStatuses,
+  commandExamples,
+  commandExampleStatuses,
+  commandExamplePending,
   hasEnvContent,
   hasConfigSchema,
   schemaEntries,
@@ -381,6 +479,37 @@ const isReadmeLoading = ref(false)
 const readmeFileName = ref('')
 const renderedReadme = ref('')
 const { renderMarkdown } = useMarkdownRenderer()
+
+interface ManifestJevDeclaration {
+  category?: unknown
+  jevDescPrompt?: unknown
+  jevPrompt?: unknown
+  agentPrompt?: unknown
+}
+
+const manifestJev = computed<ManifestJevDeclaration | null>(() => {
+  const manifest = pluginData.value?.manifest as Record<string, unknown> | undefined
+  const jev = manifest?.jev
+  return jev && typeof jev === 'object' && !Array.isArray(jev) ? (jev as ManifestJevDeclaration) : null
+})
+const jevEntry = ref<JevRegistryEntry | null>(null)
+const jevEntryError = ref('')
+
+function displayPrompt(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value : '（未填写）'
+}
+
+async function loadJevEntry(name: string) {
+  jevEntry.value = null
+  jevEntryError.value = ''
+  if (!manifestJev.value || !name) return
+  try {
+    jevEntry.value = await jevRegistryApi.getEntry(name)
+  } catch {
+    // enabled 不为 true 的声明不会进入注册表，属于正常情况。
+    jevEntryError.value = '未进入注册表（jev.enabled 不为 true 或尚未重建）'
+  }
+}
 
 const {
   isSensitiveKey,
@@ -417,6 +546,10 @@ async function saveInvocationCommandDescription(cmd: InvocationCommand) {
   await pluginConfigStore.saveInvocationCommandDescription(pluginName.value, cmd)
 }
 
+async function saveInvocationCommandExample(cmd: InvocationCommand, remove = false) {
+  await pluginConfigStore.saveInvocationCommandExample(pluginName.value, cmd, remove)
+}
+
 async function togglePlugin() {
   await pluginConfigStore.togglePlugin(pluginName.value)
 }
@@ -451,6 +584,14 @@ watch(
   () => pluginName.value,
   () => {
     pluginConfigStore.loadPluginConfig(pluginName.value)
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [pluginName.value, manifestJev.value] as const,
+  ([name]) => {
+    loadJevEntry(name)
   },
   { immediate: true }
 )
@@ -636,6 +777,78 @@ watch(
   margin: 0;
 }
 
+.jev-declaration-section {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+}
+
+.jev-declaration-section h3 {
+  margin: 0;
+  color: var(--primary-text);
+  font-size: var(--font-size-title);
+  line-height: 1.35;
+}
+
+.jev-meta {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.jev-meta > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.jev-meta dt {
+  min-width: 88px;
+  color: var(--secondary-text);
+}
+
+.jev-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.jev-prompt-block,
+.jev-diagnostics {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.jev-prompt-block h4,
+.jev-diagnostics h4 {
+  margin: 0;
+  color: var(--primary-text);
+  font-size: var(--font-size-body);
+}
+
+.jev-prompt-block pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--secondary-text);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--primary-text) 2%, transparent);
+}
+
+.jev-diagnostics ul {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--danger-text, var(--primary-text));
+}
+
+.jev-warnings ul {
+  color: var(--warning-text, var(--secondary-text));
+}
+
 .command-item {
   display: grid;
   gap: var(--space-2);
@@ -654,6 +867,17 @@ watch(
 
 .command-description-edit {
   width: 100%;
+}
+
+.command-example-edit {
+  font-family: "Consolas", "Monaco", monospace;
+}
+
+.command-example-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .command-save-btn {
