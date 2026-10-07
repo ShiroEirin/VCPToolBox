@@ -1,0 +1,59 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] 插件说明——MimoDubbing（MiMo 字幕时间轴配音）原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：e03b891d「新增快速配音插件」）
+
+一、插件基本信息（对照 Plugin/MimoDubbing/plugin-manifest.json 实测）
+
+1. name：MimoDubbing
+2. displayName：MiMo 字幕时间轴配音
+3. version：1.1.0（manifestVersion 1.0.0）
+4. pluginType：asynchronous（异步插件，回执占位符 + 回调）
+5. entryPoint：{ type: nodejs, command: "node MimoDubbing.js" }
+6. communication：{ protocol: stdio, timeout: 30000 }
+7. author：VCPToolBox
+8. 一句话总结：把 SRT / WebVTT / JSON 字幕时间轴合成为 24kHz 单声道 WAV，支持预置音色、音色设计、参考音频克隆、导演提示词与风格标签。
+
+二、文件清单（磁盘实测）
+
+- MimoDubbing.js        8404 字节  插件入口（stdio 协议）
+- core.js              19350 字节  合成核心逻辑
+- plugin-manifest.json  7553 字节  清单
+- README.md            11529 字节  使用说明
+- config.env.example     864 字节  配置样例
+
+三、configSchema 八项（manifest 原文）
+
+| 键 | 说明 |
+|---|---|
+| MIMO_API_KEY | DMXAPI 或小米官方 API Key，必须与端点匹配 |
+| MIMO_API_URL | API 完整 URL 或 /v1 基础 URL；默认 DMXAPI |
+| MIMO_MODEL | 基础模型，默认 mimo-v2.5-tts，自动派生模式后缀 |
+| MIMO_TASK_TIMEOUT_MS | 后台任务总超时，默认 1800000，最大 7200000 毫秒 |
+| MIMO_MAX_SPEED | fit 最大加速倍率，默认 2，范围 1–4 |
+| MIMO_FFMPEG_PATH | FFmpeg 可执行文件路径，不含命令参数；默认 ffmpeg |
+| MIMO_PUBLIC_BASE_URL | 可选，外部可访问的 VCP 完整基础 URL（含端口） |
+| CALLBACK_BASE_URL | VCP 回调基础地址，可含 /plugin-callback；未配置时用本机主服务端口 |
+
+四、三个调用命令（capabilities.invocationCommands）
+
+1. submit —— 字幕时间轴配音。timeline 直接填完整 SRT/WebVTT 文本或 JSON 数组字符串，每条 { start, end, text }（时间为秒数或 HH:MM:SS.mmm）。限制：最多 200 句、30 分钟、单句 4000 字符、总 40000 字符。
+2. submitSequence —— 多段对白拼接为一轨。text1、text2… 编号须从 1 连续递增，最多 200 段；每段可用 voiceN / instructionN / modeN / styleN / reference_audioN 覆盖全局同名参数；不填 startN/endN 时按实际生成长度连续拼接（pause_afterN 控制段后静音，默认 0，单段最多 60 秒）。
+3. query —— 用 request_id 查询任务，返回 Running / Succeed / Failed，成功时含音频链接与逐句对齐报告。
+
+五、关键参数语义
+
+- mode：preset（默认）/ voicedesign / voiceclone；voicedesign 时 instruction 必填。
+- 预置音色九个：mimo_default、冰糖、茉莉、苏打、白桦、Mia、Chloe、Milo、Dean。
+- style：空格分隔风格词（如 `开心 变快`），不带括号；正文可用 (开心 变快) 或 [吸气][轻笑][哽咽] 等行内标签；唱歌开头只能单独写 唱歌/sing/singing，不可与其他风格混用。
+- overflow：error（默认，失败不截断）/ fit（FFmpeg 保音高加速，默认最多 2 倍）/ truncate（明确截断，可能丢词）。
+- reference_audio：仅 data:audio/wav;base64,… 或 data:audio/mpeg;base64,…，不超过 10MB；不接受 HTTP URL 或裸本地路径（file:// 由主服务透明转换）。
+
+六、异步契约
+
+- 提交成功 ≠ 已生成，必须原文返回回执中的 {{VCP_ASYNC_RESULT::MimoDubbing::任务ID}}，不可编造音频 URL。
+- 完成后占位符被替换为 WAV 下载链接；失败或回调未送达时用 query 补偿。
+- webSocketPush：enabled=true，messageType=`mimo_dubbing_status`，targetClientType=`VCPLog`（推送给日志查看器）。
+- 上游逐句调用可能产生多次计费；相邻句音色一致性由上游模型决定。
+
+Tag: MimoDubbing, MiMo, TTS, 配音, 字幕时间轴, SRT, WebVTT, voicedesign, voiceclone, 异步插件, VCPLog, 24kHz WAV

@@ -1,0 +1,74 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCP架构——JEV 第三方插件注册表与提示词登记 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：cfc92aea「迁移插件到商店」、f13cdc03「规范配置中心」、7aedf5e1「统一插件格式」、059794ee「强化脚本安全性」、17aed412、297805d9；新增 modules/jevThirdPartyRegistry.js、routes/admin/jevRegistry.js、ToolConfigs/jev_third_party_catalog.json、docs/JEV_PROMPT_REGISTRY_MANAGEMENT_SPEC.md）
+
+一句话总结：把 JEV 从「官方硬编码白名单」升级为「官方能力目录 + 第三方插件自主登记 + 严格禁入名单」，且第三方提示词不会因插件安装而自动注入。
+
+一、注册表模块（modules/jevThirdPartyRegistry.js，头注释原文）
+
+职责三条：
+1. 读取官方维护的第三方能力目录 `ToolConfigs/jev_third_party_catalog.json`；
+2. 校验插件 `manifest.jev` 声明（目录白名单、精准类插件禁入、参数 schema、tool_name 不变量）；
+3. 构建只读注册表，供 JEV 规划器与管理 API 查询。
+
+不变量三条（原文）：
+- `tool_name` 永远等于 `manifest.name`，且调用时必须用反引号精确书写，**不存在别名**；
+- 插件只能注册官方目录中的**一个**能力目录；
+- 声明错误只把条目标记为 invalid，**绝不影响普通插件加载**。
+
+关键常量（源码）：
+
+| 常量 | 值 |
+|---|---|
+| SUPPORTED_SCHEMA_VERSION | 1 |
+| CALLABLE_PLUGIN_TYPES | { synchronous, asynchronous, hybridservice } |
+| PARAM_TYPES | { enum, boolean, text } |
+| TEXT_SOURCES | { primary, constraints, url } |
+| TOOL_NAME_RE | `^[A-Za-z][A-Za-z0-9_-]*$` |
+| PARAM_NAME_RE | `^[A-Za-z_][A-Za-z0-9_]*$` |
+| ENUM_KEY_RE | `^[A-Za-z0-9_.:-]{1,64}$` |
+
+二、官方能力目录（ToolConfigs/jev_third_party_catalog.json）
+
+version 1，开放五类（均带 label / aliases / description）：
+
+| 目录 | 标签 | 说明 |
+|---|---|---|
+| info_retrieval | 信息获取 | 天气、新闻、汇率、快递、百科、行情等只读查询 |
+| convenience | 便利操作 | 翻译、单位换算、日程、待办、提醒等轻量操作 |
+| media_entertainment | 媒体娱乐 | 音乐、视频、播客、游戏资讯的获取与播放控制 |
+| iot_control | 物联网控制 | 空调、灯光、窗帘、插座等智能设备控制 |
+| life_services | 生活服务 | 出行、交通、餐饮、购物比价等 |
+
+**禁入证据（关键）** —— 目录描述原文：「系统维护、文件编辑、代码编程、命令行等需要字符级精准输入的插件不开放 JEV 接入。」两道门：
+
+1. `forbiddenParameterNames`：target、replace、searchString、replaceString、code、script、shell、cmd、sql、regex、path、filePath、filename、file、dir、directory、content、diff、patch、old_string、new_string；
+2. `denyPlugins`：以 PowerShellExecutor、LinuxShellEx… 开头（字符级精准类硬名单）。
+
+三、开关与默认值
+
+- `JEV_THIRD_PARTY_EXP`：默认**关闭**；关闭时官方行为不变。
+- `JEV_THIRD_PARTY_ALLOWLIST`：可选额外允许名单。
+- 与既有 `VarJEVTool` 开关、`JEV_API_KEY` 无关：后者管「调不调 Jev」，本组管「允不允许第三方进入 JEV 直连」。
+
+四、管理 API（routes/admin/jevRegistry.js）
+
+- 挂在 `admin_api` 下，沿用现有管理员认证；
+- `GET /jev/registry`：返回 `{ status:'success', ...jevThirdPartyRegistry.getSnapshot() }`；
+- 含 `plan-preview`：**只做规划，不执行任何真实工具调用**（头注释原文）。
+
+五、开发设计文档要点（docs/JEV_PROMPT_REGISTRY_MANAGEMENT_SPEC.md）
+
+- 「第三方提示词不会因为插件安装、加载或上线而自动注入运行时提示词。」
+- 参数裁决边界：JEV **只裁决 enum 和 boolean**；`text` 参数**原样搬运，不经过 JEV**。
+- 已实现：`modules/jevThirdPartyRegistry.js`、`Plugin.js` 的 `buildJevPromptRegistry()` / `getJevPromptRegistry()`、`modules/jevToolCallExp.js` 第三方路由、`routes/admin/jevRegistry.js`、插件详情页只读展示。
+- 尚未实现：提示词组装面板、官方提示词编辑器、用户变量管理。
+
+六、与既有切片的关系
+
+- 切片 236（JEV 语义工具调用实验体系）：本切片是其**治理层扩展**。236 记录的是官方硬编码白名单（3 目录 / 18 别名），本切片记录「白名单如何向第三方开放且不失控」。
+- 切片 237（JEV 级联语义二次判断）：折叠/剪枝/重排三个开关，与第三方准入正交。
+- **与本会话既有结论的印证**：此前已核实「JEV 拿掉的是参数协议层，终端命令仍由模型负责」，本切片给出官方侧的同向证据——禁入名单的第一个类别就是字符级精准输入（shell / code / path）。设计意图是保持 JEV 为「受限便利通道」而非通用执行层。
+
+Tag: JEV, 第三方注册表, jevThirdPartyRegistry, jev_third_party_catalog, 能力目录, info_retrieval, convenience, media_entertainment, iot_control, life_services, forbiddenParameterNames, denyPlugins, JEV_THIRD_PARTY_EXP, allowlist, plan-preview, 字符级精准, 禁入名单, 提示词登记

@@ -2,7 +2,7 @@
 [VCP百科全书] VCPChat 原生语音输入引擎（rust_voice_input_engine + adapter + 右Alt听写）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-02（第13次上游合并，a892e459 增强语音聊天可靠性，引擎首次收录）
+最后核验：2026-10-07（第22次上游合并：Chat 侧编排层成型——modules/voice/ 扩至 8 模块 + modules/ipc/mainChatVoiceCoordinator.js + 3 份测试，详见切片 249；此前第13次 a892e459 引擎首次收录）
 适用范围：`VCPChat\rust_voice_input_engine\`、`VCPChat\modules\voice\voice-input-engine-adapter.js`、`VCPChat\preloads\voice-input-capture.js`、`VCPChat\Voicechatmodules\` 当前源码
 事实来源：Cargo.toml + src/main.rs(963行) + adapter(361行) + preload(28行) + voicechat.js(631行) 实测 + test-right-alt.ps1(192行)
 
@@ -36,5 +36,11 @@ Voicechatmodules 提交链：3f01311f 优化语音体验 ← 4df8f4fa 加固 ←
 - 与 VCP-CDS(216) 平级的 Rust sidecar，安装器 `--include-rust` 联动构建（225）。
 - modules/voice/ 目录为新增顶层模块组（voice-input-engine-adapter.js 361行）。
 
-关联节点：VCPChat 语音聊天(138)、Tauri 安装器(225)、VCP-CDS(216)
-Tag: VCP前端, VCPChat, 语音输入, rust_voice_input_engine, 右Alt, Win+H, 听写, sidecar, voice-input-engine-adapter, Rust, 第13次上游合并
+# 五之补、2026-10-07 第22次上游合并：Chat 侧编排层成型
+
+modules/voice/ 已从「单一 adapter」扩张为 8 模块：chatVoiceComposer.js（38103，主聊天语音交互控制器）、voiceComposerView.js（39176，视图层）、audioRecorder.js（15732）、voiceWaveform.js（4845，零重渲染 SVG 波形）、wavAudioEncoder.js（1623，RIFF WAV 编码）、passiveVoiceSentinel.js（8430）、speechDirectiveMatcher.js（1807）。配套：modules/ipc/mainChatVoiceCoordinator.js（14047）、voiceHandlers.js（28560）、localSttHandlers.js（2456）、preloads/api/voice.js、preloads/voice-input-capture.js。测试 3 份。
+
+分工：本切片（227）管引擎本体（Rust 侧 + adapter）；切片 249 管上层状态机、视图与 IPC。
+
+关联节点：VCPChat 语音聊天(138)、Tauri 安装器(225)、VCP-CDS(216)、语音编排体系(249)
+Tag: VCP前端, VCPChat, 语音输入, rust_voice_input_engine, 右Alt, Win+H, 听写, sidecar, voice-input-engine-adapter, Rust, 第13次上游合并, 第22次上游合并

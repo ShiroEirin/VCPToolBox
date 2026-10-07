@@ -1,7 +1,7 @@
 [2026-09-07] - 哈雷酱
 [VCP百科全书] VCP架构——知识库派生计算鲁棒性强化（原子切片）
 状态：CURRENT_VERIFIED
-最后核验：2026-09-22（第20次上游合并：ed3ffbf9「invoke rivermemo artifact prune after native build and clean on tag reset」，PR #473 / Merge 2b3b9ec0）
+最后核验：2026-10-07（第22次上游合并：知识库鲁棒性三连——协调器 AB-BA 死锁修复（a060c3fd）+ 分代双槽基线（915a9acb）+ 嵌入维度解耦（619c53da），详见切片 244/245/246；此前第20次：ed3ffbf9 RiverMemo 制品清理与 tag reset 清理）
 
 【2026-09-22 第20次上游合并 RiverMemo 制品清理与 tag reset 清理】（--numstat 实测）：
 - `KnowledgeBaseManager.js` +14/-0：原生构建完成后调用 rivermemo artifact prune（清理过期/残留产物）。
@@ -30,3 +30,18 @@
 
 - V9.1 向量更新失效钩子（见切片200/207 的 TagMemo/RiverMemo 派生计算链）语义不变，只是"新 Tag 摄取"这一入口明确声明不再需要失效（不可能有历史派生记录）。
 - 与 09-05 rust-vexus-lite 检索主链（切片83/207）正交：本切片只管摄取侧与 schema，不管查询侧。
+
+# 五、2026-10-07 第22次上游合并：鲁棒性三连（同源事件，分三条切片）
+
+- **协调器死锁与心跳**（切片 245）：`stallThresholdMs`（默认 120s）+ `owner.lastActivityAt` 心跳双条件取代单一 30 分钟总超时；等待前新增损坏闸门 `databaseCorruptionDetected || dbHealthState === 'corrupt'`。
+- **分代双槽基线**（切片 244）：新增 `chunk_index_baselines` / `chunk_index_baseline_entries` 两表，`chunkIndexPersistenceMode = 'generational'`，用集合对称差分回放替代全量重建。
+- **嵌入维度解耦**（切片 246）：`EmbeddingUtils` 请求体强制携带 `dimensions = VECTORDB_DIMENSION`，剥离对大模型默认维度的依赖。
+- 三条均为「派生计算可信」这一主题的不同侧面：245 是「不要卡死」、244 是「不要重建」、246 是「不要错位」。
+
+# 六、本轮其他同源改动（已知但未深挖）
+
+- `indexRepository.js` +468/-99（分代基线实现主体，详见 244）。
+- `tests/tagIndexGenerationalBaseline.test.js` 与 `tests/nativeKnowledgeRuntimeRegistry.test.js` 新增，属对应护栏。
+- `Plugin/OpenHerPersona/scripts/analyze-vector-baselines.js`（26932 字节）为向量基线分析脚本，以官方「附件脚本」形式保留了部分分析能力；本轮未逐行审阅。
+
+Tag: 知识库鲁棒性, 派生计算, ingestionPipeline, schemaManager, 反向端点索引, idx_pair_sim_tag_b, 第20次上游合并, 第22次上游合并, 分代双槽基线, 协调器死锁, 嵌入维度解耦

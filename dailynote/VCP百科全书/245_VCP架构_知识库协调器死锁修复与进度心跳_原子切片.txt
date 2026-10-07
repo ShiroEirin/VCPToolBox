@@ -1,0 +1,64 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCP架构——知识库协调器 AB-BA 死锁修复与进度心跳 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：a060c3fd「fix(knowledgeBase): resolve coordinator AB-BA deadlock, implement progress heartbeat and dynamic DB proxy」，PR #489；5cf71f45「prevent 0ms false-positive stall on cold start and refresh heartbeat on recovery」）
+
+一、背景：两个写入者与一把锁
+
+知识库同时存在两个写入者：JS 侧（better-sqlite3）与 Rust 侧（rusqlite），通过 WAL 互斥。原有的 DatabaseCoordinator.waitForIdle() 只靠一条「总超时 30 分钟 + 每 50ms 轮询」的等待，既无法识别真死锁（只能等满 30 分钟），也容易被误判为卡死。
+
+二、改动一：真正的「停滞」判定取代单一总超时（modules/knowledgeBase/databaseCoordinator.js）
+
+新增 stallThresholdMs，默认 120s，下限 10ms：
+
+```js
+const rawStall = Number(options.stallThresholdMs);
+const stallThresholdMs = Number.isFinite(rawStall) && rawStall > 0
+    ? Math.max(10, Math.floor(rawStall))
+    : 120 * 1000;
+```
+
+等待循环内部改为双条件判定：
+
+```js
+const lastActive = Math.max(startedAt, Number(owner.lastActivityAt) || 0);
+const timeSinceLastActivity = Date.now() - lastActive;
+const isStalled = timeSinceLastActivity >= stallThresholdMs;
+const isAbsoluteTimeout = (Date.now() - startedAt) >= timeoutMs;
+if (isStalled || isAbsoluteTimeout) { ... }
+```
+
+超时错误信息也随之富含诊断：区分 `activity stalled with zero progress for Ns` 与 `reached absolute limit of Ns`，并继续携带 processing / deletes / externalMutation / rustWriteLease 等现场字段。
+
+三、改动二：进度心跳（owner.lastActivityAt）
+
+在摄取管道的关键节点插入 `this.touchActivity?.()`（可空调用，未注入时静默降级）。ingestionPipeline.js 实测插入点：
+
+| 位置 | 时机 |
+|---|---|
+| _flushDeleteBatch 入口 | 置 isProcessingDeletes = true 之后 |
+| _flushDeleteBatch 成功返回前 | 一批删除落地之后 |
+| _flushBatch 入口 | 置 isProcessing = true 之后 |
+| 取得 chunkVectors 之后 | 嵌入请求返回后 |
+| 取得 tagVectors 之后 | 标签向量完成后 |
+
+设计意图：只要流水线在推进，lastActivityAt 就向前走，waitForIdle 便不会误报卡死；只有「真实零进展」才会命中 stall 判据。
+
+四、改动三：损坏闸门与动态 DB 代理
+
+等待前先做健康闸门，避免在损坏库上继续等待（原文）：
+
+```js
+if (owner.databaseCorruptionDetected || owner.dbHealthState === 'corrupt') {
+    throw new Error('KnowledgeBase database is unavailable because corruption was detected.');
+}
+```
+
+5cf71f45 补掉两个边界：冷启动时不经 0ms 误报 stall（限制 lastActive 不得早于 startedAt）；以及在恢复流程中刷新心跳，避免恢复期被判为停滞。
+
+五、与既有切片的关系
+
+- 切片 201（knowledgeBase 子系统模块化架构）第 1 节 databaseCoordinator 描述已被本次改写：原先只有「超时默认 30 分钟、轮询 50ms」，现在新增 stallThresholdMs 与心跳语义。
+- 切片 230（知识库派生计算鲁棒性）：事件同源（同一轮上游合入），侧重派生失效；本切片侧重写入互斥与等待语义。
+
+Tag: 知识库, databaseCoordinator, AB-BA死锁, 死锁, 心跳, lastActivityAt, touchActivity, stallThresholdMs, waitForIdle, WAL互斥, rusqlite, better-sqlite3, 损坏闸门

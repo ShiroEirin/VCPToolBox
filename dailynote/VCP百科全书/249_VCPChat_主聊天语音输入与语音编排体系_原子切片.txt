@@ -1,0 +1,53 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCPChat——主聊天语音输入与语音编排体系 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：新增 modules/voice/ 8 模块 + mainChatVoiceCoordinator + 3 份测试）
+
+一句话总结：把语音从「输入法式的一次性识别」升级为「状态机式的主聊天语音编排」——听写与录音分轨、光标级写入、草稿冲突自愈、零重渲染波形。
+
+一、modules/voice/ 八模块（磁盘实测）
+
+| 文件 | 字节 | 职责（头部注释原文） |
+|---|---|---|
+| chatVoiceComposer.js | 38103 | 「主聊天语音交互控制器：编排语音听写与原声录音的状态机及交互」「融合光标级写入、草稿冲突自愈、活动栏展开与防御性生命周期」 |
+| voiceComposerView.js | 39176 | 「VoiceComposerView: 主输入框语音交互视图层」「实现渐进式展开活动栏（Activity Bar）」「包含：32px 紧凑麦克风触发器、展开式取消按钮、零重渲染 SVG 动态波形、停止按钮与草稿冲突插入操作」 |
+| audioRecorder.js | 15732 | 录音采集 |
+| voiceWaveform.js | 4845 | 「VoiceWaveform: 实时麦克风振幅可视化组件」「预渲染 80 根具有圆角描边的 SVG 竖线，通过 requestAnimationFrame (50ms 节流) 命令式更新 line 几何属性，完全避开框架重渲染开销，保持 60fps 丝滑与超低 CPU 占用」 |
+| wavAudioEncoder.js | 1623 | 「PCM Float32 编码为 16-bit 单声道/多声道 RIFF WAV Blob」（blockAlign / byteRate / dataSize 标准头计算） |
+| voice-input-engine-adapter.js | 11863 | 接入 rust_voice_input_engine 的适配层 |
+| passiveVoiceSentinel.js | 8430 | 被动语音哨兵（被动监听通道） |
+| speechDirectiveMatcher.js | 1807 | 「解析逗号分隔的短语列表」（语音指令匹配） |
+
+二、周边接线（实测）
+
+| 路径 | 字节 | 说明 |
+|---|---|---|
+| modules/ipc/mainChatVoiceCoordinator.js | 14047 | 主进程侧语音协调 |
+| modules/ipc/voiceHandlers.js | 28560 | 语音 IPC 处理 |
+| modules/ipc/localSttHandlers.js | 2456 | 本地 STT 处理 |
+| modules/settings/schema/voice-settings.js | 6992 | 语音设置项 |
+| modules/settings/schema/local-stt-panel.js | 6297 | 本地 STT 面板 |
+| preloads/api/voice.js | 2580 | 预加载语音桥 |
+| preloads/api/localStt.js | 678 | 本地 STT 桥 |
+| preloads/voice-input-capture.js | 1283 | 采集专用预加载 |
+| modules/SovitsTTS.js | 34885 | TTS 侧（与语音输入相对） |
+| rust_voice_input_engine/runtime/win32-x64/vcp_voice_input_engine.exe | 260096 | Rust 语音引擎二进制 |
+| docs/MAIN_CHAT_VOICE_COMPOSER_ARCHITECTURE.md | 19221 | 架构文档 |
+
+三、测试护栏
+
+tests/main-chat-voice-composer.test.js（25256）、voice-composer-interaction.test.js（13688）、voice-input-engine.test.js（11257）。
+
+四、设计要点提炼
+
+1. 状态机而非直写：听写（STT→文本）与原声录音（→WAV）两条链路并存，控制器统一编排。
+2. 光标级写入 + 草稿冲突自愈：语音结果按光标位置插入，并处理「识图中用户已改稿」的冲突，而非清空覆盖。
+3. 渐进式展示：默认 32px 紧凑麦克风触发器，按下才展开活动栏，不抢占输入框空间。
+4. 零重渲染波形：80 根预渲染 SVG 竖线 + rAF 50ms 节流命令式改几何，绕开框架 diff，是低开销可视化的典范做法。
+
+五、与既有切片的关系
+
+- 切片 227（VCPChat 原生语音输入引擎 rust_voice_input_engine）：本切片是其**上层编排与视图**，227 管引擎本体（Rust 侧），本切片管 Chat 侧状态机、视图与 IPC。
+- 与 modules/SovitsTTS.js（TTS）方向相反，一个说入、一个说出。
+
+Tag: 语音输入, voice, chatVoiceComposer, voiceComposerView, audioRecorder, voiceWaveform, wavAudioEncoder, passiveVoiceSentinel, speechDirectiveMatcher, 光标级写入, 草稿冲突自愈, 零重渲染SVG, RIFF WAV, localStt, SovitsTTS, rust_voice_input_engine

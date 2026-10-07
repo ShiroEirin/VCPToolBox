@@ -1,0 +1,76 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCPChat——ProjectForge 项目锻造台（Rust AST 索引 + 链接图 + 前端工作台）原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：e3ba1cdd「Merge PR #232 from infinite-vector/feat/projectforge-ast-facts-microkernel」、03d69825、1ed73d47；d2720a58「V文坊初始化解耦」）
+
+一句话总结：ProjectForge 把「工程理解」从纯文本搜索升级为「AST 事实 + 符号解析 + 链接图」三件套，配 Rust 索引器与独立前端工作台。
+
+一、Rust 索引器（rust_projectforge_indexer/，磁盘实测）
+
+| 文件 | 字节 | 职责 |
+|---|---|---|
+| src/main.rs | 7909 | 入口 |
+| src/scan.rs | 13102 | 目录扫描 |
+| src/lang.rs | 4274 | 语言识别 |
+| src/symbols.rs | 47328 | 符号提取主体 |
+| src/facts/mod.rs | 17792 | 事实抽象层 |
+| src/facts/types.rs | 5256 | 跨语言事实类型 |
+| src/facts/c_cpp.rs | 27330 | C/C++ |
+| src/facts/js_html.rs | 27299 | JS/HTML |
+| src/facts/python.rs | 7305 | Python |
+| src/facts/rust_lang.rs | 8432 | Rust |
+| src/facts/java.rs | 7273 | Java |
+| src/facts/go.rs | 5742 | Go |
+| src/facts/csharp_lua.rs | 2721 | C# / Lua |
+| build-runtime.js / bench.js | 3685 / 2380 | 构建与基准 |
+
+关键设计：`facts/` 按语言分文件、以 mod.rs 统一抽象，即「AST 事实微内核」——每种语言只负责产出统一形状的事实，上层不感知语言差异。上游提交 03d69825 补入缺失的 tree-sitter 语法 crate 与 lock 文件。
+
+二、后端服务插件（VCPDistributedServer/Plugin/ProjectForge/）
+
+| 文件 | 字节 | 职责 |
+|---|---|---|
+| ProjectForgeService.js | 107889 | 主服务 |
+| engine.js | 35355 | 引擎 |
+| linkGraph.js | 36503 | 链接图（符号引用网络） |
+| plugin-manifest.json | 24655 | 插件清单 |
+| store.js | 20345 | 持久化 |
+| resolvers.js | 16212 | 解析器 |
+| indexerClient.js | 12282 | 调用 Rust 索引器 |
+| symbolResolver.js | 11223 | 符号解析 |
+| workspace.js | 6730 | 工作区绑定 |
+| tickets.js | 3479 | 票据 |
+| args.js | 5647 | 参数 |
+| projectforge_indexer.exe | 17521664 | 预编译 Rust 二进制（~16.7MB） |
+
+三、前端工作台（ProjectForgemodules/）
+
+- projectforge.js（34194）/ projectforge.html（16632）/ projectforge.css（34686）
+- projectforge-source.js（40798）：源码视图与跳转
+- projectforge-git.js（29361）：Git 侧边栏
+- projectforge-sidetabs.js（3806）
+
+四、IPC 与预加载桥
+
+- preloads/api/projectForge.js（2221）
+- modules/ipc/projectForgeHandlers.js（4385）
+- 配套服务：modules/services/sourceService.js（624 行）、gitService.js（542 行）、workspaceIndex.js（710 行）
+
+五、测试护栏（本轮新增 5 份）
+
+tests/project-forge.test.js、project-forge-ast.test.js（16674）、project-forge-event-ipc.test.js、project-forge-robustness.test.js、project-forge-trace.test.js。
+
+六、文档
+
+docs/projectforge-ast-indexer-blueprint.md（34382 字节，施工蓝图）、projectforge-devlog.md、projectforge-git-sidebar-devlog.md；根目录 PROJECT_STRUCTURE.md（2368 行）。
+
+七、本轮相关删除
+
+BladeGame 的 blade_controller.py 与 blade_gui.py 被移除，改为 blade-electron.js（1133 行）+ blade-electron.css（592 行）——即该插件从 Python GUI 改为 Electron 实现。
+
+八、与既有切片的关系
+
+- 与切片 197/209（Rust 向量引擎 / rust-vexus-lite）同属 Rust 下沉路线，但一为「记忆检索」、一为「代码结构索引」。
+- 与切片 206/207（TagMemo/RiverMemo）无直接耦合：ProjectForge 面向代码工区，不进记忆系统。
+
+Tag: ProjectForge, 项目锻造台, AST, tree-sitter, Rust索引器, symbols.rs, facts微内核, 链接图, linkGraph, 符号解析, sourceService, gitService, workspaceIndex, BladeGame, Electron, V文坊

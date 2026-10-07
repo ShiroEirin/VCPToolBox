@@ -1,0 +1,68 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCPChat——UI 系统 v2（外观引擎 / 组件清单 / Web Awesome 形变层）原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：modules/ui-system 新增多项；conversation-turn-navigator 对照 ZCode 改写）
+
+一句话总结：把 UI 从「散装样式」升级为「三层架构」——外观引擎（用户偏好存储，36KB+）、组件清单（API 稳定性契约）、形变层（Web Awesome 封装）。
+
+一、外观引擎（modules/ui-system/appearance-engine.js，14747 字节）
+
+存储键：`vcpchat.appearanceProfile`。内置选项集均为 Object.freeze 白名单，实测 dimension：
+
+| 维度 | 允许值 |
+|---|---|
+| density | compact / comfortable / relaxed |
+| radius | square / small / medium / round / custom |
+| typography | system / humanist / serif |
+| fontScale | small / normal / large |
+| contentWidth | full / centered |
+| wallpaperScope | theme / panel / global |
+| surface | solid / translucent / custom |
+| surfaceEffect | **vibrancy / mica / acrylic / liquid** |
+| shellRadius / composerRadius / sidebarRadius | tuned / follow / square / small / medium / round / custom |
+
+要点：`tuned`（调校值）与 `follow`（跟随全局）是前缀选项，实现「分层微调但不失控」。
+
+二、组件清单（component-manifest.js，全文实测）
+
+每项为 Object.freeze `{ name, category, aliases, status, since }`，用两个工厂构造：`stable(name, category, aliases)` → since '1.0.0'；`candidate(name, category)` → since '1.1.0'。共 32 个组件：
+
+- **stable（12）**：Button、Input、Textarea、Select、Range、SettingsSection、SettingsActionBar、Switch、Field、List（别名 ListItem）、Modal、Toast、SegmentedControl
+- **candidate（19）**：IconButton、Checkbox、Badge、Alert、Card、Tabs、Toolbar、TableFrame、EmptyState、ConfirmDialog、InputDialog、Divider、Tooltip、Skeleton、Pagination、ScrollArea、AppPageShell、WindowControls、AsyncBoundary
+
+的意义：把「哪些组件接口已冻结、哪些还可以改」写成可机读契约，而非人脑记忆。
+
+三、形变层（Web Awesome，webawesome-runtime-manifest.js 全文实测）
+
+```js
+export const WEB_AWESOME_VERSION = '3.11.0';
+export const WEB_AWESOME_LOCALE = 'zh-CN';
+// 13 个组件：button、card、input、textarea、select、option、checkbox、
+//            switch、tab、tab-panel、tab-group、dialog、tooltip
+```
+
+头注释原文点出关键约束：「Both the browser adapter and the offline closure generator consume this manifest, so adding a component necessarily changes the reproducible vendor output and its packaging gate.」——即**清单是唯一事实源**，浏览器适配器与离线闭包生成器共用，新增组件必然影响可重现构建产物与打包门禁。
+
+四、其他关键成员
+
+| 文件 | 字节 | 说明 |
+|---|---|---|
+| vcp-ui.js | 118996 | 主组件运行时；`COMPONENTS`/`ENHANCERS` Map + `controllerByElement` WeakMap（弱引用防泄漏）；Range 进度用 CSS 变量 `--vcp-ui-range-progress` 回写 |
+| appearance-studio.js | 92105 | 外观工作室（可视化调参） |
+| typed-field-owners.js | 65890 | 「设置表单的强类型接缝」；头注释声明「Native controls and persisted keys remain canonical; this module owns only the typed command path around them」 |
+| settings-bridge.js | 52673 | 设置桥 |
+| conversation-turn-navigator.js | 29976 | 按提问快速定位导轨（山峰式悬停缩放，近处平滑/远处直接到位） |
+| lucide-adapter.js | 31231 | 图标适配 |
+| ask-nova-modal.js | 31119 | Ask Nova 弹窗 |
+| component-showcase.js | 29065 | 组件陈列馆 |
+
+五、外部知识溯源（上游自述）
+
+conversation-turn-navigator.js 头注释原文：「结构、交互和数值对照 ZCode 的 ConversationTurnNavigator / conversationTurnNavigatorHelpers（https://github.com/zai-org/ZCode ，Apache-2.0，packages/ui/src/v4），由 React + Tailwind 改写为原生 DOM + styles/ui-system/turn-navigator.css」。——即该组件是 Apache-2.0 项目的移植改写（React/Tailwind → 原生 DOM/CSS），数据源从虚拟列表 render unit 换为直接观察 `.message-item.user` DOM。
+
+六、与既有切片的关系
+
+- 切片 229（VCPUI 组件库与设置系统重构）：本切片是其**第二阶段**（v2）：229 记录第一批组件与设置重构，本切片记录外观引擎维度、组件清单契约化、Web Awesome 形变层。
+- 与切片 217（官方主题「纸墨与机芯」）呼应：外观引擎的 wallpaperScope/surfaceEffect 提供了主题之外的个性化维度。
+
+Tag: UI系统, ui-system, appearance-engine, appearanceProfile, density, surfaceEffect, vibrancy, mica, acrylic, liquid, component-manifest, stable, candidate, Web Awesome, webawesome, vcp-ui, typed-field-owners, conversation-turn-navigator, ZCode, lucide, 组件契约

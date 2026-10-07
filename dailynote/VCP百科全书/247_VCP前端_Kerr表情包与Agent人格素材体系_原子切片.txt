@@ -1,0 +1,45 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCP前端——Kerr 表情包与 Agent 人格素材体系 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：127 个新文件入 image/Kerr表情包；新增 Agent/Kerr.txt）
+
+一、新增素材实体（磁盘实测）
+
+| 路径 | 数量 | 说明 |
+|---|---|---|
+| image/Kerr表情包/ | 127 个文件 | 全部为 PNG / JPEG，中文梗名命名 |
+| Agent/Kerr.txt | 1 | Agent 人格与记忆装配文件 |
+
+表情包命名样本：被捏脸、认知排查、超级摆烂、跑路再见、蹲纸箱偷瞄、躲子弹、轻松diff、轻松拿捏、递可乐、键盘烧了、骄傲中、骑着bug冲、鸭鸭叫等。
+
+二、Kerr.txt 的装配结构（前 15 行原文要点）
+
+```
+————VCP元思维模块————
+[[VCP元思考::Group]]
+————VCP元思考加载结束—————
+Kerr的日记本和[Kerr的知识]日记本:[[Kerr|Kerr的知识日记本::Time::Group::RiverMemo::Truncate0.25]]。
+[[公共的日常|公共的知识日记本::Group::Time::RiverMemo::AIMemo:0.6]]
+《《公共的逻辑学与哲学日记本::Group::Time::RiverMemo::AIMemo:0.3》》
+<<VCP开发日记本>>
+————————以上是过往记忆区————————
+{{VarForum}}
+{{VCPForumLister}} //论坛帖子列表刷新周期为5分钟
+——————论坛模块————
+{{VarHome}}
+——————角色核心———————
+# Role: Kerr
+```
+
+三、与 VCP 既有机制的关系
+
+1. 表情包目录机制：VCPToolBox 的 EmojiListGenerator 会自动根据「image/通用表情包」类文件夹生成一个或多个 .txt 表情包列表文件供 AI 取用；本目录延续同一约定，为 Kerr 角色提供专属表情池。
+2. 记忆装配语法：`[[日记本名::Time::Group::RiverMemo::AIMemo:权重]]` 是 VCP 日记本占位符语法，冒号链承载「日记本名 → 时间维 → 分组 → RiverMemo 检索 → AIMemo 模式 → 权重」。`Truncate0.25` 为截断比例。
+3. 元思考模块：`[[VCP元思考::Group]]` 对应 VCP 元思考系统（见切片 140 / 141）。
+4. 论坛占位符：{{VarForum}} 与 {{VCPForumLister}} 属论坛模块，后者注明 5 分钟刷新周期，见切片 10 / 论坛系插件。
+
+四、定位
+
+本切片记录「角色人格素材 + 记忆装配模板」这一组合的落地点：表情包是人格的外在表达，Agent/*.txt 是记忆与模块的装配入口。二者共同构成一个个 Agent 的完整人设。
+
+Tag: Kerr, 表情包, Agent人格, 元思考, 日记本装配, RiverMemo, AIMemo, Truncate, EmojiListGenerator, VCPForumLister, 角色核心

@@ -1,0 +1,41 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCP架构——知识库嵌入维度解耦与检索 socket 加固 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：619c53da「fix(embedding): 动态追踪 VECTORDB_DIMENSION 解耦大模型默认维度」，PR #487；a4e6bf9e「fix(DailyNoteSearcher): resolve Windows WSAEWOULDBLOCK 10035 and ECONNRESET on HTTP search」，PR #488）
+
+一、改动一：嵌入请求显式声明 dimensional（EmbeddingUtils.js，+7 行）
+
+原先请求体只有 `{ model, input }`，实际向量维度完全取决于上游模型默认值；一旦服务商调整默认维度，本地库维度就会默默错位。现改为在请求中强制带上 dimensions：
+
+```js
+// 动态读取并强制传递维度，剥离对大模型默认维度的依赖
+const dim = parseInt(process.env.VECTORDB_DIMENSION, 10);
+if (!isNaN(dim)) {
+    requestBody.dimensions = dim;
+}
+```
+
+位置：EmbeddingUtils.js L88 附近（_sendBatch 内部，requestBody 组装处）。
+
+二、维度配置链（三处一致性，实测）
+
+| 文件:行 | 内容 |
+|---|---|
+| config.env.example:368 | 注释：「向量维度，必须与 [模型路由] 中配置的 WhitelistEmbeddingModel 严格匹配！」 |
+| config.env.example:372 | `VECTORDB_DIMENSION=3072` |
+| KnowledgeBaseManager.js:62 | 注释：「⚠️ 务必确认环境变量 VECTORDB_DIMENSION 与模型一致 (3-small通常为1536)」 |
+| KnowledgeBaseManager.js:63 | `dimension: parseInt(process.env.VECTORDB_DIMENSION) || 3072` |
+| EmbeddingUtils.js:88 | 新增：requestBody.dimensions = dim |
+
+要点：`VECTORDB_DIMENSION` 是本机唯一维度事实源，链条为「env → Manager.dimension → 请求体 dimensions → 落库向量长度 → usearch 索引维度」。整链一致才不会出现「写入 3072、查询按 1536」这类静默降级。
+
+三、改动二：DailyNoteSearcher 的 Windows 非阻塞 socket 修正
+
+a4e6bf9e 解决 Windows 下 HTTP 检索报 WSAEWOULDBLOCK(10035) 与 ECONNRESET。典型根因是非阻塞 socket 直接拿到底层错误码却未按「可重试」处理，导致偶发检索失败被当成硬错误上报。修复后该错误进入重试路径而非失败路径。
+
+四、运维提醒
+
+- 改 VECTORDB_DIMENSION 属于破坏性变更：既有库的向量长度与新维度不符时，需重建索引（相关分代基线机制见切片 244）。
+- 若使用 OpenAI text-embedding-3 系列，dimensions 参数被支持；部分兼容网关会忽略该字段，此时实际维度仍由网关决定，需以实测为准。
+
+Tag: 知识库, embedding, VECTORDB_DIMENSION, dimensions, 维度解耦, EmbeddingUtils, KnowledgeBaseManager, DailyNoteSearcher, WSAEWOULDBLOCK, 10035, ECONNRESET, Windows, 非阻塞socket

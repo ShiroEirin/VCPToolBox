@@ -1,0 +1,47 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCPChat——窗口置顶治理与多窗口层级调度 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：6b8fd07d「refactor(window): 优化窗口置顶装配体验、交互稳定性与非Windows环境零影响」，PR #234 from Ldl-h/feat/window-pin-governance-and-parity）
+
+一句话总结：把「窗口置顶」从「一个布尔开关」升级为「带空间关系的层级调度器」——拖拽优先、释放重排、连通分量分组、生命周期安全。
+
+一、位置与体量
+
+- modules/services/windowPinService.js（12302 字节，Windows 平台专属）
+- tests/window-pin-service.test.js（4811 字节）
+
+二、四条规则（源码头注释逐条原文）
+
+1. **拖拽优先**：拖拽或调整尺寸中的窗口即时插队提升至最前；长按不松手期间持续锁定最高层级。
+2. **释放重排**：松开鼠标后防抖 120ms，对空间重叠的置顶窗口按面积排定（较小窗口置于上方）。
+3. **连通分量划分**：仅对物理区域有重叠的窗口集群独立排位，互不干扰。
+4. **生命周期管理**：窗口关闭/失焦时安全清理，防范状态锁死。
+
+三、内部状态与几何算法（源码实测）
+
+```js
+/** @type {Map<number, { win: electron.BrowserWindow, cleanup: () => void }>} */
+const pinnedWindows = new Map();
+let activeDraggingWinId = null;
+let settleTimer = null;
+
+function isOverlapping(rectA, rectB) {
+    if (!rectA || !rectB) return false;
+    return !( ... );   // AABB 碰撞检测
+}
+```
+
+- 每窗口在 Map 中除了 BrowserWindow 还携带 `cleanup()` 回调，保证注销时不留监听器。
+- `isOverlapping` 为标准 AABB 轴对齐包围盒检测，作为「连通分量」的边关系。
+- `settleTimer` 承载 120ms 防抖，`activeDraggingWinId` 承载「拖拽互斥」。
+
+四、跨平台语义
+
+提交信息明确「非 Windows 环境零影响」——即该服务为 Windows 专属增强，在 macOS / Linux 上不介入，避免引入平台相关回归。
+
+五、与既有切片的关系
+
+- 切片 202/203/204（Desktopmodules / Agenttaskmodules / Logmodules）：本服务是这些多窗口/悬浮面板的层级基座。
+- 切片 250（UI 系统 v2）：组件清单中的 `WindowControls`（application 类，candidate 状态）与本服务属同一窗口治理主题。
+
+Tag: 窗口置顶, windowPinService, 多窗口, 层级调度, 拖拽优先, 释放重排, 防抖, 120ms, 连通分量, AABB, isOverlapping, settleTimer, BrowserWindow, cleanup, Windows专属, PR234

@@ -2,7 +2,7 @@
 [VCP百科全书] VCPChat 设置系统 VCPUI 化重构与自包含 VCPUI 组件库（原子切片）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-16（第19次上游合并：090f22b2「fix」改写 styles/ui-system/settings-sidebar.css 133 行（+73/-75）并同步 tests/uiux-settings-bridge-modules.test.mjs 15 行；此前第18次：设置侧边栏现代化 PR #200 合入 69577e84，75文件 +10301/-9596，3f8c04b9 修复 #198 作用域错误）
+最后核验：2026-10-07（第22次上游合并：ui-system 进入 v2——外观引擎维度白名单、组件清单契约化（32 组件 stable/candidate）、Web Awesome 3.11.0 形变层、conversation-turn-navigator 移植 ZCode；详见切片 250。此前第19次：090f22b2「fix」改写 settings-sidebar.css（+73/-75）；第18次：设置侧边栏现代化 PR #200 合入 69577e84）
 
 【2026-09-16 侧边栏样式修正】（090f22b2，本轮上游在 styles/ 下唯一改动的文件）：
 - `styles/ui-system/settings-sidebar.css`：+73/-75（合计 133 行变化），删除 `html .vcp-ui-scope .vcp-settings-schema-surface .form-actions button[type="submit"]` 及其 `:hover` 一族硬编码样式（border / background / backdrop-filter / box-shadow 等）。
@@ -59,4 +59,11 @@
 - 128（Groupmodules）/ 125/124（Assistantmodules）：ui-system 改造波及面
 - 162（前端架构）：VCPUI 是继 ui-system 之后的第二套组件化尝试，注意架构归位
 
-Tag: VCPChat, VCPUI, WebAwesome, uiux, 设置系统, schema驱动渲染, 官方主题, 赤与白昼, 酸性玄武, webawesome-runtime, 第15次上游合并
+八、2026-10-07 第22次上游合并：UI 系统 v2（详见切片 250）
+- 外观引擎 appearance-engine.js（14747 字节，存储键 vcpchat.appearanceProfile）：density / radius / typography / fontScale / contentWidth / wallpaperScope / surface / surfaceEffect（vibrancy·mica·acrylic·liquid）/ shell·composer·sidebarRadius（tuned·follow 前缀）。
+- 组件清单 component-manifest.js：32 组件，stable 12（since 1.0.0）/ candidate 19（since 1.1.0），把「接口已冻结与否」写成可机读契约。
+- Web Awesome 形变层：WEB_AWESOME_VERSION='3.11.0'，LOCALE='zh-CN'，13 组件；清单为浏览器适配器与离线闭包生成器共用的事实源。
+- 新成员：appearance-studio.js(92105)、typed-field-owners.js(65890「设置表单的强类型接缝」)、settings-bridge.js(52673)、conversation-turn-navigator.js(29976，移植 ZCode Apache-2.0，React/Tailwind → 原生 DOM/CSS)、lucide-adapter.js(31231)、ask-nova-modal.js(31119)。
+- 本切片（229）记录 v1 组件库与设置重构；v2 增量以 250 为准。
+
+Tag: VCPChat, VCPUI, WebAwesome, uiux, 设置系统, schema驱动渲染, 官方主题, 赤与白昼, 酸性玄武, webawesome-runtime, 第15次上游合并, 第22次上游合并, UI系统v2, appearance-engine

@@ -1,0 +1,59 @@
+[2026-10-07] - 哈雷酱
+[VCP百科全书] VCP架构——知识库分代双槽基线（generational double-slot baseline）原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-07（第22次上游合并：915a9acb「feat(knowledgeBase): introduce generational double-slot baselines and set symmetric diff for chunk indices」，PR #486）
+
+一、解决的问题
+
+日记本 Chunk 的 usearch 索引原先在启动/懒加载时需要全量重建，代价随库增大而线性上升。本次引入「分代 + 双槽 + 集合对称差分」三件套，把重建降级为增量回放。
+
+二、数据结构（modules/knowledgeBase/schemaManager.js 新增，原文）
+
+```sql
+CREATE TABLE IF NOT EXISTS chunk_index_baselines (   -- 槽位登记页
+    diary_name TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    slot TEXT NOT NULL CHECK(slot IN ('a','b')),
+    dimension INTEGER NOT NULL,
+    model_sig TEXT NOT NULL,
+    chunk_count INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('building','ready')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (diary_name, generation)
+);
+CREATE TABLE IF NOT EXISTS chunk_index_baseline_entries (  -- 槽内含有的 Chunk ID 集合快照
+    diary_name TEXT NOT NULL, generation INTEGER NOT NULL, chunk_id INTEGER NOT NULL,
+    PRIMARY KEY (diary_name, generation, chunk_id),
+    FOREIGN KEY(diary_name, generation) REFERENCES chunk_index_baselines(diary_name, generation) ON DELETE CASCADE
+);
+```
+注释原文即点明设计意图：「chunks 表是唯一权威真相；本页记录某个 usearch 槽内包含的 Chunk ID 集合快照。启动或搜索懒加载时据此做集合对称差分回放，避免全量重建。」
+
+配套索引：idx_chunk_index_baseline_entries_lookup(diary_name, generation)、idx_chunk_index_baselines_diary(diary_name, status)。
+
+三、indexRepository.js 关键成员（磁盘实测行号）
+
+| 行 | 成员 | 作用 |
+|---|---|---|
+| L32 | chunkBaselineDeltaRatio | 差分比例阈值，config.chunkIndexBaselineDeltaRatio 夹取到 [0.001, 1] |
+| L35 | chunkIndexPersistenceMode | 持久化模式，默认 `'generational'` |
+| L38 | _tagBaselinePath(slot) | 全局标签基线路径 `index_global_tags_${slot}.usearch` |
+| L74 | _diaryBaselinePath(diaryName, slot) | 日记基线路径 `index_diary_${safeName}_${slot}.usearch` |
+| L88 | _readActiveDiaryBaseline(diaryName) | 读活跃代（generation DESC，校验 slot ∈ {a,b}） |
+| L107 | _countDiaryBaselineDelta(diaryName, generation) | 三表联查算 upserts / deletes / delta / ratio |
+| L143+ | loadDiaryBaseline(diaryName, capacity=50000) | 载入基线，含 model_sig 不匹配警告 |
+
+差分计算（_countDiaryBaselineDelta 返回体）：`{ upserts, deletes, delta, ratio, currentCount, baselineCount }`，其中 `delta = upserts + deletes`，`ratio = delta / Math.max(1, currentCount, baselineCount)`。
+
+四、模型签名与维度一致性
+
+- 登记页记录 `model_sig` 与 `dimension`；载入时若签名不符，输出 `Diary baseline model signature mismatch for "<name>"` 警告（L 附近，见 loadDiaryBaseline）。
+- 双槽（a/b）语义：写入新代时占一个槽、旧代留在另一槽，实现「构建中不破坏可服务基线」。
+
+五、与既有切片的关系
+
+- 切片 201（knowledgeBase 子系统模块化架构）：本切片是 indexRepository 的持久化策略升级。
+- 切片 230（知识库派生计算鲁棒性）：同属知识库鲁棒性主题，但 230 管「派生计算失效语义」，本切片管「索引持久化与回放」。
+- 切片 209/212（rust-vexus-lite 记忆管线 / 原生 Artifact 构建器）：基线文件是 .usearch 制品，与 Rust 侧产物管理面相邻但职责不同。
+
+Tag: 知识库, 分代基线, generational, 双槽, slot, usearch, 对称差分, chunk_index_baselines, chunk_index_baseline_entries, indexRepository, schemaManager, chunkIndexPersistenceMode, model_sig

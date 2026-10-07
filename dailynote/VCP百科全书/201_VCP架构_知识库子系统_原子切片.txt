@@ -109,4 +109,11 @@ modules/knowledgeBase/
 2. 实现函数绑定：searchService 和 ingestionPipeline 的方法以 KnowledgeBaseManager 作为 this 执行，状态所有权保持唯一
 3. 延迟初始化：VexusIndex 等重资源按需加载
 
-Tag: knowledgeBase, databaseCoordinator, searchService, tagConsistencyService, sqliteHealthManager, schemaManager, ingestionPipeline, indexRepository, fileWatcher, memoryProfiler, TagMemo V9.1, 模块化架构, Owner模式
+五、2026-10-07 第22次上游合并增补（本切片第一、三节的部分描述已被取代）
+
+- **DatabaseCoordinator.waitForIdle 已升级**：原先「超时默认 30 分钟、轮询 50ms」的单条件等待，改为 Stall 判定（`stallThresholdMs` 默认 120s）+ 绝对超时双条件；新增进度心跳 `owner.lastActivityAt`（ingestionPipeline 在 5 个关键点调用 `touchActivity()`）；等待前新增数据库损坏闸门。详见切片 245。
+- **新增 schema 两表**：`chunk_index_baselines` / `chunk_index_baseline_entries`（分代双槽基线，集合对称差分回放）。详见切片 244。
+- **EmbeddingUtils 新增 dimensions**：请求体强制携带 `VECTORDB_DIMENSION`，剥离对大模型默认维度的依赖。详见切片 246。
+- 本切片第一节描述的目录结构（14 个文件）仍成立；indexRepository 已从 341 行大幅扩张（本轮 +468/-99）。
+
+Tag: knowledgeBase, databaseCoordinator, searchService, tagConsistencyService, sqliteHealthManager, schemaManager, ingestionPipeline, indexRepository, fileWatcher, memoryProfiler, TagMemo V9.1, 模块化架构, Owner模式, 第22次上游合并, 分代基线, 进度心跳

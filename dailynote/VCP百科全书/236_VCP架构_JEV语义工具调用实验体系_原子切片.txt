@@ -2,7 +2,7 @@
 # JEV 语义工具调用实验体系（自然语言工具入口）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-22（第21次上游合并：8bb49395「迭代升级」——能力树扩容至 4 目录/11 工具 + 允许省略能力目录）
+最后核验：2026-10-07（第22次上游合并：新增 JEV 第三方插件注册表与官方能力目录——JEV_THIRD_PARTY_EXP 默认关闭，字符级精准类插件（shell/代码/路径）明令禁入，详见切片 251；此前第21次：8bb49395「迭代升级」能力树扩容 + 允许省略能力目录）
 
 【2026-09-22 第21次上游合并：JEV 能力树扩容（8bb49395，作者 lioensky 本人）】--numstat 实测：
 - `ToolConfigs/jev_tool_call_exp.json` +59：新增两个能力目录。
@@ -59,3 +59,10 @@
 - `modules/vcpLoop/toolCallParser.js`（+5 行）与 `modules/vcpLoop/toolExecutor.js` 的 JEV 展开点已核对：`isVirtualToolName(name)` → `await plan(expression, args)` → `executeAll(expandedCalls, …)` 递归回原执行链；`args.tool_password` 会透传给每个展开出的调用；展开数为 0 时报错「JEV 没有生成可执行的真实工具调用。」。
 - 本切片头部常量与默认值（`virtualToolName: JEV`、`maxExpandedCalls: 5`、`_chooseWithJev` 的 `isConfigured` 短路与 confidence<0.55 回退）均已实读源码核对。
 - 未逐行核对：`_inferImplicitCategory` 的阈值与拒绝条件、`_buildDailyToolArgs` 的六类参数装配细节、`_normalizeUrlFetchSelection` 的双信号判定实现。
+
+## 六、2026-10-07 第22次上游合并：第三方治理层（详见切片 251）
+- 新增 `modules/jevThirdPartyRegistry.js`：读取官方目录 `ToolConfigs/jev_third_party_catalog.json`，校验 `manifest.jev` 声明，构建只读注册表。
+- 官方开放五类：info_retrieval（信息获取）/ convenience（便利操作）/ media_entertainment（媒体娱乐）/ iot_control（物联网控制）/ life_services（生活服务）；插件只能注册其中一个。
+- **禁入证据**：目录描述原文「系统维护、文件编辑、代码编程、命令行等需要字符级精准输入的插件不开放 JEV 接入」；`forbiddenParameterNames` 含 shell/cmd/code/script/path/filePath/content/diff/patch 等，`denyPlugins` 以 PowerShellExecutor 打头。
+- 与 236 主结论互证：JEV 是「受限便利通道」，不是通用执行层——本切片此前已核实「终端命令仍由模型负责」，此处给出官方侧同向证据。
+- 第三方提示词**不会**因插件安装而自动注入；`JEV_THIRD_PARTY_EXP` 默认关闭时官方行为不变。
