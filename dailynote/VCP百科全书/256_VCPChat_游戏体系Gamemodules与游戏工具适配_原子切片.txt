@@ -1,0 +1,58 @@
+[2026-10-13] - 哈雷酱
+[VCP百科全书] VCPChat——游戏体系 Gamemodules 与游戏工具适配 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-13（第23次上游合并：1d43441c「上架斗地主引擎」、fa6b5545「新增vgame初始入口(非框架本地)」、92d09a30「优化游戏存档列表显示」）
+
+一句话总结：把游戏当作**可被 Agent 参与的一等公民**：既有可玩前端（斗地主 / forge-tax / vcp-neon-game），也有让 Agent 入座与操作的游戏工具适配层。
+
+一、游戏前端（Gamemodules/，磁盘实测字节）
+
+```text
+Gamemodules/
+├── game.html(3545) · game.css(3499) · game.js(5682)     游戏宿主壳
+├── doudizhu/   index.html(2198) · style.css(1676) · ui.js(10369)
+├── forge-tax/  engine.js(22523) · ui.js(19554) · audio.js(5868) · service.cjs(4951)
+│              session-store.cjs(7487) · tool-result.cjs(4014) · preload.cjs(879)
+│              index.html(2602) · style.css(4959) · README.md(3626)
+└── vcp-neon-game/  js/game.js(31744) · js/weapons.js(24690) · js/entities.js(22255)
+                    js/config.js(14347) · js/main.js(10436) · js/audio.js(9399)
+                    js/utils.js(3053) · styles.css(18744) · index.html(7093) · DEVLOG.md(28937)
+```
+
+要点：`forge-tax` 带 `preload.cjs` + `service.cjs` + `tool-result.cjs` + `session-store.cjs`，说明它是**与工具链打通**的游戏（工具结果可直接进入游戏）；`vcp-neon-game` 是完整 JS 游戏工程（含武器/实体/配置拆分与 28937 字节开发日志）。
+
+二、游戏工具适配层（modules/game/，磁盘实测）
+
+| 文件 | 字节 | 职责 |
+|---|---|---|
+| gameRuntime.js | 5130 | 运行时会话 |
+| gameSeatResolver.js | 2720 | **座位解析**（Agent 入座的语义映射） |
+| gameToolAdapter.js | 4022 | 工具适配器 |
+
+配套：`modules/services/gameService.js`、`modules/ipc/gameHandlers.js`、`Groupmodules/gameSessionOrchestrator.js`（群聊内游戏会话编排）、`Groupmodules/modes/gamePrompts.js`（游戏提示词模式）。
+
+三、后端插件（VCPDistributedServer/Plugin/）
+
+```text
+ForgeTax/      AI_GUIDE.md · README.md · forge-tax-service.js · plugin-manifest.json
+GameController/ GameControllerService.js · plugin-manifest.json
+```
+
+即游戏同时具备：**Agent 引导文档（AI_GUIDE.md）** + **服务端插件** + **群聊模式提示词** 三层。
+
+四、与本轮其他改动的关系
+
+- `Groupmodules/groupChatUrl.js` 与 `streamWatchdog.js` 同批新增（群聊 URL 与流式看门狗），与游戏会话编排同属群聊能力扩容。
+- 游戏存档列表显示（92d09a30）说明已有**存档体系**。
+
+五、明确的未实现事项（重要）
+
+- **Live2D 桌宠不在 main**：上游仅新建了远端分支 `feat/deskpet-live2d-v1`（及 `experimental/sidebar-pr-231`），本仓库 main 内检索 `live2d` / `deskpet` **零命中**，说明桌宠仍在开发分支。
+- 因此本切片**不包含**桌宠内容，避免与分支混淆。
+
+六、与既有切片的关系
+
+- 切片 241（Chartmodules 图表系统）与 242（ScreenPilot）：同属「Chat 内独立功能前端」家族，本切片是新增成员（游戏）。
+- 与 254（侧栏体系）：游戏与侧栏均属 UI 应用面扩张，但两者模块目录不同（Gamemodules/ vs modules/ui-system/）。
+
+Tag: 游戏体系, Gamemodules, 斗地主, doudizhu, forge-tax, vcp-neon-game, gameRuntime, gameSeatResolver, gameToolAdapter, gameService, gameHandlers, GameController, ForgeTax, gameSessionOrchestrator, gamePrompts, 存档, Live2D桌宠未合并, 第23次上游合并

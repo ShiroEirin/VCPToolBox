@@ -1,0 +1,64 @@
+[2026-10-13] - 哈雷酱
+[VCP百科全书] VCPChat——VCPCLI 终端内核重构与 xterm 渲染 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-13（第23次上游合并：ab3a74da「全量重构VCPCLI底层内核」（2026-10-10）；PR #242 / #243 / #244 PowerShellExecutor 系列修复）
+
+一句话总结：「VCPCLI」的底层内核**就是 PowerShellExecutor 插件**；本轮把执行内核拆出命令捕获层，并引入 xterm.js 做终端渲染。
+
+一、内核重构实体（ab3a74da --stat 实测）
+
+| 文件 | 变化 |
+|---|---|
+| `VCPDistributedServer/Plugin/PowerShellExecutor/PowerShellExecutor.js` | **311 行改动**（主体重构） |
+| `VCPDistributedServer/Plugin/PowerShellExecutor/commandCapture.js` | **+120 新增** |
+| `VCPDistributedServer/Plugin/PowerShellExecutor/commandRunStore.js` | +18/−? |
+| `.../PowerShellExecutor/plugin-manifest.json` | 6 行 |
+| `package.json` | 1 行 |
+| `tests/powershell-command-capture.test.js` | **+132 新增** |
+| `tests/powershell-completion-receipt.test.js` | 140 行（含重写） |
+| `tests/side-chat-branch-projection.test.mjs` | 6 行 |
+
+合计 8 文件 / +494 / −240。
+
+二、同批新增的内核模块（磁盘实测）
+
+```text
+VCPDistributedServer/Plugin/PowerShellExecutor/
+  commandCapture.js           命令捕获层（本轮新建）
+  commandRunStore.js          命令运行记录存储
+  nativeHelperPath.js         原生辅助程序路径解析
+  terminalOutputSanitizer.js  终端输出净化
+```
+
+三、终端渲染层：vendor/xterm（磁盘实测）
+
+| 文件 | 字节 |
+|---|---|
+| vendor/xterm/xterm.js | 283372 |
+| vendor/xterm/xterm.css | 5592 |
+| vendor/xterm/xterm-addon-fit.js | 1461 |
+| vendor/xterm/LICENSE | 1282 |
+
+即引入完整 xterm.js 前端终端仿真器（含自适应尺寸插件），配合 `modules/ipc/terminalHandlers.js`（本轮新增）作为 IPC 通道。
+
+四、PowerShellExecutor 系列修复（本轮三个 PR）
+
+| PR | 提交 | 内容 |
+|---|---|---|
+| #242 | b2855314 | 「resolve PTY startup probe timeout and align dual-view handshake」——PTY 启动探测超时与双视图握手对齐 |
+| #244 | 07a45316 | 「resolve startup probe deadlock and implement FIFO concurrency queue」——启动探测**死锁**与 **FIFO 并发队列** |
+| #243 | c2fa2664（合并） | 侧聊分形分支树（与终端无直接关系，同批） |
+
+即本轮的终端修复主线是：**启动探测不会僵死 + 并发命令排队而非抢占**。
+
+五、配套测试（磁盘实测）
+
+tests/powershell-output-boundaries.test.js、powershell-pager-suppression.test.js（分页抑制）、terminal-view-routing.test.js（终端视图路由）、powershell-command-capture.test.js、powershell-completion-receipt.test.js。
+
+六、与既有切片的关系
+
+- 切片 42（FileOperator）：两者同属「本地能力插件」，但本插件为**进程执行/终端**面。
+- 切片 248（ProjectForge）：ProjectForge 提供代码变更与 Git 视图，本切片提供**命令执行与终端回显**，两者共同构成 Chat 内的「工程作业台」。
+- README（Chat 侧）第 222 行自述：「VchatCLI 内置全功能终端：UI 深度融入主程序，原生兼容 PowerShell 与 WSL；解决传统 AI 命令行交互无状态的痛点，支持持久会话与多指令流；内置安全的一键管理员提权机制。」——本切片即该自述的**内核侧落地**。
+
+Tag: VCPCLI, PowerShellExecutor, 终端内核, commandCapture, commandRunStore, terminalOutputSanitizer, nativeHelperPath, xterm, xterm-addon-fit, terminalHandlers, PTY, 启动探测, FIFO并发队列, 双视图握手, PR242, PR243, PR244

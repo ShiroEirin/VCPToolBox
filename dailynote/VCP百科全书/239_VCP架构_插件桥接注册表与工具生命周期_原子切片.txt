@@ -34,3 +34,11 @@
 ## 四、未验证
 - `Plugin.js` 净删 92 行的具体迁移映射（哪些分支被注册表取代）未逐行核对。
 - `docs/VCP同步异步插件开发手册.md` +91/-7 的新增规范条款未逐条摘录。
+
+## 五、2026-10-13 第23次上游合并：MCP 桥接加固与三个新插件
+
+- **ParallelSearch**（新插件，详见切片 253）：第三方（作者 Parallel）MCP 通道插件，免密钥搜索；合并提交 2400edce = PR #490。
+- **MCP 桥接两处修复**：`135b78c7`「Preserve MCP content through VCP result unwrapping」（修 MCP 内容在 VCP 结果拆包时丢失）与 `abf4127b`「Enforce overall MCP deadline across initialization notifications」（跨初始化通知的**整体 MCP 截止时间**）。这两条正是本切片主题（工具生命周期/桥接注册表）的延伸：**MCP 调用也纳入统一生命周期与超时管控**。
+- **两个非 MCP 新插件**（VCPChat 侧，属分布式插件）：`ForgeTax`（`forge-tax-service.js` + AI_GUIDE.md，与 Gamemodules/forge-tax 联动）与 `GameController`（`GameControllerService.js`），详见切片 256。
+- **插件格式与脚本安全**：上一轮（第22次）的 `7aedf5e1「统一插件格式」`、`059794ee「强化脚本安全性」`、`f13cdc03「规范配置中心」` 的约束仍然生效；本轮新插件均带 `plugin-manifest.json`，未见旧格式回流。
+- 未逐行核对：MCP deadline 的默认值与是否可由插件覆盖。

@@ -74,3 +74,9 @@ BladeGame 的 blade_controller.py 与 blade_gui.py 被移除，改为 blade-elec
 - 与切片 206/207（TagMemo/RiverMemo）无直接耦合：ProjectForge 面向代码工区，不进记忆系统。
 
 Tag: ProjectForge, 项目锻造台, AST, tree-sitter, Rust索引器, symbols.rs, facts微内核, 链接图, linkGraph, 符号解析, sourceService, gitService, workspaceIndex, BladeGame, Electron, V文坊
+
+九、2026-10-13 第23次上游合并增补
+- **Rust 宏 FFI 误报修复**（PR #245 / 3ed5f569「fix(projectforge): eliminate Rust macro invocation FFI export false positives」，Merge a7954286）：修正 Rust 宏调用被误判为 FFI 导出符号的问题。涉及 `rust_projectforge_indexer/src` 6 个文件（含 symbols.rs / facts 系列）。
+- **新增 GUI 回退单文件能力**：`VCPDistributedServer/Plugin/ProjectForge/gui-revert-file.js`（本轮新增）——即 GUI 侧可对**单个文件**执行回退，此前命令面只有 batch/toNode 粒度。
+- **API 配置面**：新增 `preloads/api/projectForge.js` 与 `modules/ipc/projectForgeHandlers.js` 已在上次收录；本轮无接口面破坏性变更。
+- 未逐行核对：宏 FFI 误报的判定条件（宏名白名单 vs AST 节点类型判定）与 gui-revert-file.js 与命令面 Rollback 的参数映射关系。

@@ -1,0 +1,51 @@
+[2026-10-13] - 哈雷酱
+[VCP百科全书] 插件说明——ParallelSearch（Parallel 网络搜索，免密钥 MCP 搜索）原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-13（第23次上游合并：3f64b61e「Add optional Parallel Search MCP plugin」+ 135b78c7「Preserve MCP content through VCP result unwrapping」+ abf4127b「Enforce overall MCP deadline across initialization notifications」，Merge 2400edce = PR #490，作者 George Pickett / georgeatparallel）
+
+一、插件基本信息（对照 Plugin/ParallelSearch/plugin-manifest.json 实测）
+
+| 字段 | 值 |
+|---|---|
+| name | ParallelSearch |
+| displayName | Parallel 网络搜索 |
+| version | 1.0.0（manifestVersion 1.0.0） |
+| author | **Parallel** |
+| pluginType | synchronous |
+| entryPoint | { type: nodejs, command: "node ParallelSearch.js" } |
+| communication | { protocol: stdio, timeout: 60000 } |
+| description | 通过免费的 Parallel Search MCP 搜索网页和提取页面内容，**无需账号或 API 密钥**。 |
+
+二、文件清单（磁盘实测）
+
+| 文件 | 字节 |
+|---|---|
+| ParallelSearch.js | 5106 |
+| ParallelSearch.test.js | 7049 |
+| plugin-manifest.json | 1991 |
+| README.md | 3598 |
+| package.json | 317 |
+| package-lock.json | 44097 |
+
+三、两条调用命令（manifest 原文摘要）
+
+1. **web_search**：`objective` 为非空搜索目标；`search_queries` 为 JSON 字符串数组（至少一项，**建议 2–3 个相关查询**）。返回来源 URL、标题与摘录。
+   - 匿名搜索使用 **Fast 模式**；免费服务有速率限制。
+   - 可选 `session_id`（最多 100 字符）——同一会话的搜索与提取应复用该值。
+2. **web_fetch**：`urls` 为 JSON HTTP/HTTPS URL 数组（**1–20 项**）；可选 `objective`（最多 200 字符）、`search_queries`、`full_content`（true/false，默认 false）、`session_id`。
+   - 定位：「仅在搜索摘录不足或需要读取具体页面时使用；完整内容可能很大。」
+   - 返回页面摘录及**每个 URL 的提取错误**。
+
+四、与 VCP 既有机制的关系
+
+1. **它是 MCP 通道接入的第三方插件**：作者署名「Parallel」（第三方），上游以「Add optional Parallel Search MCP plugin」为名合入，与既有 VCP 内部插件（VSearch/SerpSearch/TavilySearch/AnySearch）形成**免密钥补充**。
+2. **同批的 MCP 适配修复**：135b78c7「Preserve MCP content through VCP result unwrapping」与 abf4127b「Enforce overall MCP deadline across initialization notifications」——前者修 MCP 内容在 VCP 结果拆包时被丢弃，后者给跨初始化通知加**整体 MCP 截止时间**。这两条说明 VCP 的 MCP 桥接层在本轮被加固。
+3. **不是 JEV 白名单成员**：JEV 能力树（切片 236/251）未收录本插件，仍走传统显式调用。
+
+五、运维提示
+
+- 免密钥意味着**速率限制由上游公共池决定**；批量检索场景需自备退避。
+- `session_id` 是同一会话检索与提取复用同一上下文的关键，跨会话复用它可能污染结果。
+- package-lock.json 存在（44097 字节），属可复现安装；本机未执行安装。
+
+Tag: ParallelSearch, Parallel搜索, MCP插件, 免密钥搜索, web_search, web_fetch, objective, search_queries, session_id, Fast模式, 速率限制, MCP桥接, 第三方插件, PR490

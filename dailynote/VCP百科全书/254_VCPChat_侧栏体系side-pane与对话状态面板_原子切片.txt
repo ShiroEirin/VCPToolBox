@@ -1,0 +1,61 @@
+[2026-10-13] - 哈雷酱
+[VCP百科全书] VCPChat——侧栏体系 side-pane 与对话状态面板 原子切片
+状态：CURRENT_VERIFIED
+最后核验：2026-10-13（第23次上游合并：modules/ui-system 新增 80 文件，侧栏 provider 体系与 Git 状态面板成型）
+
+一句话总结：把右侧栏从「一个面板」升级为「多 provider 可插拔侧栏」，并把**会话本身变成可版本管理的对象**（对话状态面板 = Git 图 + 分支 + 提交 + 推送）。
+
+一、四类侧栏 Provider（磁盘实测，字节）
+
+| Provider | 字节 | 职责推测（按命名与体积） |
+|---|---|---|
+| `side-pane/planDetailSideProvider.js` | 66708 | 计划详情（最大） |
+| `side-pane/modelTrajectorySideProvider.js` | 59117 | 模型轨迹 |
+| `side-pane/browserSideProvider.js` | 32604 | 内嵌浏览器 |
+| `side-pane/codeViewerSideProvider.js` | 22201 | 代码查看器 |
+
+支撑模块：`shared-source.js`(12088)、`conversation-scope.js`(5454)、`project-plan-model.js`(2572)、`side-pane/modelTrajectoryModel.js`(17407)、`side-pane/menu-position.js`(1580)、`side-pane/selection-reference.js`(5018)。
+
+二、对话状态面板（conversation-status-panel/，把会话当仓库管）
+
+主文件 `conversation-status-panel.js` 30044 字节，拆分为 9 个子模块：
+
+| 子模块 | 字节 | 职责 |
+|---|---|---|
+| branch-dialogs.js | 14799 | 分支对话框 |
+| commit-dialog.js | 10469 | 提交对话框 |
+| push-dialog.js | 5778 | 推送对话框 |
+| git-actions.js | 5624 | Git 动作 |
+| git-graph.js | 12124 | Git 图渲染 |
+| sections.js | 13130 | 分区装配 |
+| floating.js | 5939 | 浮动层 |
+| helpers.js / dom.js | 5071 / 2514 | 工具与 DOM |
+
+配套：`git-graph-layout.js`(11500，图层布局算法)、`git-file-diff.js`(7375)、`line-diff.js`(4799)、`message-file-changes.js`(24709，消息内文件变更视图)。
+
+三、代码查看器与 Git 面板（side-pane/ 子目录）
+
+```text
+side-pane/code-viewer/  editor.js(10519) · picker.js(11539) · diff-view.js(3749) · file-read.js(3753) · helpers.js(2382)
+side-pane/git/          git-view.js(30921) · cards.js(14066) · context-menu.js(6405) · diff-model.js(2990)
+side-pane/plan-detail/  node-view.js(11238) · page-navigation.js(3452) · project-picker.js(6101) · topic-activity.js(5997)
+side-pane/              portrait-display.js(4163) · portrait-media.js(4572)
+```
+
+四、其他新增（选列）
+
+- `agent-portrait-settings.js`(19887)：Agent 形象（立绘）设置。
+- `modules/services/`：`agentPortraitImages.js`、`dotGitPath.js`（.git 路径解析）、`gitWatcher.js`（Git 变更监听）、`themePreviewVariables.js`。
+- `modules/ipc/`：`sidePaneIpcPolicy.js`（侧栏 IPC 策略）、`modelTrajectoryHandlers.js`、`browserHandlers.js`、`domainActivator.js`。
+- 测试：`tests/side-pane-*.test.mjs` 系列（commands / controller / deleted-topic / dom-boundary / dormancy / focus / git-ai-scope / git-load-states 等）。
+
+五、本轮删除
+
+`modules/ui-system/vcp-icons.js` 与 `vcp-icons.MIT.txt` 被删除（图标体系改由 `lucide-adapter.js` / `vcp-icons` 替代方案承接，具体替代物未逐行追查）。
+
+六、与既有切片的关系
+
+- 切片 229（VCPUI 组件库 v1）与切片 250（UI 系统 v2 外观引擎）：本切片记录**第三层——侧栏与面板装配**，是一/二层之上的应用面。
+- 与切片 248（ProjectForge）共享 Git 视图能力：ProjectForge 的 git 侧栏与对话状态面板的 Git 图属同主题两处实现，是否共用同一布局算法未逐行核对（两者文件名不同：projectforge-git.js vs git-graph-layout.js）。
+
+Tag: 侧栏, side-pane, provider, conversation-status-panel, Git图, git-graph-layout, 分支, 提交, 推送, code-viewer, modelTrajectory, planDetail, agent-portrait, dotGitPath, gitWatcher, sidePaneIpcPolicy, 第23次上游合并

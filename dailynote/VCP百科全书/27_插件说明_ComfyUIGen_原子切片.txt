@@ -3,6 +3,18 @@
 ⚠️ 当前以 plugin-manifest.json.block 禁用态存在，以下信息基于 .block manifest
 版本：0.3.0 | pluginType: synchronous | protocol: stdio | timeout: 300000ms
 
+【2026-10-13 第23次上游合并：QWEN21 图生图编辑链】（fdcfe04a「新增qwen图生图turbo生态」）：
+- 新增 `workflows/qwen21edit.json`（1844 字节，单图编辑）与 `workflows/qwen21edit2in1.json`（1963 字节，双图联合编辑）；另有 `qwen21文生图.json`（19150）与 `workflows/qwen21gen.json`（2731）同批入库。
+- 新增文档 `docs/QWEN21_EDIT.md`：两条工作流契约——
+  · `workflow: qwen21edit`：单图编辑，必填 `prompt`、`image`。
+  · `workflow: qwen21edit2in1`：双图联合编辑，必填 `prompt`、`image`、`image_2`。
+- **图片入参四类**（文档原文要点）：支持 HTTP/HTTPS 直链或 ComfyUI input 目录中已上传文件名（可含子目录）；URL 由插件宿主下载再经 `/upload/image` 上传；支持 `file://`（VCP PluginManager 先用 resolveFileUrl 追踪至服务器缓存，插件用 fileURLToPath 读取并上传，中文及空格路径受支持）。
+- **明确不支持**：`data:` 与裸本地绝对路径；不支持网络共享 host 的 file URL。
+- **限额**：每图上限 20 MiB，HTTP 下载/上传各 30 秒，至多 3 次重定向；本地按文件句柄限量读取；支持 PNG/JPEG/GIF/WebP（签名检查不等于完整解码校验，最终由 ComfyUI 解码）。
+- **依赖**：需 Node 18+ 的 FormData/Blob（本环境 Node 22），**不新增 npm 依赖**；新增测试 `qwen-edit.test.js`（4827 字节）。
+- 安全边界自述：「内网图床是明确支持的用途；只在受信任的庄园工具环境使用，不作为公开匿名 URL 代理。」
+
+
 【2026-09-04 第16次上游合并】6156f81a "新增anima兼容"（ComfyUIGen.js +90/-19，manifest.block 描述/示例重写）：
 - 新增 **Anima 模型兼容**：上传 `Plugin/ComfyUIGen/AnimaEZGen.json`（Anima 模型元数据）与 `workflows/AnimaEZGen.json`（152行专用工作流），另随附 `workflows/AIEasyTextToImageWithLora.json`（122行 Lora 文生图工作流）
 - ComfyUIGen.js 新增 `configureWorkflowLora(workflow, args)` 函数：**节点式 LoRA 运行时控制**——
@@ -65,4 +77,4 @@ command:「始」ComfyUIGenerateImage「末」,
 prompt:「始」a majestic dragon soaring through cloudy skies at sunset, highly detailed scales, fantasy art style「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: ComfyUIGen, ComfyUIGenerateImage, comfyui-settings, workflow模板, 占位符替换, LoRA注入, seed策略, 图像生成, prompt管线, COMFYUI_BASE_URL, DEBUG_MODE, 0.3.0, .block禁用态, TagMemo V9.1
+Tag: ComfyUIGen, ComfyUIGenerateImage, comfyui-settings, workflow模板, 占位符替换, LoRA注入, seed策略, 图像生成, prompt管线, COMFYUI_BASE_URL, DEBUG_MODE, 0.3.0, .block禁用态, TagMemo V9.1, 第23次上游合并, Qwen21, qwen21edit, qwen21edit2in1, qwen21gen, resolveFileUrl, 20MiB限额

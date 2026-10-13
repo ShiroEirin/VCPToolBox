@@ -2,7 +2,7 @@
 [VCP百科全书] VCPChat 聊天内核深度解耦（modules/chat/ 事件契约 + 流式渲染器 v4）
 
 状态：CURRENT_VERIFIED
-最后核验：2026-09-22（第21次上游合并：a5997449「适配迭代升级」——JEV 被确立为协议身份；前次：9bccdee0 显存泄露修复 / 44db00a6 工具展开简化 / d898fe59 PR #207 / 6dac0fae JEV 工具渲染）
+最后核验：2026-10-13（第23次上游合并：6cc80858「增强消息完成传递链」新增 modules/handlers/interactionCompletion.js 并重写 stream/nonStream handler；modules/renderer 新增 29 文件；前次：a5997449 JEV 协议身份）
 
 【2026-09-22 第21次上游合并：JEV 字段升级为“协议身份”】（a5997449，--numstat 实测）：
 - `modules/renderer/jevToolUse.js` +2/-4：删除“缺少能力花括号或显式工具名即视为畸形、回退旧工具渲染器”的守卫；注释改为「JEV 本身就是协议身份。即使内容是完全自由的自然语言，没有能力花括号或显式工具名，也仍应生成 JEVToolUse；此时 displayName 留空即可」。
@@ -58,5 +58,18 @@ docs/chat-event-producer-consumer-roadmap.md (218行)、chat-kernel-deep-decoupl
 - 话题未读规则：手动未读始终保留；Agent/TopicSponsor 旧标记在用户参与后失效（unreadSource === 'manual' || !hasUserParticipation(history)）。
 - 渲染表面同时服务经典 UI 与 next-ui/interactive-chat-app.js、standalone-chat-app.js 新壳。
 
-关联节点：VCPChat 前端架构(162)、VCP-CDS(216)、Scriptorium 流式文档(222)、启动器体系(225)
-Tag: VCP前端, VCPChat, 聊天内核, 深度解耦, streamCoordinator, chatEventContract, 事件契约, 流式渲染器v4, streamManager, 竞态加固, vchat滚动器, 契约证据, chat-event-graph, 第13次上游合并
+关联节点：VCPChat 前端架构(162)、VCP-CDS(216)、Scriptorium 流式文档(222)、启动器体系(225)、侧栏体系(254)、游戏体系(256)
+
+【2026-10-13 第23次上游合并：消息完成传递链重构（VCPToolBox 侧）】（6cc80858，--stat 实测 9 文件 +720/-292）：
+- 新增 `modules/handlers/interactionCompletion.js`（+64）：`createInteractionCompletion({ res, signal, oneRingModule, oneRingMeta, messages, tavernInteraction })`。注释原文点明判定原则：「**上游整轮有效 + HTTP finish 才提交**；任何失败只结算当前 pending turn。」
+- `Plugin/OneRing/OneRing.js` +27/-?、`OneRing/README.md` +17/-?：新增 `markAIResponseAborted` 语义——未完成时调用它标记中断。
+- `Plugin/VCPTavern/VCPTavern.js` **404 行重写**、`VCPTavern/README.md` +91/-?：酒馆插件与完成链对齐。
+- `modules/chatCompletionHandler.js` +25/-?、`modules/handlers/nonStreamHandler.js` +41/-?、`modules/handlers/streamHandler.js` +78/-?：三条分发路径统一接入完成判定。
+- 新增 `tests/tavernInteractionCompletion.test.js`（+265）与 OnRing 临时契约测试（`tests/oneRingTemporaryContract.test.js`，其契约样本含 `[[OneRing::小克::VCPChat]]` 与 `[[OneRing临时契约::VCPMobile]]`）。
+
+【2026-10-13 第23次上游合并：renderer 层 29 个新文件】
+- 主消息区：`model-picker-popup.js`(26032)、`messenger-presentation.js`(11420)、`floatingSelectionButton.js`(4318)、`composerCommands.js`(3315)、`chat-header-style.js`(3277)。
+- 侧聊（side-chat/）：`attachments.js`(7990)、`branch-rail.js`(13972)、`branch-tree.js`(6190)、`composer-state.js`(2715)、`draft-cache.js`(2762)、`draft-store.js`(2513)、`message-actions.js`(18549)、`message-edit.js`(6003)、`model-picker.js`(2658)、`note-exporter.js`(4179)；配套 `modules/ipc/sideChatHandlers.js`。
+- 说明：侧聊的 branch-tree/branch-rail 与上游 PR #243「side-chat-fractal-branch-tree」（**分形分支树**）同源。
+
+Tag: VCP前端, VCPChat, 聊天内核, 深度解耦, streamCoordinator, chatEventContract, 事件契约, 流式渲染器v4, streamManager, 竞态加固, vchat滚动器, 契约证据, chat-event-graph, 第13次上游合并, 第23次上游合并, interactionCompletion, OneRing, 分形分支树, side-chat
