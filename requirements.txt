@@ -19,6 +19,6 @@ skyfield
 
 win10toast
 
-# YoutubeFetch dependencies
+# YoutubeFetch dependencies (Plugin Store)
 google-api-python-client>=2.169.0
 youtube-transcript-api==1.2.4

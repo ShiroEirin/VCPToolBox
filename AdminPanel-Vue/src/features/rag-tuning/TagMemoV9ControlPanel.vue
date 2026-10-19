@@ -4,16 +4,16 @@
       <div class="v9-console__identity">
         <span class="material-symbols-outlined">deployed_code</span>
         <div>
-          <div class="v9-console__eyebrow">TagMemo V9.1 Production Console</div>
-          <h3>V9.1 单轨生产控制台</h3>
+          <div class="v9-console__eyebrow">Shared Memo Foundation Console</div>
+          <h3>共享 Memo 传播底座控制台</h3>
           <p>
-            V9.1 是唯一生产路线：使用有界传播、入流枢纽校正、软非回溯与
-            归一化有限时域场。LightMemo 对照测试固定比较 KNN、V9.1 与独立 Rerank。
+            RiverMemo 复用有界传播、入流枢纽校正、软非回溯与归一化有限时域场。
+            此处调节共享底座，不提供旧检索读出；LightMemo 对照比较纯 KNN、RiverMemo 与可选 Rerank / JEV。
           </p>
         </div>
       </div>
       <div class="v9-console__status">
-        <UiBadge variant="success">生产：V9.1</UiBadge>
+        <UiBadge variant="success">读出：RiverMemo</UiBadge>
         <UiBadge variant="info">单资产</UiBadge>
         <UiBadge variant="outline">旧版本严格拒绝</UiBadge>
       </div>
@@ -22,8 +22,8 @@
     <div class="v9-console__warning">
       <span class="material-symbols-outlined">verified_user</span>
       <p>
-        资产发布仍采用原子引用替换。显式请求旧版本会返回版本已退役错误；
-        全量自学习成功后会清理 V8.3 预计算状态与兼容增益，不会发生静默回退。
+        统一 Rust MemoRuntime 按代际原子发布资产，AGS / Spike / EPA 及有效更新机制保留。
+        旧检索模式明确拒绝；纯 KNN 仅用于候选、基线及指定业务故障回退。
       </p>
     </div>
 
@@ -34,7 +34,7 @@
             <span class="v9-card__kicker">Production Contract</span>
             <h4>单轨资产与重建语义</h4>
           </div>
-          <UiBadge variant="success">固定 V9.1</UiBadge>
+          <UiBadge variant="success">统一 Rust 资产</UiBadge>
         </header>
 
         <div class="v9-toggle-list">
@@ -42,7 +42,7 @@
             <span class="material-symbols-outlined">filter_1</span>
             <span>
               <strong>唯一活动资产包</strong>
-              <small>查询始终固定到 V9.1 ArtifactBundle，不再构建 V8.3 查询核。</small>
+              <small>RiverMemo 读取统一 MemoRuntime 活动图代际，不另建第二套查询场。</small>
             </span>
           </div>
 
@@ -50,7 +50,7 @@
             <span class="material-symbols-outlined">block</span>
             <span>
               <strong>旧版本确定性拒绝</strong>
-              <small>显式请求 V8.3 会返回 TAGMEMO_VERSION_RETIRED，不允许回退冒充成功。</small>
+              <small>旧检索模式与旧读出已退休，不允许静默映射为其他引擎。</small>
             </span>
           </div>
 
@@ -58,7 +58,7 @@
             <span class="material-symbols-outlined">cleaning_services</span>
             <span>
               <strong>全量训练清理退休资产</strong>
-              <small>新 V9.1 pairwise、残差与传播核发布成功后，再清理旧状态和兼容增益。</small>
+              <small>全量训练重建 AGS 局部残差、全局主题面与传播资产；新代际发布成功后再清理退休状态。</small>
             </span>
           </div>
         </div>
@@ -68,7 +68,7 @@
         <header class="v9-card__header">
           <div>
             <span class="v9-card__kicker">Hub-aware Bounded Kernel</span>
-            <h4>V9.1 有界传播、枢纽校正与虫洞预算</h4>
+            <h4>RiverMemo 有界传播、枢纽校正与虫洞预算</h4>
           </div>
           <UiBadge variant="danger">高敏感</UiBadge>
         </header>
@@ -173,10 +173,21 @@
         <header class="v9-card__header">
           <div>
             <span class="v9-card__kicker">Path Dynamics</span>
-            <h4>V9.1 软非回溯与有限时域场</h4>
+            <h4>RiverMemo 软非回溯与有限时域场</h4>
           </div>
-          <UiBadge variant="warning">V9.1 查询动力学</UiBadge>
+          <UiBadge variant="warning">RiverMemo 查询动力学</UiBadge>
         </header>
+
+        <label class="v9-field">
+          <strong>EPA 域内门控</strong>
+          <select :value="modelValue.epaGateMode || 'backgroundRelative'" @change="emit('update:modelValue', { ...modelValue, epaGateMode: ($event.target as HTMLSelectElement).value })">
+            <option value="backgroundRelative">背景校准相对解释率</option>
+            <option value="relativeLinear">线性相对解释率</option>
+            <option value="relativeSqrt">平方根相对解释率</option>
+            <option value="absolute">绝对解释率</option>
+          </select>
+          <small>查询期生效；推荐背景校准模式，避免高维解释率绝对值过小导致增强锁死。</small>
+        </label>
 
         <div class="v9-budget">
           <div>
@@ -222,20 +233,12 @@
         <header class="v9-card__header">
           <div>
             <span class="v9-card__kicker">Residual Instrument</span>
-            <h4>内生残差与锚增益</h4>
+            <h4>AGS 局部几何与锚增益</h4>
           </div>
           <UiBadge variant="info">JS / Rust 单一真相源</UiBadge>
         </header>
 
-        <label class="v9-field">
-          <span class="v9-field__label">残差算法</span>
-          <UiSelect :model-value="residual.method" @update:model-value="setResidualField('method', $event)">
-            <option value="anchored_gs">Anchored Gram-Schmidt</option>
-            <option value="centroid">Centroid Residual</option>
-            <option value="svd">SVD Residual</option>
-          </UiSelect>
-          <small>实际生效配置由 JS 完整传入 Rust，并纳入 artifact signature。</small>
-        </label>
+        <p>固定采用 Anchored Gram-Schmidt。修改几何或构图参数后，先保存，再手动执行 RiverAGS 全量重训练。</p>
 
         <label class="v9-toggle v9-toggle--standalone">
           <input
@@ -244,8 +247,8 @@
             @change="setResidualBoolean('semanticEnabled', $event)"
           />
           <span>
-            <strong>启用 Pairwise 语义门控</strong>
-            <small>使用当前模型签名下的成对余弦缓存调制残差邻域。</small>
+            <strong>启用内联余弦语义门控</strong>
+            <small>从 SQL 原始向量现场计算余弦，不存储成对相似度表。</small>
           </span>
         </label>
 
@@ -264,7 +267,7 @@
         <div class="v9-anchor">
           <header>
             <div>
-              <strong>V9.1 固定锚增益映射</strong>
+              <strong>RiverMemo 固定锚增益映射</strong>
               <small>原始 residual ratio 保持 [0,1]，工程增益使用固定函数映射。</small>
             </div>
             <code>clip(base + scale × r^γ)</code>
@@ -279,75 +282,34 @@
         </div>
       </article>
 
+
       <article class="v9-card v9-card--geometry">
-        <header class="v9-card__header">
-          <div>
-            <span class="v9-card__kicker">Geometry Auxiliary Readout</span>
-            <h4>四层几何辅助奖励地板</h4>
-          </div>
-          <UiBadge variant="danger">V9.2 高敏感</UiBadge>
-        </header>
-
-        <p class="v9-card__description">
-          辅助轨不会叠加创造新奖励，只在节点场、分类证据与闭合门控同时可信时，
-          补足旧测地奖励尚未达到的有界地板。
-        </p>
-
-        <label class="v9-toggle v9-toggle--standalone">
-          <input
-            type="checkbox"
-            :checked="geometryAuxiliary.enabled"
-            @change="setGeometryBoolean('enabled', $event)"
-          />
-          <span>
-            <strong>启用几何辅助轨</strong>
-            <small>关闭后所有几何地板与精确身份锚点均只保留诊断，不参与排序。</small>
-          </span>
-        </label>
-
+        <header class="v9-card__header"><h4>AGS 全局主题面 / EPA 预计算</h4><UiBadge variant="warning">保存后需重训练</UiBadge></header>
         <div class="v9-geometry-grid">
-          <NumericField label="辅助奖励总上限" description="几何辅助轨单候选最多补足的绝对分数。" :model-value="geometryAuxiliary.maxAuxBonus" :min="0" :max="0.05" :step="0.001" @update:model-value="setGeometryNumber('maxAuxBonus', $event)" />
-          <NumericField label="直接证据地板上限" description="direct 证据可获得的辅助目标地板上限。" :model-value="geometryAuxiliary.directFloorCap" :min="0" :max="0.05" :step="0.001" @update:model-value="setGeometryNumber('directFloorCap', $event)" />
-          <NumericField label="结构证据地板上限" description="structural 连续走廊的辅助目标地板上限。" :model-value="geometryAuxiliary.structuralFloorCap" :min="0" :max="0.05" :step="0.001" @update:model-value="setGeometryNumber('structuralFloorCap', $event)" />
-          <NumericField label="主题证据地板上限" description="thematic 主题接触的辅助目标地板上限。" :model-value="geometryAuxiliary.thematicFloorCap" :min="0" :max="0.05" :step="0.001" @update:model-value="setGeometryNumber('thematicFloorCap', $event)" />
-          <NumericField label="最小融合几何分" description="四层融合分达到该值才允许辅助补差。" :model-value="geometryAuxiliary.minFusedScore" :min="0" :max="1" :step="0.01" @update:model-value="setGeometryNumber('minFusedScore', $event)" />
-          <NumericField label="最小闭合分" description="查询、候选与 Tag→Chunk 闭合的综合门槛。" :model-value="geometryAuxiliary.minClosureScore" :min="0" :max="1" :step="0.01" @update:model-value="setGeometryNumber('minClosureScore', $event)" />
-          <NumericField label="最小分类证据" description="当前 direct、structural 或 thematic 通道的最低证据。" :model-value="geometryAuxiliary.minClassEvidence" :min="0" :max="1" :step="0.01" @update:model-value="setGeometryNumber('minClassEvidence', $event)" />
-          <NumericField label="地板可靠性指数" description="越大越压制低可靠候选，仅让高可靠证据接近地板上限。" :model-value="geometryAuxiliary.floorExponent" :min="0.5" :max="4" :step="0.05" @update:model-value="setGeometryNumber('floorExponent', $event)" />
-        </div>
-
-        <div class="v9-anchor">
-          <header>
-            <div>
-              <strong>Exact Identity Anchor</strong>
-              <small>只保护来自 query seed/core 的高势能精确 Tag 接触；公共 Tag 与 emergent 节点不能触发。</small>
-            </div>
-            <UiBadge variant="warning">精确身份保护</UiBadge>
-          </header>
-
-          <label class="v9-toggle v9-toggle--standalone">
-            <input
-              type="checkbox"
-              :checked="identityAnchor.enabled"
-              :disabled="!geometryAuxiliary.enabled"
-              @change="setIdentityBoolean('enabled', $event)"
-            />
-            <span>
-              <strong>启用精确身份锚点</strong>
-              <small>同时受几何辅助总开关、精确命中、特异性和闭合门槛约束。</small>
-            </span>
+          <label class="v9-field">
+            <strong>候选方向</strong>
+            <select :value="globalGeometry.candidateMode || 'star'" @change="setGeometryField('global.candidateMode', ($event.target as HTMLSelectElement).value)">
+              <option value="star">星团混合</option><option value="anchor">单锚方向</option>
+            </select>
           </label>
-
-          <div class="v9-geometry-grid">
-            <NumericField label="最低查询势能" :model-value="identityAnchor.minPotential" :min="0" :max="1" :step="0.01" @update:model-value="setIdentityNumber('minPotential', $event)" />
-            <NumericField label="最低 Tag 特异性" :model-value="identityAnchor.minSpecificity" :min="0" :max="1" :step="0.01" @update:model-value="setIdentityNumber('minSpecificity', $event)" />
-            <NumericField label="最低 Tag→Chunk 闭合" :model-value="identityAnchor.minTagChunkClosure" :min="0" :max="1" :step="0.01" @update:model-value="setIdentityNumber('minTagChunkClosure', $event)" />
-            <NumericField label="最低身份锚强度" :model-value="identityAnchor.minStrength" :min="0" :max="1" :step="0.01" @update:model-value="setIdentityNumber('minStrength', $event)" />
-            <NumericField label="身份地板上限" :model-value="identityAnchor.floorCap" :min="0" :max="0.05" :step="0.001" @update:model-value="setIdentityNumber('floorCap', $event)" />
-            <NumericField label="身份可靠性指数" :model-value="identityAnchor.floorExponent" :min="0.5" :max="4" :step="0.05" @update:model-value="setIdentityNumber('floorExponent', $event)" />
-          </div>
+          <label class="v9-field">
+            <strong>候选先验</strong>
+            <select :value="globalGeometry.priorMode || 'support'" @change="setGeometryField('global.priorMode', ($event.target as HTMLSelectElement).value)">
+              <option value="support">支持度</option><option value="explained">支持度 × 解释率</option><option value="residual">支持度 × 残差</option>
+            </select>
+          </label>
+          <template v-for="field in globalFields" :key="field.key">
+            <NumericField
+              v-if="!(field.key === 'residualExponent' && (globalGeometry.priorMode || 'support') === 'support') && !(['starNeighbors', 'starMix'].includes(field.key) && globalGeometry.candidateMode === 'anchor')"
+              :label="field.label" :model-value="numberValue(globalGeometry[field.key], field.fallback)"
+              :min="field.min" :max="field.max" :step="field.step"
+              @update:model-value="setGeometryField(`global.${field.key}`, $event)"
+            />
+          </template>
         </div>
       </article>
+
+
     </div>
   </section>
 </template>
@@ -356,7 +318,6 @@
 import { computed } from "vue";
 import type { ParamGroup, ParamValue } from "@/api";
 import UiBadge from "@/components/ui/UiBadge.vue";
-import UiSelect from "@/components/ui/UiSelect.vue";
 import NumericField from "./TagMemoV9NumericField.vue";
 
 type LooseRecord = Record<string, ParamValue>;
@@ -392,9 +353,13 @@ const spikeRouting = computed(() => {
   };
 });
 const residual = computed(() => {
-  const raw = asRecord(props.modelValue.intrinsicResidual);
+  const local = asRecord(asRecord(props.modelValue.geometry).local);
+  const gate = asRecord(local.semanticGate);
+  const anchor = asRecord(local.anchorGain);
+  const raw: LooseRecord = { ...local, semanticEnabled: gate.enabled, semanticPeak: gate.peak, semanticSigma: gate.sigma,
+    semanticFloor: gate.floor, semanticHardFloor: gate.hardFloor, v9AnchorBase: anchor.base,
+    v9AnchorScale: anchor.scale, v9AnchorGamma: anchor.gamma, v9AnchorMin: anchor.min, v9AnchorMax: anchor.max };
   return {
-    method: stringValue(raw.method, "anchored_gs"),
     maxNeighbors: numberValue(raw.maxNeighbors, 48),
     maxBasis: numberValue(raw.maxBasis, 4),
     minNeighbors: numberValue(raw.minNeighbors, 3),
@@ -412,36 +377,6 @@ const residual = computed(() => {
     v9AnchorMax: numberValue(raw.v9AnchorMax, 2),
   };
 });
-const geometryAuxiliary = computed(() => {
-  const geodesic = asRecord(props.modelValue.geodesicRerank);
-  const raw = asRecord(geodesic.geometryAuxiliary);
-  return {
-    enabled: booleanValue(raw.enabled, false),
-    maxAuxBonus: numberValue(raw.maxAuxBonus, 0.018),
-    directFloorCap: numberValue(raw.directFloorCap, 0.018),
-    structuralFloorCap: numberValue(raw.structuralFloorCap, 0.012),
-    thematicFloorCap: numberValue(raw.thematicFloorCap, 0.006),
-    minFusedScore: numberValue(raw.minFusedScore, 0.12),
-    minClosureScore: numberValue(raw.minClosureScore, 0.55),
-    minClassEvidence: numberValue(raw.minClassEvidence, 0.1),
-    floorExponent: numberValue(raw.floorExponent, 1.5),
-  };
-});
-const identityAnchor = computed(() => {
-  const geodesic = asRecord(props.modelValue.geodesicRerank);
-  const geometry = asRecord(geodesic.geometryAuxiliary);
-  const raw = asRecord(geometry.identityAnchor);
-  return {
-    enabled: booleanValue(raw.enabled, false),
-    minPotential: numberValue(raw.minPotential, 0.8),
-    minSpecificity: numberValue(raw.minSpecificity, 0.55),
-    minTagChunkClosure: numberValue(raw.minTagChunkClosure, 0.35),
-    minStrength: numberValue(raw.minStrength, 0.55),
-    floorCap: numberValue(raw.floorCap, 0.018),
-    floorExponent: numberValue(raw.floorExponent, 1.25),
-  };
-});
-
 function asRecord(value: ParamValue | undefined): LooseRecord {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as LooseRecord
@@ -452,9 +387,6 @@ function numberValue(value: ParamValue | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function stringValue(value: ParamValue | undefined, fallback: string): string {
-  return typeof value === "string" ? value : fallback;
-}
 
 function booleanValue(value: ParamValue | undefined, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
@@ -480,65 +412,52 @@ function setSpikeNumber(key: string, value: number): void {
   updateSection("spikeRouting", key, value);
 }
 
-function setResidualField(key: string, value: string | number): void {
-  updateSection("intrinsicResidual", key, String(value));
+function setGeometryField(path: string, value: ParamValue): void {
+  const next = JSON.parse(JSON.stringify(props.modelValue)) as ParamGroup;
+  const geometry = asRecord(next.geometry);
+  next.geometry = geometry;
+  const parts = path.split(".");
+  let cursor = geometry;
+  for (const part of parts.slice(0, -1)) {
+    cursor[part] = { ...asRecord(cursor[part]) };
+    cursor = cursor[part] as LooseRecord;
+  }
+  cursor[parts[parts.length - 1]] = value;
+  emit("update:modelValue", next);
 }
-
+function residualPath(key: string): string {
+  const paths: Record<string, string> = {
+    semanticEnabled: "semanticGate.enabled", semanticPeak: "semanticGate.peak",
+    semanticSigma: "semanticGate.sigma", semanticFloor: "semanticGate.floor",
+    semanticHardFloor: "semanticGate.hardFloor", v9AnchorBase: "anchorGain.base",
+    v9AnchorScale: "anchorGain.scale", v9AnchorGamma: "anchorGain.gamma",
+    v9AnchorMin: "anchorGain.min", v9AnchorMax: "anchorGain.max",
+  };
+  return `local.${paths[key] || key}`;
+}
 function setResidualNumber(key: string, value: number): void {
-  updateSection("intrinsicResidual", key, value);
+  setGeometryField(residualPath(key), value);
 }
-
 function setResidualBoolean(key: string, event: Event): void {
-  updateSection("intrinsicResidual", key, (event.target as HTMLInputElement).checked);
+  setGeometryField(residualPath(key), (event.target as HTMLInputElement).checked);
 }
-
-function updateGeometrySection(key: string, value: ParamValue): void {
-  const geodesic = asRecord(props.modelValue.geodesicRerank);
-  emit("update:modelValue", {
-    ...props.modelValue,
-    geodesicRerank: {
-      ...geodesic,
-      geometryAuxiliary: {
-        ...asRecord(geodesic.geometryAuxiliary),
-        [key]: value,
-      },
-    },
-  });
-}
-
-function updateIdentitySection(key: string, value: ParamValue): void {
-  const geodesic = asRecord(props.modelValue.geodesicRerank);
-  const geometry = asRecord(geodesic.geometryAuxiliary);
-  emit("update:modelValue", {
-    ...props.modelValue,
-    geodesicRerank: {
-      ...geodesic,
-      geometryAuxiliary: {
-        ...geometry,
-        identityAnchor: {
-          ...asRecord(geometry.identityAnchor),
-          [key]: value,
-        },
-      },
-    },
-  });
-}
-
-function setGeometryNumber(key: string, value: number): void {
-  updateGeometrySection(key, value);
-}
-
-function setGeometryBoolean(key: string, event: Event): void {
-  updateGeometrySection(key, (event.target as HTMLInputElement).checked);
-}
-
-function setIdentityNumber(key: string, value: number): void {
-  updateIdentitySection(key, value);
-}
-
-function setIdentityBoolean(key: string, event: Event): void {
-  updateIdentitySection(key, (event.target as HTMLInputElement).checked);
-}
+const globalGeometry = computed(() => asRecord(asRecord(props.modelValue.geometry).global));
+const globalFields = [
+  ["candidatePool", "候选池上限", 512, 1, 4096, 1],
+  ["starNeighbors", "星团邻居数", 48, 1, 256, 1],
+  ["starMix", "星团混合比例", 0.8, 0, 1, 0.01],
+  ["minSupport", "最少支持度", 3, 0, 1000, 1],
+  ["supportExponent", "支持度指数", 0.65, 0, 4, 0.01],
+  ["residualExponent", "解释/残差先验指数", 0.35, 0, 4, 0.01],
+  ["kMax", "最大主题面数", 32, 1, 128, 1],
+  ["kSem", "语义前缀面数", 8, 1, 128, 1],
+  ["epsilon", "剩余能量容差", 0.1, 0, 1, 0.001],
+  ["kneeDelta", "覆盖增量停止阈值", 0, 0, 1, 0.001],
+  ["minGain", "最小全局增益", 0.02, 0, 1, 0.001],
+].map(([key, label, fallback, min, max, step]) => ({
+  key: String(key), label: String(label), fallback: Number(fallback),
+  min: Number(min), max: Number(max), step: Number(step),
+}));
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));

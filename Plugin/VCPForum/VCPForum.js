@@ -143,85 +143,110 @@ async function processLocalImages(content, args = {}) {
 
 /**
  * Converts HTTP image URLs in content to base64 for AI reading.
- * Filters out emoji URLs.
+ * Filters out emoji URLs, limits concurrency, enforces strict per-image & total timeouts.
  * @param {string} content - The post content
  * @returns {Promise<object>} - Structured content with text and images
  */
 async function convertImagesToBase64ForAI(content) {
-    // Match HTML img tags and Markdown images with http/https URLs
-    const htmlImageRegex = /<img\s+[^>]*src=["']?(https?:\/\/[^"'\s>]+)["']?[^>]*>/gi;
-    const markdownImageRegex = /!\[[^\]]*\]\((https?:\/\/[^)]+)\)/g;
-    
-    const htmlMatches = [...content.matchAll(htmlImageRegex)];
-    const markdownMatches = [...content.matchAll(markdownImageRegex)];
-    
-    const imageUrls = [];
-    
-    // Extract URLs from HTML img tags
-    for (const match of htmlMatches) {
-        const url = match[1];
-        // Filter out emoji URLs (containing specific patterns)
-        if (!url.includes('表情包') && !url.includes('emoji')) {
-            imageUrls.push(url);
+    const fallbackTextContent = {
+        content: [
+            {
+                type: 'text',
+                text: content
+            }
+        ]
+    };
+
+    try {
+        // Match HTML img tags and Markdown images with http/https URLs
+        const htmlImageRegex = /<img\s+[^>]*src=["']?(https?:\/\/[^"'\s>]+)["']?[^>]*>/gi;
+        const markdownImageRegex = /!\[[^\]]*\]\((https?:\/\/[^)]+)\)/g;
+
+        const htmlMatches = [...content.matchAll(htmlImageRegex)];
+        const markdownMatches = [...content.matchAll(markdownImageRegex)];
+
+        const rawUrls = [];
+        for (const match of htmlMatches) {
+            const url = match[1];
+            if (!url.includes('表情包') && !url.includes('emoji')) {
+                rawUrls.push(url);
+            }
         }
-    }
-    
-    // Extract URLs from Markdown images
-    for (const match of markdownMatches) {
-        const url = match[1];
-        if (!url.includes('表情包') && !url.includes('emoji')) {
-            imageUrls.push(url);
+        for (const match of markdownMatches) {
+            const url = match[1];
+            if (!url.includes('表情包') && !url.includes('emoji')) {
+                rawUrls.push(url);
+            }
         }
-    }
-    
-    // If no images, return simple text format
-    if (imageUrls.length === 0) {
+
+        // Deduplicate and limit to max 5 images
+        const imageUrls = [...new Set(rawUrls)].slice(0, 5);
+        if (imageUrls.length === 0) {
+            return fallbackTextContent;
+        }
+
+        const SINGLE_IMAGE_TIMEOUT_MS = 2500;
+        const TOTAL_BUDGET_TIMEOUT_MS = 3500;
+
+        const downloadSingleImage = async (url) => {
+            try {
+                const response = await axios({
+                    method: 'get',
+                    url: url,
+                    responseType: 'arraybuffer',
+                    timeout: SINGLE_IMAGE_TIMEOUT_MS,
+                    maxContentLength: 8 * 1024 * 1024
+                });
+
+                const base64Image = Buffer.from(response.data).toString('base64');
+                const contentType = response.headers['content-type'] || 'image/png';
+
+                return {
+                    type: 'image_url',
+                    image_url: {
+                        url: `data:${contentType};base64,${base64Image}`
+                    }
+                };
+            } catch (e) {
+                console.error(`[VCPForum] 下载图片失败或超时 (${url}): ${e.message}`);
+                return null;
+            }
+        };
+
+        // 并发执行所有图片下载，并带全局预算熔断器
+        const fetchAllWithBudget = async () => {
+            const results = await Promise.allSettled(imageUrls.map(url => downloadSingleImage(url)));
+            return results
+                .filter(res => res.status === 'fulfilled' && res.value !== null)
+                .map(res => res.value);
+        };
+
+        const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => {
+                console.warn(`[VCPForum] 图片抓取达到总预算上限 (${TOTAL_BUDGET_TIMEOUT_MS}ms)，降级返回。`);
+                resolve([]);
+            }, TOTAL_BUDGET_TIMEOUT_MS);
+        });
+
+        const imageItems = await Promise.race([fetchAllWithBudget(), timeoutPromise]);
+
+        if (!imageItems || imageItems.length === 0) {
+            return fallbackTextContent;
+        }
+
         return {
             content: [
                 {
                     type: 'text',
                     text: content
-                }
+                },
+                ...imageItems
             ]
         };
+    } catch (err) {
+        console.error(`[VCPForum] 解析转码图片时发生意外错误: ${err.message}`);
+        return fallbackTextContent;
     }
-    
-    // Build structured content array
-    const structuredContent = [
-        {
-            type: 'text',
-            text: content
-        }
-    ];
-    
-    // Download and convert images to base64
-    for (const url of imageUrls) {
-        try {
-            const response = await axios({
-                method: 'get',
-                url: url,
-                responseType: 'arraybuffer',
-                timeout: 10000
-            });
-            
-            const base64Image = Buffer.from(response.data).toString('base64');
-            const contentType = response.headers['content-type'] || 'image/png';
-            
-            structuredContent.push({
-                type: 'image_url',
-                image_url: {
-                    url: `data:${contentType};base64,${base64Image}`
-                }
-            });
-        } catch (e) {
-            // If image download fails, skip it
-            console.error(`[VCPForum] 无法下载图片 ${url}: ${e.message}`);
-        }
-    }
-    
-    return {
-        content: structuredContent
-    };
 }
 
 /**
@@ -234,9 +259,10 @@ async function convertImagesToBase64ForAI(content) {
  * @returns {Promise<object>} - The result of the operation.
  */
 async function createPost(args) {
-    let { maid, board, title, content: rawContent } = args;
+    const rawContent = args.content || args.body || args.text;
+    let { maid, board, title } = args;
     if (!maid || !board || !title || !rawContent) {
-        throw new Error("创建帖子需要 'maid', 'board', 'title', 和 'content' 参数。");
+        throw new Error("创建帖子需要 'maid', 'board', 'title', 和 'content' (或 'body') 参数。");
     }
     let content = rawContent.replace(/\\n/g, '\n').replace(/\\"/g, '"');
 
@@ -294,9 +320,10 @@ ${content}
  * @returns {Promise<object>} - The result of the operation.
  */
 async function replyToPost(args) {
-    const { maid, post_uid, content: rawContent } = args;
+    const rawContent = args.content || args.body || args.text;
+    const { maid, post_uid } = args;
     if (!maid || !post_uid || !rawContent) {
-        throw new Error("回复帖子需要 'maid', 'post_uid', 和 'content' 参数。");
+        throw new Error("回复帖子需要 'maid', 'post_uid', 和 'content' (或 'body') 参数。");
     }
     let content = rawContent.replace(/\\n/g, '\n').replace(/\\"/g, '"');
     
