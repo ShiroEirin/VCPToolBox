@@ -116,4 +116,12 @@ modules/knowledgeBase/
 - **EmbeddingUtils 新增 dimensions**：请求体强制携带 `VECTORDB_DIMENSION`，剥离对大模型默认维度的依赖。详见切片 246。
 - 本切片第一节描述的目录结构（14 个文件）仍成立；indexRepository 已从 341 行大幅扩张（本轮 +468/-99）。
 
-Tag: knowledgeBase, databaseCoordinator, searchService, tagConsistencyService, sqliteHealthManager, schemaManager, ingestionPipeline, indexRepository, fileWatcher, memoryProfiler, TagMemo V9.1, 模块化架构, Owner模式, 第22次上游合并, 分代基线, 进度心跳
+六、2026-10-19 第24次上游合并（PR #504 KBM 单 SQL 运行时）
+
+- 新增隔离 crate `rust-vexus-lite/crates/vcp-tdb-index/`：lib.rs 原文「SQL remains authoritative; this crate owns derived retrieval state only」，上游 database / memtable / WAL / query language 全部排除。详见切片 257。
+- `modules/knowledgeBase/fileWatcher.js`：`initialScan` 硬置 `false`，启动只留 JS 侧单次对账（`_reconcileAfterOverflow()`），消除 Rust/JS 双扫描背压竞态。详见切片 258。
+- 新增 `modules/knowledgeBase/memoConfig.js`（119 行）：RiverMemo 生产契约，退役实验开关被有意移除；`AdminPanel-Vue/.../metadata.ts` 同步 −661 行，`rag_params.json` 约 −211 行。详见切片 259。
+- `ingestionPipeline.js` +23 行（提交前快照诊断）、`rust-vexus-lite/src/schema.rs` +95 行（Windows 兼容）。
+- 本轮新增测试面：kbmNativeLifecycle / kbmNativeKnnProxy / kbmTaskDrain / kbmWatcherBackpressure / kbmWatcherReconciliation / kbmOfflineWriteSafety / kbmPrecommitSnapshotDiagnostics / kbmDeadCodeCleanup / kbmAuditRegression / kbmConfigurationCompatibility / tdbNativeAcceptance / tdbMemoryProfile / tdbRetrievalQuality / tdbKnowledgeWatcher / tdbLegacyDimensionCompatibility / sqlAuthoritativeRoutingQuality / ragNativeChainAudit / lightMemoIdleLifecycle / memoSingleTrack / memoRefreshPolicy / memoConfigCleanup 共 21 个。
+
+Tag: knowledgeBase, databaseCoordinator, searchService, tagConsistencyService, sqliteHealthManager, schemaManager, ingestionPipeline, indexRepository, fileWatcher, memoryProfiler, TagMemo V9.1, 模块化架构, Owner模式, 第22次上游合并, 分代基线, 进度心跳, 第24次上游合并, KBM单SQL运行时, vcp-tdb-index, 负压竞态, memoConfig

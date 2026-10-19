@@ -84,5 +84,13 @@ TagMemoV10Engine 是 VCP 记忆系统的 V10 Alpha 实验引擎完整实现。�
 - experimentArms.js 等旧 JS 实验构型保留但不在 V3 生产路径中
 - V10 的 Artifact 系统被 RiverMemo 复用为查询溯源和不可变资产的基础设施
 
-关联节点：RiverMemoEngine与TopologyV3(207), rust-vexus-lite记忆管线(209), RiverMemo拓扑理论(210), TagMemoEngine统一构型(198), LightMemo(59), TagMemo V10 Alpha(206)
-Tag: TagMemoV10Engine, v10_alpha, v10.alpha.1, 实验引擎, immutable, provenance, artifact, 双条件算子, 双尺度场, DSTC, 直接锚点, experimentArms, TagMemo V9.1, 2026-07-24
+九、2026-10-19 第24次上游合并：参数内联逻辑删除与面板契约化（54277fc0）
+
+- `TagMemoV10Engine.js` −163 行：实验期把参数表内联在引擎里的逻辑被删除，改为从 `modules/knowledgeBase/memoConfig.js`（119 行，本轮新增）读取生产契约。
+- `TagMemoEngine.js` 仅 2 行改动；`RiverMemoEngine.js` 43 行改为消费同一契约；`KnowledgeBaseManager.js` +10 行负责装配。
+- `AdminPanel-Vue/src/features/rag-tuning/metadata.ts` −661 行（本地参数表清空）、`TagMemoV9ControlPanel.vue` +119 行（改为渲染后端契约）、`routes/admin/rag.js` 13 行（暴露契约）、`rag_params.json` 约 −211 行（退役开关清出）。
+- `memoConfig.js` 头部原文：「The production RiverMemo contract. Fixed algorithms and retired laboratory switches are deliberately absent: retaining them would imply working controls.」——已固化算法与退役实验开关被有意移除。
+- 影响：V10 Alpha 的实验旋钮从此不在生产面板暴露；如需重启实验，必须单独引入契约外的旁路，不能靠旧配置项复活。详见切片 259。
+
+关联节点：RiverMemoEngine与TopologyV3(207), rust-vexus-lite记忆管线(209), RiverMemo拓扑理论(210), TagMemoEngine统一构型(198), LightMemo(59), TagMemo V10 Alpha(206), RiverMemo生产契约(259)
+Tag: TagMemoV10Engine, v10_alpha, v10.alpha.1, 实验引擎, immutable, provenance, artifact, 双条件算子, 双尺度场, DSTC, 直接锚点, experimentArms, TagMemo V9.1, 2026-07-24, 第24次上游合并, memoConfig, 生产契约, 参数契约化

@@ -56,4 +56,11 @@ CREATE TABLE IF NOT EXISTS chunk_index_baseline_entries (  -- 槽内含有的 Ch
 - 切片 230（知识库派生计算鲁棒性）：同属知识库鲁棒性主题，但 230 管「派生计算失效语义」，本切片管「索引持久化与回放」。
 - 切片 209/212（rust-vexus-lite 记忆管线 / 原生 Artifact 构建器）：基线文件是 .usearch 制品，与 Rust 侧产物管理面相邻但职责不同。
 
-Tag: 知识库, 分代基线, generational, 双槽, slot, usearch, 对称差分, chunk_index_baselines, chunk_index_baseline_entries, indexRepository, schemaManager, chunkIndexPersistenceMode, model_sig
+六、2026-10-19 第24次上游合并：代际处理器重构与启动单点对账
+
+- `bff029ee 修复代际处理器并重构`：30 文件 +1584/−291，`vexus-lite.win32-x64-msvc.node` 10,320,384B → 10,481,664B；`tests/tagIndexGenerationalBaseline.test.js` +84 行、`tests/diaryIndexAtomicDelta.test.js` 微调、新增 `tests/sqlAuthoritativeRoutingQuality.test.js`（130 行）与 `tests/thoughtClusterPersistence.test.js`（90 行）。
+- `10c47de3 核心文件负压竟态fix1`：`fileWatcher.js` 把 `initialScan` 硬置 `false`，启动阶段只保留 JS 侧 `_reconcileAfterOverflow()` 一次对账（并携带已索引路径做缺失检测），Rust 侧原生扫描不再并发；真实溢出恢复仍在 `_handleRustEvent()` 中独立启用。详见切片 258。
+- 与分代基线的直接关系：启动不再有「原生扫描 + JS 对账」双写，基线的对称差分回放不会与初始扫描争抢同一批 Chunk。
+- 检索内核同批换芯（PR #504），`chunk_index_baselines` 仍是持久化层唯一真源，检索侧只消费派生状态。详见切片 257。
+
+Tag: 知识库, 分代基线, generational, 双槽, slot, usearch, 对称差分, chunk_index_baselines, chunk_index_baseline_entries, indexRepository, schemaManager, chunkIndexPersistenceMode, model_sig, 第24次上游合并, 代际处理器重构, initialScan, 启动对账

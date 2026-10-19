@@ -94,3 +94,16 @@ Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology
 - **Windows FlushFileBuffers 只读句柄修复**：Windows 的 FlushFileBuffers 要求句柄具备写权限，只读句柄即使文件可读也会返回 ERROR_ACCESS_DENIED；usearch 完成临时文件写入后，此处重新打开同一文件执行持久化屏障（不修改内容）。
 - **normalized_sqlite_path 路径规范化**：`std::fs::canonicalize` 规范化 SQLite 路径，失败时 fallback 原始路径，统一替换反斜杠为正斜杠——避免 Windows 路径格式不一致导致的 SQLite 连接问题。
 - 新增 `std::sync::{Arc, LazyLock, Mutex, RwLock}` 并发原语支持。
+
+十、2026-10-19 第24次上游合并：检索内核隔离（PR #504）
+
+- 新增 workspace crate `rust-vexus-lite/crates/vcp-tdb-index/`，lib.rs 自我定位为「Isolated TriviumDB 0.8.9 retrieval kernels」，并明确 `SQL remains authoritative; this crate owns derived retrieval state only`，上游 database / memtable / WAL / query language 被排除。
+- crate 导出面：`asset` / `engine` / `vector` / `index::{bq, quiver}`；对外类型 `QuIVer`、`QuIVerConfig`、`QuIVerSearchConfig`、`VectorType`。
+- 体量：`index/quiver.rs` 151,678B、`index/quiver/corrected_sm.rs` 74,275B、`index/bq.rs` 52,676B、`corrected_sm/dynamic.rs` 38,516B、`corrected_sm/build.rs` 15,750B。
+- 主 crate 侧：`knowledge_runtime.rs` 增长至 180,751B（统一运行时，含 `GlobalTagSearchTask` / `publication_gate` / `task_lifecycle` / `storage`）；`global_chunks.rs` 25,725B、`light_memo.rs` 19,634B（P1-4 LightMemo 原生接线，+316 行）；`storage.rs` 49,461B（tdb 换芯 +75 行）；`schema.rs` 36,384B。
+- 任务化：`index_lifecycle.rs`（88,204B）与 `ingestion.rs`（113,633B）的检查点、恢复、摄取提交全部改为 `TrackedTask` / `TaskLifecycle` 追踪，原生侧不再同步阻塞事件循环。
+- 维度兼容回补（6df3d5e2）：`asset.rs` / `engine.rs` / `index/bq.rs`（+38 行）/ `index_source.rs`，新增 `tests/tdbLegacyDimensionCompatibility.test.js`（125 行），4096 维旧库不再被判非法。
+- 原生产物变化：`vexus-lite.win32-x64-msvc.node` 9,949,184B → 10,481,664B；`vexus-lite.linux-x64-gnu.node` 4,635,352B → 9,502,736B（bcfbd7af 补构建）。
+- 详见切片 257（KBM 单 SQL 运行时与 TDB 换芯）、258（负压协调与启动对账）。
+
+Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, 第24次上游合并, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容

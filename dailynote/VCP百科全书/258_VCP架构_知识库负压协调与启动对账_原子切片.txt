@@ -1,0 +1,79 @@
+[2026-10-19] - 哈雷酱
+[VCP百科全书] VCP架构——知识库负压协调与启动单次对账 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-19（第24次上游合并：10c47de3「核心文件负压竟态fix1」、f446bd0f「重要win兼容fix补丁」、7e4b105c「kbm(P2-9): block obsolete direct database write tools」、8ce5d9f0「kbm(P4-4): rebuild native binding with verified PA fixes」）
+适用范围：`modules/knowledgeBase/fileWatcher.js`、`modules/knowledgeBase/ingestionPipeline.js`、`tests/kbm*.test.js` 当前源码
+
+一、解决的矛盾
+
+启动阶段原本有两条扫描来源：Rust 侧 watcher 的 `initialScan`，和 JS 侧的 `_reconcileAfterOverflow()`。两者同时跑，会对同一批文件重复派发 add 事件，在高负载时形成「自己压自己」的背压竞态。
+
+二、改动：启动只留一次对账（fileWatcher.js，原文注释）
+
+```js
+// Startup uses the single reconciliation below, including indexed
+// paths for missing-file detection. Do not also launch a native scan.
+initialScan: false,
+```
+
+对应的 JS 侧：
+
+```js
+// One authoritative startup scan, with the indexed-path snapshot.
+// Real overflow recovery remains independently enabled.
+if (config.fullScanOnStartup !== false) {
+    void this._reconcileAfterOverflow();
+}
+```
+
+要点：`initialScan` 被硬置为 `false`，不再由 `config.fullScanOnStartup` 驱动；开关语义整体上移到 JS 单点。真实的溢出恢复（`_handleRustEvent()` 内）保持独立可用，不受该开关影响。
+
+三、Windows 兼容与预提交快照（f446bd0f）
+
+| 文件 | 变更 |
+|---|---|
+| `modules/knowledgeBase/ingestionPipeline.js` | +23 行 |
+| `rust-vexus-lite/src/schema.rs` | +95 行 |
+| `tests/kbmPrecommitSnapshotDiagnostics.test.js` | 新增 87 行 |
+
+含意：摄取管道在提交前先做快照诊断，`schema.rs` 同步补充对应结构，Windows 下的路径/句柄差异不再直接表现为写入失败。
+
+四、旧直写通道封堵（7e4b105c，P2-9）
+
+`kbm(P2-9): block obsolete direct database write tools` —— 已废弃的「直接写数据库」工具被显式阻断，写入必须走统一运行时，避免绕过负压队列。
+
+五、原生绑定重建（8ce5d9f0，P4-4）
+
+`kbm(P4-4): rebuild native binding with verified PA fixes` —— 在确认 PA（预提交/原子）修正后重建原生绑定，与 257 的换芯产物同批。
+
+六、负压与一致性测试面
+
+| 测试文件 | 覆盖点 |
+|---|---|
+| `tests/kbmWatcherBackpressure.test.js` | 129 行，watcher 背压 |
+| `tests/kbmWatcherReconciliation.test.js` | 启动对账幂等 |
+| `tests/kbmTaskDrain.test.js` | 任务排空 |
+| `tests/kbmOfflineWriteSafety.test.js` | 离线写入安全 |
+| `tests/kbmPrecommitSnapshotDiagnostics.test.js` | 提交前快照诊断 |
+| `tests/kbmNativeLifecycle.test.js` | 原生生命周期 |
+| `tests/kbmNativeKnnProxy.test.js` | 原生 KNN 代理 |
+| `tests/kbmDeadCodeCleanup.test.js` | 死代码清理回归 |
+| `tests/kbmAuditRegression.test.js` | 审计回归 |
+| `tests/kbmConfigurationCompatibility.test.js` | 配置兼容 |
+| `tests/lightMemoIdleLifecycle.test.js` | LightMemo 空闲生命周期 |
+| `tests/memoSingleTrack.test.js` | 单轨约束 |
+| `tests/memoRefreshPolicy.test.js` | 刷新策略 |
+
+七、与既有切片的关系
+
+- 245（协调器 AB-BA 死锁修复与进度心跳）：245 管「锁等待与停滞判定」，本篇管「事件源重复与排空」，两者叠加才是完整的并发面。
+- 244（分代双槽基线）：分代基线解决重建代价，本篇解决启动期重复扫描。
+- 257（KBM 单 SQL 运行时与 TDB 换芯）：同一批 P0/P1/P2/P4 施工的不同侧面。
+
+八、风险
+
+1. `initialScan` 硬置 false 后，若 `_reconcileAfterOverflow()` 自身失败，启动将没有第二道兜底扫描。部署时若发现启动后索引缺失，应优先查看 JS 侧对账日志而非 Rust watcher。
+2. `fullScanOnStartup` 语义已上移，旧配置项仍被读取但不再控制 Rust 侧行为，属于「保留键名、收窄语义」。
+
+关联章节：244 / 245 / 246 / 257 / 259

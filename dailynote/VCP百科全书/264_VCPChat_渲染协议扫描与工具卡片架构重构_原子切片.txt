@@ -1,0 +1,68 @@
+[2026-10-19] - 哈雷酱
+[VCP百科全书] VCPChat——渲染协议扫描与工具卡片架构重构（三连提交）原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-19（第24次上游合并：b322c4fb「架构重构1」、24628f00「关键架构重构2」、60f1b28e「重要架构优化3」）
+适用范围：`modules/renderer/`、`modules/messageRenderer.js`、`styles/projectforge-topic.css` 当前源码
+事实来源：
+- `modules/renderer/toolRequestScanner.js`（438 行）
+- `modules/renderer/projectForgeTopicSurface.js`（新增 69 行）
+- `modules/renderer/toolPresentation.js`（35 行）、`contentPipeline.js`（7 行）、`streamManager.js`（16 行）
+- `modules/messageRenderer.js`（+20 → +104 行）
+- `docs/tool-block-loading-research.md`（新增 66 行）
+- `tests/message-renderer-tool-cards.test.mjs`（+52 → +97 行）、`tests/projectforge-topic-surface.test.mjs`（新增 108 行）、`tests/stream-stable-boundaries.test.mjs`（新增 43 行）
+- 上游 commit 标题：`架构重构1` / `关键架构重构2` / `重要架构优化3`
+
+一、三次提交合起来做的事
+
+把「工具调用块怎么被识别、怎么被渲染、流式过程中边界怎么稳定」这三件原本混在 `messageRenderer.js` 里的事，拆成三个独立层：
+
+```text
+协议识别层  toolRequestScanner.js        ← 判断哪段文本是协议、哪段是普通文本/代码
+呈现映射层  toolPresentation.js          ← 工具名 → 卡片形态
+主题面层    projectForgeTopicSurface.js  ← ProjectForge 话题的专属呈现
+流稳定层    streamManager.js             ← 流式增量与稳定边界
+```
+
+二、协议识别层（toolRequestScanner.js）关键语义
+
+该文件不是本轮新建（`--diff-filter=A` 指向 `0a8a2576`），本轮 b322c4fb 对它 +17 行。它当前 438 行，核心是「哪些 `<<<[TOOL_REQUEST]>>>` 是真的协议」：
+
+1. **反引号包裹视为字面量**：`` `<<<[TOOL_REQUEST]>>>` `` 不建立协议块；
+2. **代码域优先遮蔽**：fenced code 与行内 code span 内的标记不算协议。注释原文解释了行内 code span 的限制理由——
+
+```text
+行内代码域额外限制为同一行。Markdown code span 虽可容纳换行，但聊天
+正文中的颜文字（如 `(・`ω´・)`）常含不成对反引号；若允许它与数百字后
+工具载荷中的反引号跨行配对，会把真实 TOOL_REQUEST 错误覆盖为代码示例。
+```
+
+3. **工具结果数据域优先级最高**：`collectToolResultRanges` 先遮蔽结果区，其内部任何 `TOOL_REQUEST` / `DESKTOP_PUSH` 都不具协议含义，也不会与外部正文的反引号配对吞掉后续真实协议块；
+4. **容错结束标记**：`/<{2,4}\[END_TOOL_REQUEST\]>{2,4}/gi` —— 允许左右各 2–4 个尖括号，因为后端语义解析偶尔多/少尖括号，但中间的协议名保持严格；
+5. **字段感知扫描**：`scanToolRequestEnd` 返回三态 `complete` / `incomplete-field` / `incomplete-request`；进入字段后，`<<<[END_TOOL_REQUEST]>>>` 只被当作字段载荷，必须先遇到与括号风格严格对应的 `「末」` 或 `}末}`（含 `ESCAPE` 变体）。
+
+三、主题面层（projectForgeTopicSurface.js）
+
+新增 69 行，配合 `styles/projectforge-topic.css`（+43 行，后续又 −28 行收敛）。作用：让 ProjectForge 的话题在渲染层拥有专属表面，而不是复用通用卡片。
+
+四、呈现与流稳定
+
+- `toolPresentation.js`（35 行）：工具名到卡片形态的映射；
+- `contentPipeline.js`（7 行）：内容处理管线挂载点；
+- `streamManager.js`（16 行）+ `tests/stream-stable-boundaries.test.mjs`（43 行）：流式增量的稳定边界，防止半截协议被提前渲染。
+
+五、研究笔记（docs/tool-block-loading-research.md，66 行）
+
+本轮新增的研究文档，主题是「工具块加载」——即工具调用结果块在渲染时的加载时机与占位策略。属于设计依据类文档，不是接口契约。
+
+六、`messageRenderer.js` 的变化
+
+两轮累计 +124 行，主要集中在工具卡片：新增 `tests/message-renderer-tool-cards.test.mjs` 的 149 行断言（52 + 97）覆盖卡片生成、卡片与协议块的对应关系。
+
+七、风险
+
+1. 行内 code span「仅限同一行」是一条有意收紧的规则：放宽会让颜文字反引号误吞协议块。改这条规则需要同步回归 `message-renderer-tool-cards`。
+2. 结束标记的 2–4 尖括号容错是**已知的必要妥协**，但它扩大了「什么算结束」的范围；若出现协议块提前闭合，应优先怀疑这里。
+3. `projectforge-topic.css` 在两轮里先 +43 后 −28，说明主题面仍在小幅摆动，视觉回归需实测。
+
+关联章节：232（渲染管线 HTML 规范化与二重 DOM 竞态防护）、248（ProjectForge 项目锻造台）、260（MoonAST V2 几何拱形 Outline）

@@ -1,0 +1,100 @@
+[2026-10-19] - 哈雷酱
+[VCP百科全书] VCPChat——MoonAST V2 几何拱形 Outline（Arch-Geometry Outline）原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-19（第24次上游合并：3cde8466「上架真正的MoonAST技术。」、a31a2f98「上架moonASTV2」）
+适用范围：`rust_projectforge_indexer/src/geo.rs` 与 `src/scan.rs` / `src/symbols.rs` / `src/main.rs` 当前源码
+事实来源：
+- `D:\github\VCP\VCPChat\rust_projectforge_indexer\src\geo.rs`（1,224 行，本轮新增）
+- `D:\github\VCP\VCPChat\rust_projectforge_indexer\examples\geo_probe.rs`（1,821 行 + 4 行）
+- `D:\github\VCP\VCPChat\rust_projectforge_indexer\src\scan.rs`（+250 → +57）
+- `D:\github\VCP\VCPChat\rust_projectforge_indexer\src\symbols.rs`（+33）
+- `D:\github\VCP\VCPChat\rust_projectforge_indexer\src\lang.rs`（+50）
+- `D:\github\VCP\VCPChat\rust_projectforge_indexer\src\main.rs`（+55 → +23）
+- 二进制：`bin/win32-x64/projectforge_indexer.exe` 17,645,568B → 17,852,416B → 17,896,960B
+
+一、先纠正一个误解
+
+「MoonAST」不是独立仓库、不是独立插件、也不是新目录。本轮两次提交的全部实体都落在 **ProjectForge 的 Rust 索引器**内部：新增 `geo.rs`，改 `scan.rs` / `symbols.rs` / `lang.rs` / `main.rs`，并重编 `projectforge_indexer.exe`。因此 MoonAST V2 应理解为「ProjectForge 索引器的符号边界修复能力」，而不是一个可单独调用的工具。
+
+二、它解决的问题（geo.rs 头部原文）
+
+```text
+//! 几何拱形 Outline（Arch-Geometry Outline，二期①）
+//!
+//! 无需 Tree-sitter grammar 的轻量块级结构提取。单趟字节流扫描每一行的
+//! 缩进深度与括号/冒号信号，用「缩进账 + 括号账」双账配对出块级拱形
+//! （sig_start / foot_line / end_line），再启发式提取拱脚符号名。
+//!
+//! 引擎只依赖 `Family`（族）做注释与声明特征分派，不依赖 grammar，
+//! 因此可服务于无 grammar 绑定的语言（.ps1/.sh/.wgsl/.zig/.vue 等）
+//! 与编辑器态语法破损（has_error）时的符号边界修复。
+```
+
+关键点有三层：
+1. **无 grammar 依赖**：`.ps1` / `.sh` / `.wgsl` / `.zig` / `.vue` 这类没有 tree-sitter grammar 绑定的语言，此前拿不到符号边界；
+2. **破损文件可救**：`has_error` 时 tree-sitter 的 AST 不可信，几何法仍能给出拱形；
+3. **单趟扫描**：不是解析器，是字节流的账本配对，代价与文件长度线性相关。
+
+三、数据结构（实测字段）
+
+```rust
+pub struct GeoArch {
+    pub sig_start: usize,   // 拱脚签名起始行（跨行小括号签名自动上溯到签名首行）
+    pub foot_line: usize,   // 起拱左脚行（块开启 `{` 或 `:` 所在行）
+    pub end_line: usize,    // 落拱右脚行
+    pub full_start: usize,  // 向上吸附紧邻等缩进注释后的起点
+    pub tier: Tier,         // 置信度档位
+}
+
+pub struct GeoFileResult {
+    pub healthy: bool,
+    pub alarm: bool,        // 独立报警器是否触发（分词状态不可信）
+    pub names: Vec<String>, // 与 arches 一一对应的拱脚名，空串表示未提取到
+    pub arches: Vec<GeoArch>,
+}
+
+pub struct ScanStyle {
+    pub family: Family,
+    pub hash_comment: bool,  // 行注释以 `#` 开头（shell / powershell 等）
+    pub hyphen_ident: bool,  // 标识符允许连字符（PowerShell `Verb-Noun`）
+}
+```
+
+四、三档置信度（原文语义）
+
+| 档位 | 判定 |
+|---|---|
+| 🟢 `Green` | 双账吻合（缩进回落 + 括号/块配平落在同一行）且拱脚含明确函数/容器特征 |
+| 🟡 `Yellow` | 几何区间完整，但拱脚签名模糊（跨行复杂签名或无明显关键字） |
+| 🔴 `Red` | 缩进与括号账本冲突，或文件健康度异常 |
+
+含意：输出不是「有/无」二值，而是带可信度的三档。下游可以只信 Green，或在 Yellow 上降级处理。
+
+五、索引器对外子命令（main.rs 实测）
+
+```text
+ping          → { pong: true, cached: <n>, pending: <n> }
+outline       → 符号大纲
+findSymbols   → 按名查定义
+facts         → 语言事实
+clearCache    → 清缓存
+```
+
+`ping` 的返回体同时暴露缓存条目数与待处理队列长度，便于上层判断索引器是否积压。
+
+六、为什么 PowerShell 特别受益
+
+`ScanStyle` 里专门有 `hash_comment`（`#` 注释）与 `hyphen_ident`（允许 `Verb-Noun` 函数名）两个开关。PowerShell 两者都命中，而 tree-sitter 的 PowerShell grammar 覆盖并不完整——这正是几何法要补的缺口。测试样本 `tests/sample_script.ps1` 与 `tests/broken_syntax.rs` 分别对应「正常脚本」与「破损语法」两条路径。
+
+七、迁入方式（可追溯）
+
+`geo.rs` 头部写明「由 examples/geo_probe.rs 的实验引擎逐字提升而来，零逻辑改动」。即：先在 `examples/` 做实验探针（1,821 行），验证后再整体提升进 `src/`。这是本轮工程方法上的一个可复用范式。
+
+八、风险
+
+1. **置信度不可当确定性用**：`Yellow` 档的 `sig_start`/`end_line` 可能偏移，`EditCode` 这类行级编辑依赖行号时必须先校验 tier。
+2. `full_start` 会向上吸附注释，若注释与代码之间隔了空行则不会吸附，跨语言行为需实测。
+3. 二进制体积从 17.6MB 增至 17.9MB，换版后需重新分发 `.exe`，不能复用旧文件。
+
+关联章节：248（ProjectForge 项目锻造台）、264（渲染协议扫描与工具卡片架构重构）

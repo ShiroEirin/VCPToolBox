@@ -66,3 +66,16 @@
 - **禁入证据**：目录描述原文「系统维护、文件编辑、代码编程、命令行等需要字符级精准输入的插件不开放 JEV 接入」；`forbiddenParameterNames` 含 shell/cmd/code/script/path/filePath/content/diff/patch 等，`denyPlugins` 以 PowerShellExecutor 打头。
 - 与 236 主结论互证：JEV 是「受限便利通道」，不是通用执行层——本切片此前已核实「终端命令仍由模型负责」，此处给出官方侧同向证据。
 - 第三方提示词**不会**因插件安装而自动注入；`JEV_THIRD_PARTY_EXP` 默认关闭时官方行为不变。
+
+十一、2026-10-19 第24次上游合并：插件 manifest 自述通路（1a937fdc，6 文件 +283/−34）
+
+- **第二登记通道确立**：除 `ToolConfigs/jev_tool_call_exp.json` 服务端白名单外，插件可自带 `jev` 块；注册表读取 `manifest.jev` 即可纳入能力树，不必改服务端 JSON。PR #250 `feat/frontend-jev-distributed-plugins`。
+- **`jev` 块字段**：`schemaVersion`（当前 1）、`enabled`、`category`、`jevDescPrompt`、`jevPrompt`、`agentPrompt`、`defaultCommand`、`commands[]`。
+- **`commands[]` 参数的关键字段 `source`**：`primary` 表示从 JEV 语句的 `【主要内容】` 取值；`constraints` 表示从 `[约束:...]` 按 `prefixes` 识别取值（DeepMemo 的 `window_size` 前缀为 `窗口`/`轮数`/`范围`）。这正是「自然语言 → 合法参数」的编译落点。
+- **本轮接入的 6 款前端分布式插件**：DeepMemo v2.0.0（便利操作 / `DeepMemo`）、TopicMemo v1.0.0（便利操作 / `ListTopics`，另有 `GetTopicContent`）、TopicSponsor v2.2.0（便利操作 / `ListUnlockedTopics`，另有 `CheckUnreadMessages`、`ReadTopicContent`）、VCPEverything v1.1.0（便利操作 / `search`）、VCPSuperDice v1.1.0（媒体娱乐 / `roll`）、WaitingForUrReply v1.0.0（便利操作 / `WaitForUserInput`）。
+- **新增能力目录名**：`便利操作` 与 `媒体娱乐`，与既有 `web_search` / `image_generation` / `daily_tools`（服务端 JSON）并存。`category` 是中文字面量，会直接出现在 `{...}` 花括号中，改名等于改协议。
+- **上下文成本提示**：`agentPrompt` 内嵌完整 JEV 范例，属进入提示词的文字；6 段合计将使常驻提示词体量上升，需纳入上下文预算。
+- **不改变既有结论**：`enabled: true` 只是声明，JEV 整体仍受 `JEV_*` 配置控制；本地无 `JEV_*` 键时声明不会自动激活服务（见本切片第八节）。
+- 详见切片 251（第三方插件注册表）、262（前端分布式插件 JEV 规范声明）。
+
+Tag: JEV, 语义工具调用, jevToolCallExp, ToolConfigs, jev_tool_call_exp.json, 能力树, 省略目录, url_fetch, daily_tools, 三级优先级, JEV_THIRD_PARTY_EXP, 插件自述声明, 便利操作, 媒体娱乐, 第24次上游合并

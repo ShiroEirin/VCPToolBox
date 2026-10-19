@@ -1,0 +1,81 @@
+[2026-10-19] - 哈雷酱
+[VCP百科全书] VCP架构——KBM 单 SQL 运行时与 TriviumDB 检索内核换芯 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-19（第24次上游合并：d961b09c「Merge pull request #504 from lioensky/feat/kbm-rust-single-sql-runtime」，234 文件 / +37875 / −18375）
+适用范围：`rust-vexus-lite/` 工作区与 `modules/knowledgeBase/` 当前源码
+事实来源：
+- `rust-vexus-lite/crates/vcp-tdb-index/src/lib.rs`
+- `rust-vexus-lite/crates/vcp-tdb-index/Cargo.toml`
+- `rust-vexus-lite/src/knowledge_runtime.rs`（180,751B）
+- 上游 commit：`d8cf0e89`（P2-2 tdb换芯01 done）、`6df3d5e2`（恢复对4096维度兼容）、`6a720ca8`（P1-4 lightmemo与bench接线）、`bff029ee`（修复代际处理器并重构）、`bcfbd7af`（liunx-x64依赖构建）
+
+一、一句话结论
+
+知识库的检索内核从「上游 TriviumDB 整体嵌入」改为「只取检索算子的隔离 crate」：新的 `vcp-tdb-index` 明确声明 SQL 仍是唯一权威，crate 只拥有派生检索状态，上游的 database / memtable / WAL / query language 全部排除在外。
+
+二、新 crate 的自我定位（lib.rs 注释原文）
+
+```text
+//! Isolated TriviumDB 0.8.9 retrieval kernels.
+//!
+//! VCP-PATCH: SQL remains authoritative; this crate owns derived retrieval
+//! state only. Upstream database, memtable, WAL and query language are excluded.
+```
+
+导出面（实测）：
+
+```rust
+pub mod asset; pub mod engine; pub mod vector;
+pub use vector::VectorType;
+pub mod index { pub mod bq; pub mod quiver; }
+pub use index::quiver::{QuIVer, QuIVerConfig, QuIVerSearchConfig};
+```
+
+三、crate 内模块体量（字节）
+
+| 文件 | 体量 | 职责 |
+|---|---|---|
+| `index/quiver.rs` | 151,678B | QuIVer 主体 |
+| `index/quiver/corrected_sm.rs` | 74,275B | 修正软匹配 |
+| `index/bq.rs` | 52,676B | 二值量化索引 |
+| `index/quiver/corrected_sm/dynamic.rs` | 38,516B | 动态检索 |
+| `index/quiver/corrected_sm/build.rs` | 15,750B | 索引构建 |
+| `index/quiver/corrected_sm/routing_snapshot.rs` | 9,095B | 路由快照 |
+| `index/quiver/corrected_sm/production.rs` | 13,726B | 生产路径 |
+| `engine.rs` | 16,963B | 引擎装配 |
+| `vector.rs` | 20,693B | 向量类型 |
+
+四、主 crate 侧配套下沉（`rust-vexus-lite/src/`）
+
+- `knowledge_runtime.rs` 180,751B —— 统一运行时，持有 `GlobalTagSearchTask`、`publication_gate`、`task_lifecycle`、`storage` 四类协作对象；
+- `global_chunks.rs` 25,725B（P1-4 新增 351 行）；
+- `light_memo.rs` 19,634B（P1-4 新增 316 行，LightMemo 原生接线）；
+- `schema.rs` 36,384B（P1-4 +38 行，win 兼容补丁 +95 行）；
+- `storage.rs` 49,461B（tdb 换芯 +75 行）；
+- `index_lifecycle.rs` 88,204B、`ingestion.rs` 113,633B —— 索引检查点/恢复与摄取提交全部任务化，由 `task_lifecycle.rs` 统一追踪（`TrackedTask`、`TaskLifecycle`），原生侧不再同步阻塞事件循环。
+
+五、维度兼容回补
+
+`6df3d5e2 恢复对4096维度兼容` 改 `asset.rs` / `engine.rs` / `index/bq.rs`（+38 行）/ `index_source.rs`，并新增 `tests/tdbLegacyDimensionCompatibility.test.js`（125 行）。含意：换芯后旧库 4096 维向量不被判为非法，走同一套检索路径。
+
+六、原生二进制
+
+| 产物 | 变化 |
+|---|---|
+| `vexus-lite.win32-x64-msvc.node` | 9,949,184B → 10,481,664B（换芯后经 bff029ee 再增） |
+| `vexus-lite.linux-x64-gnu.node` | 4,635,352B → 9,502,736B（bcfbd7af 补构建） |
+
+七、验证面（新增测试，逐条可查）
+
+`tests/kbmNativeLifecycle.test.js`、`kbmNativeKnnProxy.test.js`、`kbmDeadCodeCleanup.test.js`、`kbmAuditRegression.test.js`、`kbmConfigurationCompatibility.test.js`、`tdbNativeAcceptance.test.js`、`tdbMemoryProfile.test.js`、`tdbRetrievalQuality.test.js`、`tdbKnowledgeWatcher.test.js`、`sqlAuthoritativeRoutingQuality.test.js`、`ragNativeChainAudit.test.js`、`unifiedGeometryScheduling.test.js`、`thoughtClusterPersistence.test.js`、`nativeKnowledgeRuntimeRegistry.test.js`。
+
+八、脚本侧联动
+
+`scripts/rebuild_vector_indexes.js`、`rebuild_tag_index_custom.js`、`repair_database.js`、`diary-semantic-classifier.js` 同步适配新运行时（各 +2～+8 行）。
+
+九、风险与注意
+
+1. 原生 ABI 与二进制强绑定：换芯后 `.node` 体量变化近 5MB（linux），跨平台部署必须使用仓库内对应平台的 `.node`，不能沿用旧文件。
+2. 4096 维兼容是「回补」而非「默认」：若旧库维度与新配置不一致，应先跑 `tdbLegacyDimensionCompatibility` 相关路径确认，再执行重建。
+3. 关联切片：244（分代双槽基线）、246（嵌入维度解耦）、258（负压协调与启动对账）、259（RiverMemo 生产契约）。

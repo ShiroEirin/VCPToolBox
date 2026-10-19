@@ -180,5 +180,15 @@ newSession:「始」true「末」
 - OldPowerShellExecutor：旧版PowerShell执行器
 - FileOperator：可配合使用进行文件操作后的命令验证
 
-九、浪潮算法标签
-Tag: VCPChat分布式插件, Shell执行, Linux命令, PTY会话, 异步任务管理, 本地执行, 混合服务插件, 环境保持, NodePTY, 终端仿真, 开发工具, 系统运维, 跨平台兼容, TagMemo V9.1
+九、2026-10-19 第24次上游合并：v2.0.0 命令协议重构（223c7d57，9 文件 +1285/−1904）
+
+- **版本 1.0.0 → 2.0.0，语义整体反转**：PTY 不再是命令执行通道，而是「显示与交互」通道；真正的 stdout/stderr 采集与退出码判定改由**无损管道日志 + 原子完成回执**承担。manifest 描述原文：「底层通过无损管道日志采集与原子完成回执驱动，PTY 仅作显示与交互。所有能力均支持可选参数 terminalTarget：sidebar（默认，主窗口侧栏）或 window（独立窗口）。」
+- **会话连续性回归**：v1.0.0 为修同步超时改用了独立 POSIX 子进程（不保留 cd/环境变量）；v2.0.0 改回持久 PTY 会话并保留连续 `cd` 与环境变量。
+- **命令面扩到 10 条**：`ExecuteCommand`、`ExecutePowerShell`（兼容别名）、`StartInteractive`、`SendInteractiveKey`、`PasteInteractiveText`、`RunInteractiveSequence`、`QueryVisible`、`InterruptCommand`、`InterruptPowerShell`（兼容别名）、`EndInteractive`。
+- **新增 4 个模块**：`AdminConfirm.js`（111 行，Electron dialog 可视化提权确认，标题 `⚠️ VCP 终端命令执行确认`，列出命令/触发规则/命中关键字）、`commandCapture.js`（110 行，无损管道采集）、`commandRunStore.js`（120 行，侧栏「命令输出」共享缓存，上限 50 条 / 512KB 原始 / 64KB 单次读取）、`terminalKeyParser.js`（165 行，按键映射与序列上限：maxSteps 100、maxWaitMs 60000、maxTotalWaitMs 300000、maxTextLength 100000、maxQueryLines 2000）。
+- `PTYShellExecutor.impl.js` 2,245 行级重写；`modules/ipc/terminalHandlers.js` +15 行打通终端视图联动。
+- 详见切片 263。
+
+十、浪潮算法标签
+
+Tag: VCPChat分布式插件, Shell执行, Linux命令, PTY会话, 异步任务管理, 本地执行, 混合服务插件, 环境保持, NodePTY, 终端仿真, 开发工具, 系统运维, 跨平台兼容, TagMemo V9.1, 第24次上游合并, PTYShellExecutor v2.0.0, 原子完成回执, commandRunStore, terminalKeyParser, AdminConfirm

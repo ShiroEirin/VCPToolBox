@@ -1,0 +1,74 @@
+[2026-10-19] - 哈雷酱
+[VCP百科全书] VCP架构——RiverMemo 生产契约与调参面板统一 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-19（第24次上游合并：54277fc0「对齐配置面板」、ed42cd9a「统一数据展示」）
+适用范围：`modules/knowledgeBase/memoConfig.js`、`rag_params.json`、`AdminPanel-Vue/src/features/rag-tuning/` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\modules\knowledgeBase\memoConfig.js`（119 行，本轮新增）
+- `D:\github\VCP\VCPToolBox\rag_params.json`（211 行变更）
+- `AdminPanel-Vue/src/features/rag-tuning/metadata.ts`（−661 行）
+- `AdminPanel-Vue/src/features/rag-tuning/TagMemoV9ControlPanel.vue`（+119 行）
+- `tests/memoConfigCleanup.test.js`（新增 87 行）
+
+一、核心动作
+
+把散落在 `metadata.ts`、`TagMemoV10Engine.js`、`rag_params.json` 三处的可调参数，收敛成一份由后端定义的「生产契约」`memoConfig.js`。前端面板不再自己维护参数表，只渲染后端给的契约。
+
+二、契约的自我说明（memoConfig.js 头部原文）
+
+```js
+// The production RiverMemo contract. Fixed algorithms and retired laboratory
+// switches are deliberately absent: retaining them would imply working controls.
+```
+
+含意：已固化的算法参数和已退役的实验开关被**有意移除**——留着它们会让人误以为还能调。
+
+三、契约顶层结构（RIVER_DEFAULTS 实测）
+
+| 段 | 关键字段与默认值 |
+|---|---|
+| `sourceObservation` | `baseTagBoost: 0.6`、`coreBoostFactor: 1.33` |
+| `localField` | `alpha: 0.15`、`maxIterations: 80`、`tolerance: 1e-9` |
+| `transferField` | `alpha: 0.55`、`maxIterations: 80`、`tolerance: 1e-9` |
+| `effectiveSupport` | `localMassRatio: 0.8`、`transferMassRatio: 0.9` |
+| `candidateSuperset` | `queryK: 100`、`denoisedK: 100`、`localFieldK: 100`、`transferFieldK: 100`、`bm25K: 50`、`anchorK: 50`、`maxUnionCandidates: 300` |
+| `pathGeometry` | `localWeight: 0.6`、`transferWeight: 0.4`、`directionFloor: 0.05`、`closureFloor: 0` |
+| `relativeTopology` | `semanticNodeThreshold: 0.48`、`relativeDistanceTemperature: 0.35`、`reverseDirectionCredit: 0.25`、`nodeOnlyReliabilityCap: 0.2`、`minimumRiverEdgeFlow: 0.015`、`maximumRiverEdges: 96` |
+| `riverObservability` | `kappaEdge: 0.5`、`kappaRatio: 0.3`、`epsilon: 0.02`、`collapsedThreshold: 0.12`、`sparseThreshold: 0.45` |
+| `directAnchor` | `semanticThreshold: 0.8`、`semanticDiscount: 0.7`、`specificityFloor: 0.35`、`rarityFloor: 0.15`、`reliabilitySeedSaturation: 2`、`fallbackReliabilityCap: 0.5` |
+| `topology` | `topologyBonusCap: 0.08`、`topologyPathSaturation: 0.15`、`innovationScale: 0.5`、`conditionalBandwidth: 0.04`、`minimumPeers: 3`、`omegaGamma: 1`、`structRoleMinOmega: 0.12`、`anchorBonusCap: 0.1`、`anchorActivationZ: 2` |
+
+四、旧键名映射（LEGACY_TOPOLOGY）
+
+旧配置项以映射表转成新键：`topologyBonusCap`、`topologyPathSaturation`、`topologyV2InnovationScale→innovationScale`、`topologyV2ConditionalBandwidth→conditionalBandwidth`、`topologyV2ClosureBandwidth→conditionalClosureBandwidth`、`topologyV2DirectBandwidth→conditionalDirectBandwidth`、`topologyV2MinimumPeers→minimumPeers`、`topologyV2MinimumEffectivePeers→minimumEffectivePeers`、`topologyV2InnovationConfidenceZ→innovationConfidenceZ`、`topologyV3OmegaGamma→omegaGamma`、`topologyV3StructRoleMinOmega→structRoleMinOmega`，以及 `topologyV3Anchor*` 一组。
+
+含意：**旧配置不会失效，但会被翻译**。读取旧 `rag_params.json` 时不会报错，也不会静默丢弃。
+
+五、瘦身清单
+
+| 文件 | 变化 |
+|---|---|
+| `AdminPanel-Vue/src/features/rag-tuning/metadata.ts` | −661 行（参数表迁走后近乎清空） |
+| `rag_params.json` | −约 211 行（退役开关清出） |
+| `TagMemoV10Engine.js` | −163 行（实验期参数内联逻辑删除） |
+| `TagMemoEngine.js` | 2 行 |
+| `RiverMemoEngine.js` | 43 行（改为读取契约） |
+| `KnowledgeBaseManager.js` | +10 行（装配契约） |
+| `routes/admin/rag.js` | 13 行（对外暴露契约） |
+
+六、面板统一数据展示（ed42cd9a）
+
+`AdminPanel-Vue` 全量重建（84 文件 / 133 行级改动），涉及 `MemoryProfileCard.vue`、`OrderedCooccurrenceModal.vue`、`RiverMemoV3ControlPanel.vue`、`TagMemoV9ControlPanel.vue`、`metadata.ts`、`RagTuning.vue`，以及 `tagmemo-simulation.html`（public 与 dist 双份同步）。
+
+七、回归测试
+
+`tests/memoConfigCleanup.test.js`（87 行）：验证退役开关确实不再出现在契约中、旧键名映射生效、清理后不残留孤儿字段。
+
+八、风险
+
+1. 契约是**唯一真源**：任何绕过 `memoConfig.js` 直接改 `rag_params.json` 新键的行为都会被覆盖或被判为未知字段。
+2. `metadata.ts` 的 661 行删除意味着前端不再有本地默认值兜底，后端契约缺失时面板会直接空表。
+3. 参数是「生产契约」而非「实验旋钮」，调参前应确认对应项是否仍在契约内。
+
+关联章节：198 / 205 / 207 / 208 / 210 / 244 / 257

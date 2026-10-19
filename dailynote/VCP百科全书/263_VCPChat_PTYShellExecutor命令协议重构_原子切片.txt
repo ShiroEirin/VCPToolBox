@@ -1,0 +1,77 @@
+[2026-10-19] - 哈雷酱
+[VCP百科全书] VCPChat——PTYShellExecutor 命令协议重构（v2.0.0 无损管道采集与原子回执）原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-19（第24次上游合并：223c7d57「feat(pty): 增强 PTYShellExecutor 命令执行协议、回执降噪并打通终端视图联动」，9 文件 +1285/−1904）
+适用范围：`VCPDistributedServer/Plugin/PTYShellExecutor/` 当前源码
+事实来源：
+- `VCPDistributedServer/Plugin/PTYShellExecutor/plugin-manifest.json`（v2.0.0）
+- `VCPDistributedServer/Plugin/PTYShellExecutor/PTYShellExecutor.impl.js`（2,245 行级重写）
+- `VCPDistributedServer/Plugin/PTYShellExecutor/AdminConfirm.js`（新增 111 行）
+- `VCPDistributedServer/Plugin/PTYShellExecutor/commandCapture.js`（新增 110 行）
+- `VCPDistributedServer/Plugin/PTYShellExecutor/commandRunStore.js`（新增 120 行）
+- `VCPDistributedServer/Plugin/PTYShellExecutor/terminalKeyParser.js`（新增 165 行）
+- `modules/ipc/terminalHandlers.js`（15 行）
+
+一、一句话结论
+
+PTY 从「命令执行通道」降级为「显示与交互通道」。真正的 stdout/stderr 采集与退出码判定，改由**无损管道日志**承担，并以**原子完成回执**驱动同步返回。manifest 原文：
+
+```text
+在持久化 Linux Shell (bash/zsh) PTY 会话中执行命令，完全对齐 VCPCLI 标准架构。
+底层通过无损管道日志采集与原子完成回执驱动，PTY 仅作显示与交互。
+```
+
+二、v2.0.0 命令面（manifest 实测，10 条）
+
+| 命令 | 说明 |
+|---|---|
+| `ExecuteCommand` | 执行并同步等待原子完成回执；输出与真实退出码无损分流采集；保留连续 `cd` 与环境变量 |
+| `ExecutePowerShell` | **兼容别名**，等同 `ExecuteCommand` |
+| `StartInteractive` | 启动 snow / codex / claude / vim / fzf 等交互式 CLI，锁定交互模式并立即返回 |
+| `SendInteractiveKey` | 发送单键或组合键（enter/up/down/esc/tab/ctrl+c/ctrl+l 等） |
+| `PasteInteractiveText` | 走 xterm bracketed paste 协议粘贴，不污染系统剪贴板、不破坏多行缩进 |
+| `RunInteractiveSequence` | 按全局步骤编号串行操纵（`command1 → wait2 → key3 → paste4 → wait5 → queryVisible6`） |
+| `QueryVisible` | 从终端 buffer 读当前可见文本，不发命令、不打断交互程序 |
+| `InterruptCommand` | 发送 Ctrl+C，解除等待并保持未决占用直到收尾回执 |
+| `InterruptPowerShell` | **兼容别名**，等同 `InterruptCommand` |
+| `EndInteractive` | 清除 `interactiveMode` 占用标记，复位提示符 |
+
+所有命令均支持可选 `terminalTarget`：`sidebar`（默认，主窗口侧栏）或 `window`（独立窗口）。
+
+三、四个新增协作模块
+
+| 模块 | 职责 |
+|---|---|
+| `AdminConfirm.js`（111 行） | Electron `dialog` 可视化确认；标题固定为 `⚠️ VCP 终端命令执行确认`，详情列出待执行命令、触发规则、命中关键字；非 Electron 环境退回 `spawn` |
+| `commandCapture.js`（110 行） | 无损管道采集：stdout / stderr / 退出码分流 |
+| `commandRunStore.js`（120 行） | 命令运行记录缓存，供侧栏「命令输出」标签读取。上限：`COMMAND_RUN_LIMIT = 50` 条、原始 `512 * 1024` 字节、单次读取 `64 * 1024` 字节；模块无加载副作用，执行器与读取方共享同一实例 |
+| `terminalKeyParser.js`（165 行） | 按键与序列解析。上限常量：`maxSteps: 100`、`maxWaitMs: 60000`、`maxTotalWaitMs: 300000`、`maxTextLength: 100000`、`maxQueryLines: 2000`、`responseTimeoutMs: 5000` |
+
+按键映射实测：`enter`/`return` → `\r`；`up`/`arrowup` → `\x1b[A`；`down`/`arrowdown` → `\x1b[B`。
+
+四、与 v1.x 的行为差异（重要）
+
+| 维度 | 旧版（切片 78 记载） | v2.0.0 |
+|---|---|---|
+| 同步执行 | 独立 POSIX 子进程，stdin 固定隔离，不保留 `cd`/环境 | 持久 PTY 会话，**保留连续 cd 与环境变量** |
+| 采集方式 | 子进程管道 | 无损管道日志 + 原子完成回执 |
+| 退出码 | 依赖子进程 | 真实退出码无损分流 |
+| 回执 | 直接返回输出 | 「原子完成回执」判定后才返回，回执降噪 |
+| 视图联动 | 无 | `commandRunStore` 驱动侧栏「命令输出」标签，双视图共享会话 |
+
+也就是：v1 为修超时牺牲了会话连续性，v2 把连续性拿回来，同时用回执机制解决「何时算结束」这个老问题。
+
+五、安全面
+
+- 管理员提权不再靠模型自述，而是弹 Electron 对话框让**人**确认，详情里写明触发规则与命中关键字；
+- `terminalKeyParser` 有硬上限（100 步 / 单步 60s / 累计 300s），防止无限序列占用终端；
+- `EndInteractive` 只清占用标记、不杀进程——这是刻意设计，避免误杀用户正在用的编辑器。
+
+六、风险
+
+1. `commandRunStore` 是 50 条环形缓存，超限后早记录被挤掉；排查长任务需及时取日志。
+2. `terminalTarget` 双视图共享会话：一端 `StartInteractive` 后，另一端普通执行会被拒绝（交互占用）。
+3. 兼容别名 `ExecutePowerShell` / `InterruptPowerShell` 保留，但语义已完全切换为 POSIX Shell，不再是 Windows PowerShell。
+
+关联章节：74（PowerShellExecutor）、78（PTYShellExecutor 旧版）、255（VCPCLI 终端内核重构与 xterm 渲染）

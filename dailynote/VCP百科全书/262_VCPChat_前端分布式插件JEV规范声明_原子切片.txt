@@ -1,0 +1,91 @@
+[2026-10-19] - 哈雷酱
+[VCP百科全书] VCPChat——前端分布式插件 JEV 规范声明（6 款核心交互插件）原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-19（第24次上游合并：c8224543「Merge pull request #250 from infinite-vector/feat/frontend-jev-distributed-plugins」→ 1a937fdc「feat(distributed): 为前端分布式节点 6 款核心交互插件注入标准 JEV 规范声明」，6 文件 +283/−34）
+适用范围：`VCPDistributedServer/Plugin/*/plugin-manifest.json` 当前源码
+事实来源：
+- `VCPDistributedServer/Plugin/DeepMemo/plugin-manifest.json`（v2.0.0，+32 行）
+- `VCPDistributedServer/Plugin/TopicMemo/plugin-manifest.json`（v1.0.0，84 行改动）
+- `VCPDistributedServer/Plugin/TopicSponsor/plugin-manifest.json`（v2.2.0，58 行改动）
+- `VCPDistributedServer/Plugin/VCPEverything/plugin-manifest.json`（v1.1.0，+32 行）
+- `VCPDistributedServer/Plugin/VCPSuperDice/plugin-manifest.json`（v1.1.0，+80 行）
+- `VCPDistributedServer/Plugin/WaitingForUrReply/plugin-manifest.json`（v1.0.0，+31 行）
+
+一、这件事的意义
+
+JEV 语义工具调用的白名单此前定义在 **VCPToolBox 的 `ToolConfigs/jev_tool_call_exp.json`**（服务端硬编码）。本轮新增了第二条通路：**插件自己在 manifest 里声明 `jev` 块**。注册表可以据此把前端分布式插件纳入 JEV 能力树，不必再改服务端 JSON。
+
+也就是说，JEV 从「服务端集中登记」变成「服务端登记 + 插件自述」双轨。
+
+二、`jev` 块的结构（以 DeepMemo 实测为准）
+
+```json
+"jev": {
+  "schemaVersion": 1,
+  "enabled": true,
+  "category": "便利操作",
+  "jevDescPrompt": "通过中央聊天数据服务检索历史对话上下文，进行关键词深度回忆与上下文切片召回。",
+  "jevPrompt": "用户希望根据关键词检索过往聊天记录或唤醒历史对话片段时调用 DeepMemo。关键词放入主要内容，窗口大小通过约束提供。",
+  "agentPrompt": "当需要回忆历史对话中聊过的特定细节时，使用 {便利操作} 中的 `DeepMemo`，关键词放入【主要内容】，窗口大小放入 [窗口:...]：\nJEV:「始」请使用 {便利操作} 中的 `DeepMemo`，深度回忆关于【系统架构设计】的历史讨论。「末」",
+  "defaultCommand": "DeepMemo",
+  "commands": [ ... ]
+}
+```
+
+字段职责：
+| 字段 | 作用 |
+|---|---|
+| `schemaVersion` | 块格式版本，当前 `1` |
+| `enabled` | 是否参与能力树 |
+| `category` | 能力目录名（**决定 JEV 语法里的 `{...}` 花括号内容**） |
+| `jevDescPrompt` | 供能力树索引的一句话描述 |
+| `jevPrompt` | 何时该选它的判断依据 |
+| `agentPrompt` | 面向主模型的完整范例（含 `JEV:「始」…「末」` 语法） |
+| `defaultCommand` | 省略 command 时的默认值 |
+| `commands[]` | 命令面定义 |
+
+三、命令项内部（`commands[]`）
+
+```json
+{
+  "commandIdentifier": "DeepMemo",
+  "description": "根据关键词深度检索历史聊天上下文",
+  "aliases": ["深度回忆", "搜聊天记录", "回忆对话", "记忆检索"],
+  "parameters": {
+    "keyword":     { "type": "text", "required": true,  "source": "primary",     "maxLength": 200, "description": "用于检索历史记忆的关键词" },
+    "window_size": { "type": "text", "source": "constraints", "prefixes": ["窗口","轮数","范围"], "maxLength": 3 }
+  }
+}
+```
+
+**最关键的是 `source` 字段**：
+- `primary` —— 参数值从 JEV 语句的 `【主要内容】` 里取；
+- `constraints` —— 参数值从 `[约束:...]` 中按 `prefixes`（窗口/轮数/范围）识别后取。
+
+这就是「模型用自然语言说话，系统编译成合法调用」的落点：不需要模型记参数名，只需要把关键词放进【】、把窗口放进 []。
+
+四、6 款插件的声明实况
+
+| 插件 | 版本 | category | defaultCommand | commands |
+|---|---|---|---|---|
+| DeepMemo | 2.0.0 | 便利操作 | `DeepMemo` | `DeepMemo` |
+| TopicMemo | 1.0.0 | 便利操作 | `ListTopics` | `ListTopics` / `GetTopicContent` |
+| TopicSponsor | 2.2.0 | 便利操作 | `ListUnlockedTopics` | `ListUnlockedTopics` / `CheckUnreadMessages` / `ReadTopicContent` |
+| VCPEverything | 1.1.0 | 便利操作 | `search` | `search` |
+| VCPSuperDice | 1.1.0 | 媒体娱乐 | `roll` | `roll` |
+| WaitingForUrReply | 1.0.0 | 便利操作 | `WaitForUserInput` | `WaitForUserInput` |
+
+五、与既有 JEV 白名单的关系
+
+- 2019 版服务端白名单（`jev_tool_call_exp.json`）实测为 3 个能力目录 / 18 个工具别名，其中 `daily_tools` 已含 `light_memo`；
+- 本轮新增的 6 款插件**不在**该 JSON 内，它们走 manifest 自述通路；
+- 两边合并后，能力目录至少新增 `便利操作` 与 `媒体娱乐` 两个名称，与既有 `web_search` / `image_generation` / `daily_tools` 并存。
+
+六、注意
+
+1. `category` 是**中文字面量**，会直接出现在 JEV 语法里（如 `{便利操作}`）。改名等于改协议，不能随意调整。
+2. `agentPrompt` 内嵌了完整 JEV 范例，属于「进入提示词的内容」——这 6 段文字会增加常驻提示词体量，部署时需留意上下文预算。
+3. `enabled: true` 只是声明，是否真正生效取决于宿主是否读取 manifest 的 `jev` 块；本地 `config.env` 无 `JEV_*` 键时 JEV 整体沉睡，声明不会自动激活服务。
+
+关联章节：236（JEV 语义工具调用实验体系）、237（JEV 级联语义二次判断）、239（插件桥接注册表与工具生命周期）、251（JEV 第三方插件注册表）
