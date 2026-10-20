@@ -1,0 +1,115 @@
+[2026-10-20] - 哈雷酱
+[VCP百科全书] VCP架构——单轮请求共享观测与句柄释放 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-20（第25次上游合并：deb9d156「fix2」、ea68ab3c「优化内存1」）
+适用范围：`KnowledgeBaseManager.js`、`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js`、`modules/knowledgeBase/memoryProfiler.js` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\KnowledgeBaseManager.js`（deb9d156 +59 行）
+- `D:\github\VCP\VCPToolBox\Plugin\RAGDiaryPlugin\RAGDiaryPlugin.js`（deb9d156 +52 行）
+- `D:\github\VCP\VCPToolBox\modules\knowledgeBase\memoryProfiler.js`（ea68ab3c +14 行）
+- `D:\github\VCP\VCPToolBox\tests\memoObservationSharing.test.js`（133 行，新增）
+- `D:\github\VCP\VCPToolBox\tests\ragNativeChainAudit.test.js`（+30 行）
+
+一、解决的问题
+
+一轮对话里，RAGDiaryPlugin 的多个记忆占位符、元思考、日记任务会各自触发一次观测。此前每次观测各算一遍、各自持有原生句柄，同一轮内重复计算且句柄生命周期不明确——释放早了后续读到空，释放晚了内存不回收。
+
+本轮引入 **AsyncLocalStorage 作用域**，把「一轮请求」变成共享观测的边界。
+
+二、核心实现（KnowledgeBaseManager.js 原文）
+
+```js
+const { AsyncLocalStorage } = require('node:async_hooks');
+
+// 单轮请求拥有共享观测；异步读出只借用句柄，不得提前释放。
+const memoObservationScope = new AsyncLocalStorage();
+```
+
+`withMemoObservationScope(operation)` 的三段逻辑：
+
+```js
+async withMemoObservationScope(operation) {
+    const current = memoObservationScope.getStore();
+    if (current?.owner === this) return operation();          // 已在同 owner 作用域内 → 直接复用
+    const scope = { owner: this, tasks: new Map(), handles: new Set() };
+    return memoObservationScope.run(scope, async () => {
+        try {
+            return await operation();
+        } finally {
+            await Promise.allSettled(scope.tasks.values());   // 先等所有异步任务落定
+            for (const handle of scope.handles) {
+                try {
+                    this.tagIndex?.releaseMemoObservation?.(handle);
+                } catch (error) {
+                    console.warn(`[KnowledgeBase] Shared Memo release failed: ${error.message}`);
+                }
+            }
+            scope.tasks.clear();
+        }
+    });
+}
+```
+
+四个设计要点：
+1. **嵌套复用**：已有同 `owner` 的作用域时直接执行，不重复建 scope（避免元思考等子调用再开一层）；
+2. **释放顺序固定**：`Promise.allSettled(tasks)` → 逐个 `releaseMemoObservation(handle)` → `tasks.clear()`；
+3. **释放失败不抛**：仅 `console.warn`，一条句柄释放失败不会污染主流程；
+4. **句柄只在 finally 释放**：对应注释「异步读出只借用句柄，不得提前释放」。
+
+三、RAGDiaryPlugin 侧接入
+
+```js
+const run = () => this._processMessagesWithMemoScope(messages, pluginConfig);
+return typeof this.vectorDBManager?.withMemoObservationScope === 'function'
+    ? this.vectorDBManager.withMemoObservationScope(run)
+    : run();
+```
+
+原 `_processMessages` 主体被搬进 `_processMessagesWithMemoScope`，外层只负责「有作用域就包一层，没有就裸跑」——**对不支持该能力的老版本 vectorDBManager 保持兼容**。
+
+元思考等待策略（原文注释）：
+
+```text
+// 元思考只等待同类查询的感应就绪，而非 RiverMemo 读出完成。
+// 独立快照只含日记任务，禁止元思考等待自身造成死锁。
+```
+
+即：等待粒度从「读出完成」收窄为「感应就绪」，并显式排除「元思考等待自己」的死锁构造。
+
+四、内存画像补充（memoryProfiler.js）
+
+`profileRiverMemo(state)` 新增 `observationMemory` 段：
+
+```js
+let observationMemory = { available: false };
+try {
+    if (typeof state.tagIndex?.memoObservationMemoryStats === 'function') {
+        const raw = state.tagIndex.memoObservationMemoryStats();
+        observationMemory = { available: true, ...(typeof raw === 'string' ? JSON.parse(raw) : raw) };
+    }
+} catch (error) {
+    observationMemory = { available: false, error: error.message || String(error) };
+}
+```
+
+特征：**能力探测 + 容错**。原生侧没有该导出时标 `available: false`，调用失败也不抛，只记录错误信息。对应原生侧 `lib.rs` +12 与 `index.d.ts` +4 的新导出。
+
+五、验证
+
+| 测试 | 行数 | 覆盖 |
+|---|---|---|
+| `tests/memoObservationSharing.test.js` | 133 | 单轮共享、句柄释放、嵌套复用 |
+| `tests/ragNativeChainAudit.test.js` | +30 | RAG 原生链审计 |
+| `tests/memoSingleTrack.test.js` | +39 | 单轨约束 |
+| `tests/tdbMemoryProfile.test.js` | +18 | 内存画像 |
+| `tests/nativeMemoManifestCompatibility.test.js` | +31 | 原生跨阶段集成 |
+
+六、风险
+
+1. **`owner` 身份即作用域身份**：`current?.owner === this` 判断意味着同一个 KnowledgeBaseManager 实例的嵌套调用共享观测；若将来出现多实例场景，作用域不会跨实例合并。
+2. **释放失败只警告**：`releaseMemoObservation` 抛错时句柄可能泄漏，日志里搜 `Shared Memo release failed` 是唯一线索。
+3. **元思考等待粒度收窄是行为变更**：从「等读出」改为「等感应」，下游若依赖「读出已完成」这一更强保证，需要重新确认。
+4. `observationMemory` 的 `available: false` 会同时覆盖「原生未实现」与「调用抛错」两种情况，除非读 `error` 字段否则无法区分。
+
+关联章节：209（rust-vexus-lite 记忆管线）、230（知识库派生计算鲁棒性）、265（双场投影预算与请求级向量复用）、266（请求级动态虫洞）

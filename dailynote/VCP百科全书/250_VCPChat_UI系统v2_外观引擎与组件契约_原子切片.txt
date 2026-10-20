@@ -75,4 +75,25 @@ Tag: UI系统, ui-system, appearance-engine, appearanceProfile, density, surface
 - **删除**：`vcp-icons.js` 与 `vcp-icons.MIT.txt`（图标体系由 lucide-adapter / vcp-icons 方案承接）。
 - 本切片（250）记录 v2 的外观引擎与组件契约；侧栏/面板层以 254 为准。
 
-Tag: UI系统, ui-system, v2, v3, 侧栏扩张, side-pane, conversation-status-panel, model-picker, agent-portrait, git-graph-layout, lucide, 第23次上游合并
+八、2026-10-20 第25次上游合并：输入区模型切换保存队列修复（0cc86c28，PR #254）
+
+- `modules/renderer/composerModelSelect.js`（+75/−29）：把原先的单一 `busy` 布尔量换成**按 Agent 分离的保存队列**。
+  ```js
+  const saves = new Map();
+  let disposed = false;
+  ```
+  `choose()` 改为把目标模型写入对应 Agent 的 `state.pending`，由 `drainSaves(agentId, state)` 循环排空：
+  ```js
+  while (state.pending !== null) {
+      const modelId = state.pending;
+      state.pending = null;
+      const result = await electronAPI.saveAgentConfig(agentId, { model: modelId });
+      ...
+  }
+  ```
+- **修的问题**：旧实现用 `busy` 挡住并发，**保存未完成期间的后续切换会被直接丢弃**（用户连点只生效第一次）。新实现把每次切换压入 `pending`，保存完成后继续排空，**最后一次意图胜出**。
+- **回写策略更保守**：只在保存成功后回写选中项，且保留当前项的其它最新字段（`{ ...latest, model: modelId }`）；组件销毁后（`disposed`）不再发布结果，但仍继续排空以免留下悬挂 Promise。
+- **失败可见**：保存失败调用 `window.uiHelperFunctions?.showToastNotification?.('切换模型失败: ...', 'error')` 并 `console.error('[ComposerModelSelect] 切换模型失败:', error)`。
+- 新增 `tests/composer-model-select.test.mjs`（97 行）覆盖该队列语义；`tests/terminal-command-run-watch.test.js` +9 行（非 win32 平台 store 路径对齐，176e23b5）。
+
+Tag: UI系统, ui-system, v2, v3, 侧栏扩张, side-pane, conversation-status-panel, model-picker, agent-portrait, git-graph-layout, lucide, 第23次上游合并, 第25次上游合并, composerModelSelect, 保存队列, drainSaves

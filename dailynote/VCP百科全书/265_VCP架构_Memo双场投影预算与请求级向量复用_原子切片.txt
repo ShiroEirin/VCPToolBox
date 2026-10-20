@@ -1,0 +1,105 @@
+[2026-10-20] - 哈雷酱
+[VCP百科全书] VCP架构——Memo 双场投影预算与请求级向量复用 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-20（第25次上游合并：32be7e6a「更新超强算法」、6184793e「更新算子」、ea68ab3c「优化内存1」、76e11104「核心功能实现和推进1」）
+适用范围：`rust-vexus-lite/src/memo_projection.rs`、`docs/MEMO_FIELD_PROJECTION_BUDGET.md`、`modules/knowledgeBase/memoConfig.js` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\memo_projection.rs`（463 行，本轮新增）
+- `D:\github\VCP\VCPToolBox\docs\MEMO_FIELD_PROJECTION_BUDGET.md`
+- `D:\github\VCP\VCPToolBox\modules\knowledgeBase\memoConfig.js`（`maxProjectionNodes: 256`）
+- `D:\github\VCP\VCPToolBox\tests\memoProjectionBudget.test.js`（77 行，新增）
+- 上游 commit：32be7e6a（memo_projection.rs +463、memo_pipeline.rs +60、node 10,578,432 → 10,628,608B）
+
+一、新模块的自我定位（memo_projection.rs 头部原文）
+
+```rust
+//! Request-local seed-basin projection. Never modifies Sense, scalar fields or Omega.
+```
+
+三句话概括：**请求级、种子流域、不改观测本身**。投影只决定「这一轮要加载哪些节点向量」，不触碰 Sense 输出、标量场与 Ω 泛函。
+
+二、硬上限常量（实测）
+
+```rust
+const RESERVED: usize = 8;        // 每活动前沿的保底外圈机会
+const STATE_LIMIT: usize = 8192;  // 全局最多出队状态数
+const EDGE_LIMIT: usize = 65536;  // 边预算
+const BATCH: usize = 4;           // 保底后每次最多推进的外圈节点数
+```
+
+三、核心数据结构
+
+```rust
+pub(crate) struct Basin {
+    pub(crate) id: i64,
+    pub(crate) inner: Vec<i64>,   // 流域内圈节点
+    pub(crate) importance: f64,   // 内圈观测能量之和
+}
+```
+
+构造入口 `seed_basins(observation: &SenseOutput, graph: &NativeArtifact) -> Vec<Basin>`，函数注释原文：
+
+```text
+/// A deterministic, disjoint observation-edge forest rooted at the recorded seeds.
+/// seed_id is representative provenance, not exact multi-source lineage. Forest
+/// assignment validates paths instead of trusting a potentially disconnected label group.
+```
+
+要点：**确定性 + 互不相交**；`seed_id` 只是「代表来源」，不是精确多源血缘；森林分配靠**验证路径**，而不是相信一个可能不连通的标签组。
+
+四、预算契约（docs/MEMO_FIELD_PROJECTION_BUDGET.md 原文要点）
+
+```text
+默认预算为 256；接受任意非负整数，不要求是 SQL 批大小的倍数。
+K 现在约束双场选点的去重并集，包含全部核心骨架；不再是旧版每场 K、并集 2K。
+0 仅取消节点数量上限，质量目标与搜索工作限额仍有效，不恢复全正支撑投影。
+核心骨架超过正预算时显式返回预算冲突，不静默裁剪路径或突破上限。
+```
+
+四条都是**语义变更**，不是参数微调：
+1. `K` 的含义从「每场 K」变成「两场去重并集的 K」——同样的数值现在更紧；
+2. `0` 不再是「不限」的等价物，只解除节点数量上限；
+3. 超预算**报冲突**而不是静默裁剪——宁可失败也不悄悄改变结果；
+4. 预算不必是 SQL 批大小的整数倍，解除了旧约束。
+
+配置落点：`memoConfig.js` 的 `effectiveSupport` 段新增 `maxProjectionNodes: 256`。
+
+五、选点算法七步（文档原文归纳）
+
+1. 以本次 Spike 活跃河网为**全局保留骨架**；不重新聚类，不额外读向量筛质心；
+2. 复用 hop-0 种子与记录的种子来源作为根线索，在正流量且存在真实 CSR 边的观测图上按根 ID / 邻接 ID **稳定排序**构造多源 BFS 森林；流域内圈有完整同流域路径，无法分配的骨架节点**保守地**作为独立内圈保留；
+3. 每个「流域 × 场」维护独立最短路前沿，从自身内圈边界**零距离起步**，边代价为**负对数传输率**，只沿 `0 < 权重 ≤ 1` 的真实出边推进——是内圈边界外的预算受限扩展，不是从单球心出发的完整测地球；
+4. 每个活动前沿前 8 个外圈接纳机会**按轮转推进，完全不看收益**；机会受剩余共享预算、质量目标、可达性与工作限额约束——**不是每个流域无条件得到 8 个新向量**；
+5. 保底完成后每次最多推进 4 个外圈节点，再按「流域重要性平方根 × 近期新增归一化场质量 / (1 + 已接纳外圈数 / 8)」选下一前沿；重要性取该流域内圈观测能量之和；近期收益取本批新增质量与旧估计各半；两场收益按各自总质量归一化；
+6. **一个节点全局只扣一次席位**；两场独立接纳、独立累计质量，不因另一场读过就自动参与本场投影；核心节点两场均保留；缺失向量不全图补位——因此路径保证只针对选点支持集，**不保证有效向量子集连通**；
+7. 全局最多处理 8192 个出队状态 / 8192 个流域—场—节点状态。
+
+第 6 条是最容易被误读的一条：**「路径保证」不等于「连通保证」**。
+
+六、配套的下游改动
+
+| 文件 | 改动 |
+|---|---|
+| `rust-vexus-lite/src/memo_pipeline.rs` | 双场投影接入（+60 → +230 多轮累计） |
+| `rust-vexus-lite/src/storage.rs` | 请求级向量差集加载（+31 起） |
+| `rust-vexus-lite/src/lib.rs` | 模块挂载（+1 → +12） |
+| `rust-vexus-lite/index.d.ts` | 新增导出类型声明（+4） |
+| `KnowledgeBaseManager.js` | 查询入口与释放 |
+| `AdminPanel-Vue/src/features/rag-tuning/metadata.ts` | 面板元数据对齐 |
+
+七、验证
+
+- `tests/memoProjectionBudget.test.js`（77 行，JS 预算回归）
+- `tests/nativeMemoManifestCompatibility.test.js`（原生跨阶段集成）
+- `tests/memoSingleTrack.test.js`（单轨约束）
+- `tests/tdbMemoryProfile.test.js`（内存画像）
+
+八、风险
+
+1. `K` 语义已变：沿用旧值（每场 K）会导致并集被压缩到原设计的一半，需要重新调参。
+2. 预算冲突是**显式失败**，上游未提供自动降级；调用方必须处理该错误路径。
+3. 「不保证有效向量子集连通」意味着下游若假设投影结果连通（例如做连通性遍历），可能踩空。
+4. 原生二进制需同步更新：`vexus-lite.win32-x64-msvc.node` 本轮多轮增长至 10,628,608B。
+
+关联章节：209（rust-vexus-lite 记忆管线）、210（RiverMemo 拓扑 V3 理论）、212（原生 Artifact 构建器与统一 Memo 运行时）、259（RiverMemo 生产契约）、266（请求级动态虫洞）、267（单轮请求共享观测）

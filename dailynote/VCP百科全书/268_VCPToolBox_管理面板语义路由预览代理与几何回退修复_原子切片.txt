@@ -1,0 +1,98 @@
+[2026-10-20] - 哈雷酱
+[VCP百科全书] VCPToolBox——管理面板语义路由预览代理与几何回退修复 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-20（第25次上游合并：907c5d60「fix(admin): 修复语义路由预览未代理到主进程及提示框不可见」，PR #508；79a5bcd7「fix: restore legacy geometry fallback and update maintenance mock」；d9f61c0d「更新面板」）
+适用范围：`adminServer.js`、`TagMemoEngine.js`、`AdminPanel-Vue/` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\adminServer.js`（+79 行）
+- `D:\github\VCP\VCPToolBox\TagMemoEngine.js`（`_geometryConfig()`，+10 行）
+- `D:\github\VCP\VCPToolBox\tests\adminRagMaintenanceRoutes.test.js`（+9 行）
+- `AdminPanel-Vue/dist` 全量重建（d9f61c0d：74 文件 / 61 插入 61 删除）
+
+一、Bug 一：语义路由预览在独立管理进程里必然 503
+
+**根因**（代码注释原文）：
+
+```text
+本地 semanticRouter 模块仅具备配置读写与上游模型拉取能力，
+预览依赖主进程中的 semanticModelRouter / RAG 插件运行态。
+若由本地路由处理会直接返回 503，且不会再进入兜底代理。
+```
+
+关键在最后半句：本地路由**先**命中，返回 503 后**不再**走兜底代理——所以是「必然失败」而不是「偶尔失败」。
+
+**修复**：在本地 admin 路由挂载**之前**，把该接口反向代理到主进程。
+
+```js
+const targetPath = "/admin_api/semantic-router/preview";
+
+const proxyReq = http.request(
+    `http://127.0.0.1:${MAIN_PORT}${targetPath}`,
+    {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: req.headers.authorization || "",
+            Cookie: req.headers.cookie || "",
+        },
+        timeout: 60 * 1000,
+    },
+    (proxyRes) => { /* 原样回传 status / content-type / body */ }
+);
+```
+
+行为细节：
+
+| 维度 | 实现 |
+|---|---|
+| 认证透传 | `Authorization` 与 `Cookie` 原样转发 |
+| 超时 | 60 秒，超时销毁并返回 **504** + 「主服务语义路由预览接口响应超时。」 |
+| 连接失败 | 返回 **502** + 「无法将语义路由预览请求转发给主服务。主服务可能未启动或正在重启中。」+ `details` 带原始 message |
+| 日志前缀 | `[AdminServer] Semantic router preview request received — forwarding to main process...` |
+| 响应体 | 先尝试 `JSON.parse`，失败则原样 `res.send` |
+| 重复响应防护 | 每个分支先判 `if (res.headersSent) return;` |
+
+二、Bug 二：全局提示框不可见
+
+**根因**：`.message-popup` 中存在**重复的 `position: relative`**，覆盖了 `position: fixed`，导致提示框不再浮于视口之上。修复即删除该重复声明（`FeedbackHost.vue` −1 行）。
+
+这是典型的 CSS 层叠顺序问题：同一选择器里后写的 `relative` 压掉了前面的 `fixed`。
+
+三、Bug 三：几何配置的 legacy 回退丢失（TagMemoEngine.js）
+
+**根因**（代码注释原文）：
+
+```text
+cleanRagParams() migrates legacy intrinsicResidual when rag_params is
+loaded through KnowledgeBaseManager, but TagMemoEngine can also be
+constructed with caller-injected params that never ran that migration.
+Keep the local fallback so a legacy-only config still resolves geometry
+instead of silently collapsing every tunable to the built-in defaults.
+A present AGS section always wins.
+```
+
+**修复**：
+
+```js
+return JSON.parse(JSON.stringify(
+    kb.geometry || { local: kb.intrinsicResidual || {} }
+));
+```
+
+改动前是 `kb.geometry || {}`——只有旧配置（`intrinsicResidual`）而没有新 AGS 段时，几何配置**静默塌陷**为内置默认值，所有可调项失效。修复后旧键仍可解析，且**存在 AGS 段时 AGS 优先**。
+
+配套回归：`tests/adminRagMaintenanceRoutes.test.js` +9 行。
+
+四、面板重建（d9f61c0d）
+
+`AdminPanel-Vue/dist` 全量重建，74 文件仅 hash 重命名（61 插入 / 61 删除），无逻辑变化。涉及 `RagTuning` / `MemoryProfileCard` / `WeatherCard` / `VcpForumCard` / `NodeInfoCard` / `ProcessCard` / `NewsCard` 等卡片产物与 `MainLayout` CSS。
+
+五、风险
+
+1. **502/504 是新的失败语义**：管理面板此前看到的是 503，现在区分「主服务未起/重启中」（502）与「主服务超时」（504），排障时不要沿用旧判断。
+2. **代理依赖 `MAIN_PORT`**：主进程换端口时该代理需同步，否则 502。
+3. **几何回退是「静默失效」类 bug 的修复**：若此前观察到「改了参数没效果」，根因可能就在这里；升级后需重新核对面板参数是否真的生效。
+4. 60 秒超时对语义路由预览这类交互操作偏长，用户侧可能感知为「卡住」。
+
+关联章节：208（TagMemoV10Engine 完整架构）、198（TagMemoEngine 统一构型）、230（知识库派生计算鲁棒性）、259（RiverMemo 生产契约与调参面板统一）

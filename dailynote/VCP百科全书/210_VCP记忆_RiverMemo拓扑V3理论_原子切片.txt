@@ -144,5 +144,19 @@ JS：整个上下文查询向量
 - experimentArms.js 等旧 JS 实验构型保留在仓库中但不属于 V3 生产执行路径
 - 候选投影、候选超集、路径几何、相对拓扑、查询河网形态统计、DSTC 观测、Direct Anchor、批级条件创新与最终排序已下沉至 Rust
 
-关联节点：RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), rust-vexus-lite记忆管线(209), TagMemoEngine统一构型(198), TagMemo浪潮算法V5(143)
-Tag: RiverMemo, topology-v3, Ω泛函, 双场语义基线, 关系拓扑创新, 直接锚点创新, 查询河网形态, Softmax, Atomic, Propositional, Narrative, 连续图读出, 三评分头, compute_query_morphology, DSTC, SmoothStep, 正部投影, TagMemo V9.1, 2026-08-04
+六、2026-10-20 第25次上游合并：理论文档同步与双场投影预算
+
+- `docs/RIVERMEMO_TOPOLOGY_V3.md` 本轮多次更新（32be7e6a +54/−?、39813e16 +23/−?），与实现同步。
+- **新增 `docs/MEMO_FIELD_PROJECTION_BUDGET.md`**：确立「双场投影预算」契约。默认预算 **256**，由 `memoConfig.js` 的 `effectiveSupport.maxProjectionNodes` 承载。四条语义变更（原文）：
+  ```text
+  默认预算为 256；接受任意非负整数，不要求是 SQL 批大小的倍数。
+  K 现在约束双场选点的去重并集，包含全部核心骨架；不再是旧版每场 K、并集 2K。
+  0 仅取消节点数量上限，质量目标与搜索工作限额仍有效，不恢复全正支撑投影。
+  核心骨架超过正预算时显式返回预算冲突，不静默裁剪路径或突破上限。
+  ```
+- **新增 `docs/MEMO_DYNAMIC_WORMHOLES.md`**：请求级动态虫洞，四条件（正权重历史出边 / 更深层金字塔残差共鸣 / 扣除回流惩罚后达最低注入门槛 / 动态保留席位内胜出），且**动态席位占用原邻居名额、不额外追加出边**。
+- **理论层的新增概念**：种子流域（seed basin）、内圈/外圈、负对数传输率边代价、流域重要性平方根加权的预算分配。Ω 泛函本身未被本轮改动——`memo_projection.rs` 头部明确「Never modifies Sense, scalar fields or Omega」。
+- 详见切片 265（双场投影预算与请求级向量复用）、266（请求级动态虫洞）。
+
+关联节点：RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), rust-vexus-lite记忆管线(209), TagMemoEngine统一构型(198), TagMemo浪潮算法V5(143), Memo双场投影预算(265), Memo请求级动态虫洞(266)
+Tag: RiverMemo, topology-v3, Ω泛函, 双场语义基线, 关系拓扑创新, 直接锚点创新, 查询河网形态, Softmax, Atomic, Propositional, Narrative, 连续图读出, 三评分头, compute_query_morphology, DSTC, SmoothStep, 正部投影, TagMemo V9.1, 2026-08-04, 第25次上游合并, 种子流域, 双场投影预算, 动态虫洞, maxProjectionNodes

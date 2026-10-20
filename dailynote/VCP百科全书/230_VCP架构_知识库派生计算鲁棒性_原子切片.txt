@@ -44,4 +44,23 @@
 - `tests/tagIndexGenerationalBaseline.test.js` 与 `tests/nativeKnowledgeRuntimeRegistry.test.js` 新增，属对应护栏。
 - `Plugin/OpenHerPersona/scripts/analyze-vector-baselines.js`（26932 字节）为向量基线分析脚本，以官方「附件脚本」形式保留了部分分析能力；本轮未逐行审阅。
 
-Tag: 知识库鲁棒性, 派生计算, ingestionPipeline, schemaManager, 反向端点索引, idx_pair_sim_tag_b, 第20次上游合并, 第22次上游合并, 分代双槽基线, 协调器死锁, 嵌入维度解耦
+六、2026-10-20 第25次上游合并：观测内存画像与单轮共享观测
+
+- **`modules/knowledgeBase/memoryProfiler.js`（ea68ab3c +14 行）**：`profileRiverMemo(state)` 新增 `observationMemory` 段，通过能力探测调用原生导出：
+  ```js
+  let observationMemory = { available: false };
+  try {
+      if (typeof state.tagIndex?.memoObservationMemoryStats === 'function') {
+          const raw = state.tagIndex.memoObservationMemoryStats();
+          observationMemory = { available: true, ...(typeof raw === 'string' ? JSON.parse(raw) : raw) };
+      }
+  } catch (error) {
+      observationMemory = { available: false, error: error.message || String(error) };
+  }
+  ```
+  注意：`available: false` 同时覆盖「原生未实现」与「调用抛错」两种情况，必须读 `error` 字段才能区分。对应原生侧 `lib.rs` +12、`index.d.ts` +4 的新导出。
+- **单轮请求共享观测（deb9d156）**：`KnowledgeBaseManager.js` +59 行引入 `AsyncLocalStorage` 作用域 `memoObservationScope`，`withMemoObservationScope(operation)` 统一持有/释放原生观测句柄；`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js` +52 行接入该作用域（无该能力时裸跑，保持兼容）。详见切片 267。
+- **新增测试**：`tests/memoObservationSharing.test.js`（133 行）、`tests/ragNativeChainAudit.test.js`（+30 行）、`tests/memoSingleTrack.test.js`（+39 行）、`tests/tdbMemoryProfile.test.js`（+18 行）、`tests/nativeMemoManifestCompatibility.test.js`（+31 行）。
+- **鲁棒性主题的延续**：本轮仍属「派生计算失效语义」范畴——句柄释放失败仅 `console.warn`（`[KnowledgeBase] Shared Memo release failed`），不阻断主流程，与既有的「派生失败不污染权威层」一致。
+
+Tag: 知识库鲁棒性, 派生计算, ingestionPipeline, schemaManager, 反向端点索引, idx_pair_sim_tag_b, 第20次上游合并, 第22次上游合并, 分代双槽基线, 协调器死锁, 嵌入维度解耦, 第25次上游合并, observationMemory, AsyncLocalStorage, 共享观测, 句柄释放

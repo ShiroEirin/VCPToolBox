@@ -71,5 +71,32 @@ agent: 「始」Nova「末」
 <<<[END_TOOL_REQUEST]>>>
 ```
 
-关联节点：ContextBridge（必需依赖）、AgentAssistant
-Tag: OpenHerPersona, 人格观察, 向量轴, 异步, SQLite, hybridservice, 0.6.0-observer
+【2026-10-20 第25次上游合并：v0.7.0-observer 资源预算与生命周期（d4651130「优化openher生命周期」，6 文件 +706/−163）】
+
+- **版本 0.6.0-observer → 0.7.0-observer**；displayName 改为 `OpenHer Persona Observer`。
+- **manifest 描述原文**：「Pure asynchronous persona observation and measurement plugin. It never injects prompt text, never emits brk/HTML hints, never asks for persona_delta JSON, and never uses wall-clock emotional decay」——**纯异步观测与测量**，不注入提示词、不写 brk/HTML hint、不要求 persona_delta 回填、不用墙钟情绪衰减。
+- **命令面（4 条）**：`status` / `snapshot` / `reset` / `explain`。
+- **新增 `ObserverResources.js`（166 行）**：把资源预算收敛成一张表，每项为 `[默认值, 最小值, 最大值, 中文标签]`，并由 `resourceDefaults()` / `resourceSchema()` / `resolveResources(config)` 统一钳位（`Math.max(min, Math.min(max, ...))`）。
+- **10 项资源预算（实测默认值 / 范围）**：
+
+| 键 | 默认 | 范围 | 含义 |
+|---|---|---|---|
+| `OpenHerPersonaGlobalConcurrency` | 2 | 1–16 | 全局观测并发 |
+| `OpenHerPersonaGlobalQueueMaxSize` | 128 | 1–4096 | 全局待处理任务上限 |
+| `OpenHerPersonaQueueMaxBytes` | 1,048,576 | 8,192–16,777,216 | 待处理任务文本字节预算 |
+| `OpenHerPersonaMessageCacheMaxBytes` | 1,048,576 | 0–16,777,216 | 消息向量缓存字节预算 |
+| `OpenHerPersonaMessageCacheTtlMs` | 300,000 | 1,000–3,600,000 | 消息向量缓存有效期 |
+| `OpenHerPersonaSqliteCacheKiB` | 4,096 | 256–65,536 | SQLite 页缓存预算 |
+| `OpenHerPersonaAuditRetentionDays` | 30 | 1–3,650 | 审计保留天数 |
+| `OpenHerPersonaAuditMaxRowsPerAgent` | 1,000 | 0–100,000 | 每 Agent 审计条数上限（0 = 不记录） |
+| `OpenHerPersonaMaintenanceIntervalMs` | 60,000 | 1,000–3,600,000 | 维护间隔 |
+| `OpenHerPersonaMaintenanceBatchSize` | 100 | 1–1,000 | 每轮迁移/清理行数上限 |
+
+- **旧版状态不迁移**：`OpenHerPersonaDropLegacyState=true` 启动时清理旧 `openher_persona_*` 表与旧 JSON 状态；新版用 `openher_axis_*` 表族，**不迁移** frustration / signals / persona_delta 数据。
+- **其余配置**：`OpenHerPersonaAnchorTemperature=0.12`（二级子锚 softmax 温度）、`OpenHerPersonaStateEma=0.35`、`OpenHerPersonaCouplingStrength=0.18`（知性/感性/驱力三方 soft 杠杆）、`OpenHerPersonaDriveStateEma=0.78`、`OpenHerPersonaEmbeddingTimeoutMs=2500`（锚点冷启动用其 4 倍）。
+- `OpenHerPersona.js` +350 行、`README.md` 重写（−116/+?）；新增 `tests/openHerPersonaResources.test.js`（205 行）。
+- `ObserverResources.js` 位于 `Plugin/OpenHerPersona/`（本仓库 VCPToolBox 侧），非 VCPChat 分布式插件。
+
+关联节点：ContextBridge（必需依赖）、AgentAssistant、切片 267（单轮请求共享观测）
+
+Tag: OpenHerPersona, 人格观察, 向量轴, 异步, SQLite, hybridservice, 0.6.0-observer, 0.7.0-observer, ObserverResources, 资源预算, openher_axis_*, DropLegacyState, 第25次上游合并

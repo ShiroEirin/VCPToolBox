@@ -106,4 +106,20 @@ Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology
 - 原生产物变化：`vexus-lite.win32-x64-msvc.node` 9,949,184B → 10,481,664B；`vexus-lite.linux-x64-gnu.node` 4,635,352B → 9,502,736B（bcfbd7af 补构建）。
 - 详见切片 257（KBM 单 SQL 运行时与 TDB 换芯）、258（负压协调与启动对账）。
 
-Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, 第24次上游合并, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容
+十一、2026-10-20 第25次上游合并：双场投影、动态虫洞与项目 README
+
+- **新增 `rust-vexus-lite/README.md`（488 行，252c6321）**：这是该 crate 的首份完整自述，标题「Vexus-Lite：读、写、搜一体化的原生记忆数据库」。副标题原文列出五层能力：
+  ```text
+  SQLite 权威事实层 × TDB 2-bit 冲程检索 × AGS 统一背景场
+  × Spike 有界传播与请求级动态虫洞 × RiverMemo 共享预算双场投影与统一泛函
+  ```
+  README 明确定位：它「已不只是一个『由 JavaScript 调用的向量索引』」，而是嵌入式原生知识与记忆数据引擎。并给出**主动/被动渠道**的区分——`RAGDiary` 被动渠道（消息预处理阶段唤起记忆，模型生成回答前注入上下文）vs `LightMemo` 主动渠道（Agent 显式调用工具）。原文一句话：「主动渠道回答『我想起要去查什么』；被动渠道决定『在我开始回答时，哪些过去已经在场』。」README 同时声明「不虚构吞吐、延迟、召回率或跨产品排名」。
+- **新增 `src/memo_projection.rs`（463 行，32be7e6a）**：请求级种子流域投影，头部注释 `//! Request-local seed-basin projection. Never modifies Sense, scalar fields or Omega.`。详见切片 265。
+- **动态虫洞**：`memo_sensing.rs` 单次 +328 行、`memo_pipeline.rs` 多轮累计 +700 行级；请求级状态、不写回图资产。详见切片 266。
+- **新增 5 个实验探针 + 1 份报告（2b3b944f，+2277 行）**：`scripts/memo_cached_links_probe.js`(324) / `memo_context_wormhole_probe.js`(225) / `memo_neighbor_selection_probe.js`(197) / `memo_pyramid_csr_probe.js`(332) / `memo_real_graph_probe.js`(209) / `reports/memo_cached_links_report.md`(425)。
+- **内存与观测**：`lib.rs` +12、`index.d.ts` +4（新增 `memoObservationMemoryStats` 等导出）；`storage.rs` 请求级向量差集加载（+31 起）；`rivermemo_topology_v3.rs` 多轮累计改动。
+- **原生产物多轮增长**：`vexus-lite.win32-x64-msvc.node` 10,481,664B → 10,628,608B（中间经历 10,495,488 → 10,529,280 → 10,569,728 → 10,578,432 → 10,628,608）。
+- **新增文档**：`docs/MEMO_FIELD_PROJECTION_BUDGET.md`、`docs/MEMO_DYNAMIC_WORMHOLES.md`；`docs/RIVERMEMO_TOPOLOGY_V3.md` 同步更新。
+- 详见切片 265（双场投影预算）、266（请求级动态虫洞）、267（单轮请求共享观测）。
+
+Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, 第24次上游合并, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容, 第25次上游合并, memo_projection, 双场投影, 动态虫洞, README, 探针脚本
