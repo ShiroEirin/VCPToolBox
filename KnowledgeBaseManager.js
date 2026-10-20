@@ -5,6 +5,10 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { AsyncLocalStorage } = require('node:async_hooks');
+
+// 单轮请求拥有共享观测；异步读出只借用句柄，不得提前释放。
+const memoObservationScope = new AsyncLocalStorage();
 const { getEmbeddingsBatch } = require('./EmbeddingUtils');
 const ResultDeduplicator = require('./ResultDeduplicator'); // ✅ Tagmemo v4 requirement
 const TagMemoEngine = require('./TagMemoEngine');
@@ -1738,6 +1742,7 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
         if (options.engineMode === 'rivermemo' || options.abMode === true) {
             prepared = await this.prepareUnifiedMemoObservation(query, options);
         }
+        try {
         const raw = await runtime.executeLightMemoQuery(JSON.stringify({
             ...options,
             modelSig: this.config.modelSig,
@@ -1764,6 +1769,9 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
         result.comparisonPool = (result.comparisonPool || []).map(normalize);
         if (Array.isArray(result.river?.results)) result.river.results = result.river.results.map(normalize);
         return result;
+        } finally {
+            if (prepared) this.releaseMemoObservation(prepared);
+        }
     }
 
     async search(...args) {
@@ -2053,6 +2061,57 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
         return { artifact, dbPath: this.dbPath };
     }
 
+    async withMemoObservationScope(operation) {
+        const current = memoObservationScope.getStore();
+        if (current?.owner === this) return operation();
+        const scope = { owner: this, tasks: new Map(), handles: new Set() };
+        return memoObservationScope.run(scope, async () => {
+            try {
+                return await operation();
+            } finally {
+                await Promise.allSettled(scope.tasks.values());
+                for (const handle of scope.handles) {
+                    try {
+                        this.tagIndex?.releaseMemoObservation?.(handle);
+                    } catch (error) {
+                        console.warn(`[KnowledgeBase] Shared Memo release failed: ${error.message}`);
+                    }
+                }
+                scope.tasks.clear();
+                scope.handles.clear();
+            }
+        });
+    }
+
+    _runMemoPipelineShared(dbPath, artifactSig, inputJson, queryVector, ghostVectors) {
+        const scope = memoObservationScope.getStore();
+        if (!scope || scope.owner !== this) {
+            return this.tagIndex.runMemoPipeline(
+                dbPath, artifactSig, inputJson, queryVector, ghostVectors
+            );
+        }
+        // 使用实际 ABI 输入：包含完整 FP32 向量、所有有效配置和资产身份，
+        // 不包含候选索引、权限、K 或排序选项。
+        const key = crypto.createHash('sha256')
+            .update(stableSerialize([dbPath, artifactSig, JSON.parse(inputJson)]))
+            .update(Buffer.from(queryVector.buffer, queryVector.byteOffset, queryVector.byteLength))
+            .update(Buffer.from(ghostVectors.buffer, ghostVectors.byteOffset, ghostVectors.byteLength))
+            .digest('hex');
+        if (!scope.tasks.has(key)) {
+            const task = Promise.resolve().then(async () => {
+                const result = await this.tagIndex.runMemoPipeline(
+                    dbPath, artifactSig, inputJson, queryVector, ghostVectors
+                );
+                const metadata = JSON.parse(result.metadataJson);
+                if (metadata.observationHandle) scope.handles.add(metadata.observationHandle);
+                return result;
+            });
+            // 在启动原生任务前登记 Promise；失败也共享，避免同轮失败风暴。
+            scope.tasks.set(key, task);
+        }
+        return scope.tasks.get(key);
+    }
+
     /**
      * 统一原生感应入口。
      *
@@ -2095,9 +2154,15 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
             ...(options.transferField || {})
         };
         const effectiveSupportConfig = {
+            ...(riverConfig.effectiveSupport || {}),
             ...(nativeMemoConfig.effectiveSupport || {}),
             ...(options.effectiveSupport || {})
         };
+        const maxFieldProjectionNodes = options.maxFieldProjectionNodes
+            ?? effectiveSupportConfig.maxProjectionNodes ?? 256;
+        if (!Number.isSafeInteger(maxFieldProjectionNodes) || maxFieldProjectionNodes < 0) {
+            throw new RangeError('maxFieldProjectionNodes must be a non-negative safe integer');
+        }
         const language = kbConfig.languageCompensator || {};
         const requestedCoreTags = Array.isArray(options.coreTags)
             ? options.coreTags
@@ -2137,7 +2202,7 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
             isCore: tag.isCore
         }));
 
-        const nativeResult = await this.tagIndex.runMemoPipeline(
+        const nativeResult = await this._runMemoPipelineShared(
             dbPath,
             artifact.artifactSig,
             JSON.stringify({
@@ -2185,6 +2250,7 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
                             Number(effectiveSupportConfig.transferMassRatio ?? 0.9)
                         )
                     ),
+                    maxFieldProjectionNodes,
                     maxLevels: Math.max(
                         1,
                         Math.floor(Number(options.maxPyramidLevels) || 3)
@@ -2290,6 +2356,7 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
             || !(enhancedVector instanceof Float32Array)
             || enhancedVector.length !== this.config.dimension
         ) {
+            if (observationHandle) this.releaseMemoObservation({ observationHandle });
             const error = new Error(
                 'Unified native Memo pipeline failed artifact/schema validation'
             );
@@ -2414,6 +2481,19 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
         });
     }
 
+    releaseMemoObservation(prepared) {
+        const handle = prepared?.observationHandle;
+        if (!handle || typeof this.tagIndex?.releaseMemoObservation !== 'function') return false;
+        const scope = memoObservationScope.getStore();
+        if (scope?.owner === this && scope.handles.has(handle)) return false;
+        try {
+            return this.tagIndex.releaseMemoObservation(handle);
+        } catch (error) {
+            console.warn(`[KnowledgeBase] Memo observation release failed: ${error.message}`);
+            return false;
+        }
+    }
+
     /**
      * 统一 Memo 单轨读出门面。readoutMode 只允许 topology_v3；
      * RiverMemo 复用原生 QueryObservation 和统一活动图代际。
@@ -2437,6 +2517,7 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
             || await this.prepareUnifiedMemoObservation(query, options);
         const { artifact, sourceObservationResult } = prepared;
 
+        try {
         if (mode === 'topology_v3') {
             if (!this.riverMemoEngine) {
                 const error = new Error('RiverMemo engine is unavailable');
@@ -2486,7 +2567,9 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
                 }
             );
         }
-
+        } finally {
+            if (!options.preparedMemoObservation) this.releaseMemoObservation(prepared);
+        }
     }
 
     /**
@@ -2703,6 +2786,7 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
             if (!isStaleMemo(error)) throw error;
             return degradedKnn();
         }
+        try {
         const agentContext = {
             agentId: options.agentId || null,
             diaryNames,
@@ -2790,6 +2874,9 @@ this.tagMemoV10Engine = new TagMemoV10Engine(
                 nativeJointQuery: false
             }
         );
+        } finally {
+            if (!options.preparedMemoObservation) this.releaseMemoObservation(prepared);
+        }
 
         async function collectCandidates() {
             const searchOptions = {

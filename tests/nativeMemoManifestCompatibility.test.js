@@ -203,9 +203,32 @@ async function main() {
         );
         assert.strictEqual(
             topology.diagnostics.queryTagSqlBatches,
-            1,
-            'River and Anchor Tag vectors must share one batched SQL query'
+            0,
+            'River and Anchor Tag vectors reuse the request pool without SQL'
         );
+
+        assert.strictEqual(topology.diagnostics.candidateTagVectorSqlBatches, 0,
+            'candidate Tags already loaded by Pyramid must not fetch vector BLOBs again');
+        assert.strictEqual(topology.diagnostics.candidateTagVectorFetchedNodes, 0);
+        assert.strictEqual(pipelineMetadata.diagnostics.dualField.sqlFetchedNodes, 0);
+        const fieldGrowth = pipelineMetadata.diagnostics.dualField.growth;
+        assert.strictEqual(fieldGrowth.budget, 256);
+        assert(fieldGrowth.unionNodes <= 256, 'both fields share one union hard cap');
+        assert.strictEqual(fieldGrowth.unionNodes,
+            pipelineMetadata.diagnostics.dualField.selectedProjectionNodes);
+        assert.strictEqual(fieldGrowth.coreNodes,
+            pipelineMetadata.diagnostics.sensing.reachedNodes);
+        assert(fieldGrowth.settledStates <= 8192);
+        assert(fieldGrowth.scannedEdges <= 65536);
+        assert(fieldGrowth.lanes.length > 0, 'seed basins must reach the production pipeline');
+        for (const lane of fieldGrowth.lanes) {
+            assert(lane.innerNodes > 0);
+            assert(lane.reservedNodes <= 8);
+            assert(lane.reservedNodes <= lane.outerNodes);
+            assert(Number.isFinite(lane.radius));
+        }
+        assert(Number.isFinite(pipelineMetadata.diagnostics.dualFieldSolveMs));
+        assert(Number.isFinite(pipelineMetadata.diagnostics.dualFieldProjectMs));
 
         const jointPayload = await nativeKnowledgeRuntime.executeRiverQuery(
             dbPath,
@@ -414,6 +437,41 @@ async function main() {
                     .intermediateCandidatesCrossedNapi,
                 false
             );
+        }
+
+        const retained = JSON.parse(index.memoObservationMemoryStats());
+        assert.strictEqual(retained.entries, 8,
+            'raw ABI caller owns handles until all internal consumers finish');
+        assert(retained.payloadCapacityBytes > 0);
+        assert(retained.tagVectorNodes > 0);
+        assert(retained.tagVectorBytes > 0);
+        assert.strictEqual(JSON.parse(index.memoObservationMemoryStats()).entries, 8,
+            'memory diagnostics must not evict observations');
+        for (const handle of concurrentHandles) {
+            assert.strictEqual(index.releaseMemoObservation(handle), true);
+            assert.strictEqual(index.releaseMemoObservation(handle), false,
+                'request release must be idempotent');
+        }
+        const released = JSON.parse(index.memoObservationMemoryStats());
+        assert.strictEqual(released.entries, 0);
+        assert.strictEqual(released.payloadCapacityBytes, 0);
+        assert.strictEqual(released.tagVectorNodes, 0);
+        assert.strictEqual(released.tagVectorBytes, 0);
+        assert.strictEqual(index.memoRuntimeStats().resident, true,
+            'releasing requests must retain the shared background graph');
+
+        for (let round = 0; round < 32; round++) {
+            const pipeline = await index.runMemoPipeline(
+                dbPath, result.artifactSig,
+                JSON.stringify({ queryText: `memory-round-${round}`,
+                    config: { maxLevels: 1, pyramidTopK: 3 } }),
+                new Float32Array([1, 0, 0, 0]), new Float32Array()
+            );
+            const handle = JSON.parse(pipeline.metadataJson).observationHandle;
+            assert.strictEqual(JSON.parse(index.memoObservationMemoryStats()).entries, 1);
+            assert.strictEqual(index.releaseMemoObservation(handle), true);
+            assert.strictEqual(JSON.parse(index.memoObservationMemoryStats()).payloadCapacityBytes, 0,
+                `round ${round} must not retain completed request payloads`);
         }
 
         const row = JSON.parse(await nativeKnowledgeRuntime.getNativeMemoManifest(
