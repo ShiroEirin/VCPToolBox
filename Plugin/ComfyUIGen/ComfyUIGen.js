@@ -62,9 +62,10 @@ function debugLog(...args) {
 }
 
 // Helper to validate input arguments
-function isValidComfyUIGenArgs(args) {
-    if (!args || typeof args !== 'object') return false;
-    if (typeof args.prompt !== 'string' || !args.prompt.trim()) return false;
+function isValidComfyUIGenArgs(args, requiresPrompt = true) {
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
+    if (requiresPrompt && (typeof args.prompt !== 'string' || !args.prompt.trim())) return false;
+    if (!requiresPrompt && args.prompt !== undefined && typeof args.prompt !== 'string') return false;
     return true;
 }
 
@@ -111,7 +112,23 @@ function resolveNumericArg(value, fallback) {
 function fillWorkflowParameters(workflow, args, config) {
     const settings = config.userSettings || {};
     const userPrompt = args.prompt || '';
+
+    // 含缩放占位符的模板使用各自默认倍率；拒绝非法输入。
+    let resizeScale;
+    if (JSON.stringify(workflow).includes('{{RESIZE_SCALE}}')) {
+        const candidate = args.resize_scale ?? settings.defaultResizeScale ?? 2;
+        resizeScale = Number(candidate);
+        if ((typeof candidate !== 'number' && typeof candidate !== 'string') ||
+            String(candidate).trim() === '' || !Number.isFinite(resizeScale) || resizeScale <= 0) {
+            throw new Error('resize_scale must be a finite number greater than 0.');
+        }
+    }
     
+    const facePrompt = args.face_prompt ?? settings.facePrompt ?? '';
+    if (JSON.stringify(workflow).includes('{{FACE_PROMPT}}') && typeof facePrompt !== 'string') {
+        throw new Error('face_prompt must be a string.');
+    }
+
     // 构建LoRA字符串
     const lorasString = buildLoRAsString(settings.loras || []);
     
@@ -139,6 +156,7 @@ function fillWorkflowParameters(workflow, args, config) {
         '{{IMAGE}}': args.image || '',
         '{{IMAGE_2}}': args.image_2 || '',
         '{{RESOLUTION}}': resolveNumericArg(args.resolution, settings.defaultResolution ?? 0),
+        '{{RESIZE_SCALE}}': resizeScale,
         '{{MODEL}}': args.model || settings.defaultModel || 'sd_xl_base_1.0.safetensors',
         '{{WIDTH}}': resolveNumericArg(args.width, settings.defaultWidth || 1024),
         '{{HEIGHT}}': resolveNumericArg(args.height, settings.defaultHeight || 1024),
@@ -156,6 +174,7 @@ function fillWorkflowParameters(workflow, args, config) {
         '{{USER_PROMPT}}': userPrompt || '',
         '{{PROMPT_INPUT}}': userPrompt || '', // 独立提示词输入
         '{{LORA_PROMPT}}': args.lora_prompt || '',
+        '{{FACE_PROMPT}}': facePrompt,
         
         // 组件字符串
         '{{LORAS}}': lorasString,
@@ -493,8 +512,8 @@ async function generateImageAndSave(args) {
         throw new Error(`ComfyUI Plugin Error: Missing environment variables: ${missing.join(', ')}. Available env vars: ${Object.keys(process.env).filter(k => k.includes('HTTP') || k.includes('PORT') || k.includes('IMAGE')).join(', ')}`);
     }
 
-    if (!isValidComfyUIGenArgs(args)) {
-        throw new Error(`ComfyUI Plugin Error: Invalid arguments. Required: prompt (string). Received: ${JSON.stringify(args)}`);
+    if (!args || typeof args !== 'object' || Array.isArray(args)) {
+        throw new Error('ComfyUI Plugin Error: Invalid arguments. Expected an object.');
     }
 
     debugLog('Starting image generation with args:', args);
@@ -524,7 +543,11 @@ async function generateImageAndSave(args) {
             
             // 兼容旧格式（直接是工作流）和新格式（包含元数据和 workflow 键）
             const workflowObject = wfTemplate.workflow || wfTemplate;
-            strictWorkflow = Array.isArray(wfTemplate.requiredInputs) && wfTemplate.requiredInputs.length > 0;
+            strictWorkflow = wfTemplate.requiresPrompt === false ||
+                (Array.isArray(wfTemplate.requiredInputs) && wfTemplate.requiredInputs.length > 0);
+            if (!isValidComfyUIGenArgs(args, wfTemplate.requiresPrompt !== false)) {
+                throw new Error('ComfyUI Plugin Error: Invalid arguments. Required: prompt (string), except for workflows with requiresPrompt=false.');
+            }
             const preparedArgs = await prepareWorkflowImages(args, wfTemplate.requiredInputs || [], config);
             const workflowConfig = {
                 ...config,
@@ -548,19 +571,32 @@ async function generateImageAndSave(args) {
             break; // 成功，退出回退序列
         } catch (e) {
             lastError = e;
+            // [芙铃诊断补丁 2026-09-06 / 2026-10-15] 捕获ComfyUI 400响应体原文，终结“替身演员顶包”黑箱
+            let respBody = '';
+            try {
+                if (e && e.response && e.response.data) {
+                    respBody = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
+                }
+            } catch (_) {}
+            const diagnosticMsg = (e && e.message ? e.message : String(e)) + (respBody ? ' | ComfyUI-400-body: ' + respBody.substring(0, 2048) : '');
+            e.diagnosticMessage = diagnosticMsg;
+            if (respBody) {
+                e.message = diagnosticMsg;
+            }
             if (strictWorkflow) throw e;
-            debugLog(`Workflow ${wfName} failed:`, e && (e.message || e.toString()));
+            debugLog(`Workflow ${wfName} failed:`, diagnosticMsg);
             // 继续下一回退候选
         }
     }
 
     if (!savedImages) {
         // 所有回退均失败
-        throw new Error(`All workflow attempts failed. Primary: ${primaryWorkflowName}. Last error: ${lastError && lastError.message ? lastError.message : String(lastError)}`);
+        throw new Error(`All workflow attempts failed. Primary: ${primaryWorkflowName}. Last error: ${lastError && (lastError.diagnosticMessage || lastError.message) ? (lastError.diagnosticMessage || lastError.message) : String(lastError)}`);
     }
     
     // 7. 构建返回结果 - 结构化格式
-    const altText = args.prompt.substring(0, 80) + (args.prompt.length > 80 ? "..." : "");
+    const altPrompt = args.prompt || usedWorkflow || 'ComfyUI';
+    const altText = altPrompt.substring(0, 80) + (altPrompt.length > 80 ? "..." : "");
     
     let textContent = `ComfyUI 图片生成成功！共生成 ${savedImages.length} 张图片\n\n`;
     textContent += `详细信息：\n`;
@@ -602,7 +638,7 @@ async function generateImageAndSave(args) {
         content: content,
         details: {
             workflow: usedWorkflow,
-            prompt: args.prompt,
+            prompt: args.prompt || '',
             imageCount: savedImages.length,
             images: savedImages.map(img => ({
                 serverPath: `image/comfyuigen/${img.filename}`,
@@ -656,6 +692,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+    isValidComfyUIGenArgs,
     fillWorkflowParameters,
     configureWorkflowLora,
     resolveSeed,
