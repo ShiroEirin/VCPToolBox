@@ -75,4 +75,24 @@ AdminPanel-Vue 是 VCPToolBox 的新一代管理面板，替代了旧的纯 HTML
 package.json 中 "type": "module" (行5)，表明项目使用 ES Module 标准。
 "private": true (行4)，不发布到 npm。
 
-Tag: AdminPanel-Vue, Vue3, Vite, Pinia, vue-router, TypeScript, 管理面板, RAG调参, Agent管理, 插件配置, Markdown渲染, DOMPurify
+七、2026-10-26 第26次上游合并：构建产物摘出版本库（PR #525，6167e642）
+
+- **`AdminPanel-Vue/dist` 从版本库移除，删除 303 个文件**——这是本轮 ToolBox 净删 43,320 行的主因。
+- `.gitignore` 变化：**删除**两条反规则 `!AdminPanel-Vue/dist/` 与 `!AdminPanel-Vue/dist/**`（原注释「# 但保留 AdminPanel-Vue 构建产物，让用户开箱即用」），**新增** `AdminPanel-Vue/dist`；另新增 `.audit`、`Plugin/LinuxShellExecutor/state/`。
+- `package.json` 脚本改写：
+  ```diff
+  - "build:admin": "cd AdminPanel-Vue && npm install && npm run build",
+  + "build:admin": "node scripts/ensure_admin_panel.js --force",
+  + "ensure:admin": "node scripts/ensure_admin_panel.js",
+  ```
+- **新增 `scripts/ensure_admin_panel.js`**，头注释原文：
+  ```text
+  跨平台 AdminPanel-Vue 前端静态资产校验与自愈构建中枢
+  1. 探针 A（物理与引用自洽）：检查 dist/index.html 是否存在，并反查其引用的主 JS/CSS 在磁盘是否真实存在（杜绝三层指纹错位与白屏）；
+  2. 探针 B（源码新鲜度比对）：比对 src/**, public/**, package.json, vite.config.ts 的最新 mtime 是否超过 dist；
+  3. 安全极速构建：在必要时调用 npm run build:no-type-check，强制覆盖 NODE_ENV=production，并注入 1024MB 堆上限防御 OOM。
+  ```
+- **部署影响**：全新拉取后**没有 dist**，必须先跑 `npm run ensure:admin`，否则管理面板 404；且需 `AdminPanel-Vue/node_modules` 已存在（`--force` 不负责装依赖）。
+- 详见切片 273（AdminPanel 构建产物摘出与 ensure_admin_panel 自愈构建）。
+
+Tag: AdminPanel-Vue, Vue3, Vite, Pinia, vue-router, TypeScript, 管理面板, RAG调参, Agent管理, 插件配置, Markdown渲染, DOMPurify, 第26次上游合并, dist摘出, ensure_admin_panel, 自愈构建

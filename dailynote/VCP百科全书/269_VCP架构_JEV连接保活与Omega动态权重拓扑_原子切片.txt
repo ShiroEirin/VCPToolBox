@@ -1,0 +1,91 @@
+[2026-10-26] - 哈雷酱
+[VCP百科全书] VCP架构——JEV 连接保活与基于 Ω 泛函的动态权重拓扑 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-26（第26次上游合并：59d34ab5「引入jev-keepalive大幅提升延迟可用性」、dd39d7d5「实现基于Ω泛函的动态Jev权重拓扑」）
+适用范围：`modules/jevClient.js`、`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js`、`rust-vexus-lite/src/native_rerank.rs` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\modules\jevClient.js`（59d34ab5 +138/−11）
+- `D:\github\VCP\VCPToolBox\Plugin\RAGDiaryPlugin\RAGDiaryPlugin.js`（dd39d7d5 +28）
+- `D:\github\VCP\VCPToolBox\rust-vexus-lite\src\native_rerank.rs`（新增，`//! Native HTTP ranking. Candidate bodies never need a JavaScript round trip.`）
+- `tests\jevClient.test.js`（+88）、`tests\ragGreenLane.test.js`（+68）
+
+一、JEV 连接保活（jev-keepalive）
+
+jevClient 新增 HTTP Agent 级连接复用，四个可调参数全部走「override → options → 环境变量 → 默认值」四级回退：
+
+| 参数 | 环境变量 | 默认 | 允许区间 |
+|---|---|---|---|
+| `keepAlive` | `JEV_KEEPALIVE` | `true` | 布尔 |
+| `keepAliveMsecs` | `JEV_KEEPALIVE_MSECS` | 10,000 | 上限 60,000 |
+| `maxSockets` | `JEV_MAX_SOCKETS` | 10 | 上限 100 |
+| `maxFreeSockets` | `JEV_MAX_FREE_SOCKETS` | 5 | 上限 50 |
+| `socketTimeoutMs` | `JEV_SOCKET_TIMEOUT_MS` | 60,000 | — |
+
+布尔解析函数 `parseBoolean(value, fallback = true)` 接受 `true/1/yes/on` 与 `false/0/no/off`，其余回落默认。新增 `this.directAgents = new Map()` 按目标分桶管理 Agent。
+
+**意义**：JEV 决策调用此前每次新建 TCP/TLS 连接，高频工具调用下握手开销累积成延迟。keepAlive 让连接池常驻，官方标题称「大幅提升延迟可用性」——注意这是**可用性**表述，不是延迟数字承诺。
+
+二、基于 Ω 泛函的动态权重拓扑
+
+核心是一个新方法 `_omegaRrfAlpha(omega)`，把 Ω 泛函的标量值映射成 RRF 融合的外部权重：
+
+```js
+_omegaRrfAlpha(omega) {
+    if (typeof omega !== 'number' || !Number.isFinite(omega) || omega < 0 || omega > 1) return 0.5;
+    // Alpha is the EXTERNAL weight: Omega .4 => RM .3; Omega .9 => RM .7.
+    return 1 - Math.max(0.3, Math.min(0.7, 0.5 + 0.8 * (omega - 0.65)));
+}
+```
+
+拆开看：
+- **输入校验**：非数、非有限、越界（<0 或 >1）一律回落 `0.5`；
+- **映射**：`0.5 + 0.8 × (omega − 0.65)`，再夹在 `[0.3, 0.7]`；
+- **取反**：`1 − x` 得到 alpha，因为 alpha 是**外部（非 RiverMemo）权重**；
+- **注释给的锚点**：Omega 0.4 → RM 权重 0.3；Omega 0.9 → RM 权重 0.7。
+
+调用侧新增 `weightMode` 诊断字段：
+
+```text
+weightMode: rankOptions.autoRrfAlpha && canUseNativeRiverFullPath ? 'omega-v1' : 'fixed'
+```
+
+即：只有 `autoRrfAlpha` 开启**且**原生 RiverMemo 全路径可用时才走动态权重，否则退回固定值。同时输出 `alpha` / `riverWeight` / `omega` 三个诊断量，`omega` 缺失时明确置 `null` 而不是强转为 0（代码注释原文：「Preserve missing/invalid Omega rather than coercing it to zero.」）。
+
+三、原生 HTTP 重排（native_rerank.rs）
+
+新增 Rust 侧 HTTP 排名器，头部注释：
+
+```rust
+//! Native HTTP ranking. Candidate bodies never need a JavaScript round trip.
+```
+
+硬上限与并发控制（实测）：
+
+```rust
+const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;   // 单响应 4MiB
+static KEY_CURSOR: AtomicUsize = AtomicUsize::new(0);   // 多 key 轮询游标
+static HTTP_LIMIT: OnceLock<Arc<Semaphore>> = OnceLock::new();  // 全局并发闸
+static CLIENTS: OnceLock<Mutex<HashMap<String, Client>>> = OnceLock::new();  // 按 provider 复用 Client
+```
+
+`Ranker` 结构持有 `client` / `url` / `keys` / `model` / `jev` / `provider` / `prompt` / `referer`。要点是**候选正文不再经过 JS 往返**——重排请求与响应全程在 Rust 内完成，只把最终排序结果交回 JS。
+
+四、验证
+
+| 测试 | 行数 | 覆盖 |
+|---|---|---|
+| `tests/jevClient.test.js` | +88 | keepAlive 参数解析与回退链 |
+| `tests/ragGreenLane.test.js` | +68 | 绿道（GreenLane）权重路径 |
+| `tests/nativeParallelRerank.test.js` | 新增 | 原生并行重排 |
+| `tests/nativeRerankSearchOptions.test.js` | 新增 64 行 | 原生重排搜索选项透传 |
+| `tests/nativeGreenLane.test.js` | 新增 | 原生绿道 |
+
+五、风险
+
+1. **`autoRrfAlpha` 是行为开关**：开启后排序权重随 Ω 浮动，同一查询在不同图状态下可能给出不同排序——可复现性下降是设计取舍，不是 bug。
+2. **Omega 缺失时 alpha 回落 0.5**，即两路等权；若观察到「有时排序像随机」，先查 `diagnostics.omega` 是否为 `null`。
+3. **keepAlive 默认开启**（`JEV_KEEPALIVE` 缺省为 true）：若 JEV 服务端有连接数限制，`maxSockets` 默认 10 可能触发限流，需按服务端配额调整。
+4. `native_rerank.rs` 的 `RESPONSE_LIMIT` 是 4MiB 硬上限，超长重排响应会被截断——大候选集需先裁剪。
+
+关联章节：236（JEV 语义工具调用实验体系）、237（JEV 级联语义二次判断）、251（JEV 第三方插件注册表）、262（前端分布式插件 JEV 规范声明）、270（ChromeBridge JEV 实体服务）

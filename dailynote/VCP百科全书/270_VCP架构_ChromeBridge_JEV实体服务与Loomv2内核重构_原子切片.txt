@@ -1,0 +1,92 @@
+[2026-10-26] - 哈雷酱
+[VCP百科全书] VCP架构——ChromeBridge JEV 实体服务与 Loom v2 内核重构 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-26（第26次上游合并：add5dbb5「大幅升级ChromeBridge+jev接入」、77f941d1「完成loomv2内核重构+jev浏览器辅助操作！」）
+适用范围：`Plugin/ChromeBridge/`、`modules/loom/` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\Plugin\ChromeBridge\jevEntityService.js`（新增 115 行）
+- `D:\github\VCP\VCPToolBox\Plugin\ChromeBridge\VCPChrome\webcore\web-agent-entity-arbiter.js`（新增 61 行）
+- `D:\github\VCP\VCPToolBox\Plugin\ChromeBridge\VCPChrome\webcore\web-agent-page-runtime-core.js`（+259 行）
+- `D:\github\VCP\VCPToolBox\tests\chromeBridge\jev-ws-test.js`（新增 195 行）
+- VCPChat 侧：`modules/loom/webcore/` 同名文件同步改动，`tests/loom-v2-webcore.test.js`（新增 375 行）
+
+一、jevEntityService.js 的安全边界（头两行原文）
+
+```js
+// ChromeBridge transport boundary: never expose an unrestricted Jev proxy.
+const ALLOWED_COMMANDS = new Set([
+    'page_click', 'page_type', 'page_set_value', 'page_send_keys',
+    'page_select_option', 'page_hover', 'page_check', 'page_scroll',
+    'page_wait_for', 'page_query_html'
+]);
+```
+
+**白名单只有 10 条页面级命令**，全部是「对已渲染页面做原子操作」，不含任何导航、脚本注入、文件或系统能力。这是本轮最重要的一条安全事实：JEV 通过 ChromeBridge 能做的事被硬编码枚举封死，不是开放式代理。
+
+二、入参校验（实测）
+
+```js
+if (typeof data.requestId !== 'string' ||
+    !/^[a-zA-Z0-9-]{1,100}$/.test(data.requestId) ||
+    Buffer.byteLength(JSON.stringify(data), 'utf8') > 32768) {
+```
+
+三重限制：
+1. `requestId` 必须是字符串；
+2. 必须匹配 `^[a-zA-Z0-9-]{1,100}$`——只允许字母数字与连字符，长度 1–100；
+3. 整个 payload 的 UTF-8 字节数 **≤ 32,768**（32KiB）。
+
+三、连接与并发治理
+
+```js
+const connections = new WeakMap();
+let active = 0;
+```
+
+- `connections` 用 **WeakMap** 按 entry 绑定，连接断开后自动回收，不产生泄漏；
+- `active` 计数器控制并发；
+- 回包前检查 `socket.readyState !== 1`，非 OPEN 直接丢弃；
+- `send` 包在 `try { } catch { }` 内，注释原文：「A closed transport must not escape the async handler.」——**关闭的传输层不允许把异常抛出异步处理器**。
+
+回包格式固定：
+
+```json
+{ "type": "jev_entity_result", "data": { "requestId": "...", ...result } }
+```
+
+四、web-agent-entity-arbiter.js（新增 61 行）
+
+实体仲裁器：当页面存在多个可交互实体（多个候选元素）时，决定「这次操作落到哪一个」。这是把「自然语言指代」落到「具体 DOM 实体」的裁决层。
+
+五、web-agent-page-runtime-core.js（+259 行）
+
+页面运行时核心大幅扩张，是本轮 ChromeBridge 改动的最大单体。配套 `web-agent-page-core.js`（+88）、`web-agent-runtime-core.js`（+120）、`web-agent-protocol.js`（+5）、`index.js`（+5）。
+
+六、Loom v2 内核重构（VCPChat 侧）
+
+同一批 webcore 文件在 VCPChat 侧同步改动（`modules/loom/webcore/`），另有：
+
+| 文件 | 变化 |
+|---|---|
+| `modules/loom/VCPLoomManager.js` | +9 |
+| `modules/loom/sideBrowserService.js` | 9 行 |
+| `modules/services/globalJevService.js` | +2 |
+| `tests/loom-v2-webcore.test.js` | 新增 375 行 |
+
+合计 11 文件 / +867 −65。
+
+**注意**：ToolBox 与 VCPChat 两侧存在**同名 webcore 文件**（`web-agent-entity-arbiter.js`、`web-agent-page-core.js`、`web-agent-page-runtime-core.js`、`web-agent-protocol.js`、`web-agent-runtime-core.js`、`index.js`）。这是双仓同步维护的同一套协议实现，改动时需两边对齐。
+
+七、验证
+
+`tests/chromeBridge/jev-ws-test.js`（195 行）覆盖 WebSocket 通道上的 JEV 实体请求/响应；VCPChat 侧 `tests/loom-v2-webcore.test.js`（375 行）覆盖 loom v2 内核。
+
+八、风险
+
+1. **白名单是硬边界**：想让 JEV 做白名单外的页面操作，必须改 `ALLOWED_COMMANDS` 源码，不存在配置项绕过——这是刻意设计。
+2. **32KiB payload 上限**：`page_type` 粘贴大段文本会超限，需分段。
+3. **双仓同名文件**：ToolBox 与 VCPChat 各有一份 webcore 实现，版本漂移会导致协议不匹配。合并上游时若只更新一侧，需手动核对另一侧。
+4. `active` 计数器与 `WeakMap` 的组合意味着并发上限由调用侧控制，服务本身不设硬闸（与 `native_rerank.rs` 的 `Semaphore` 不同）。
+
+关联章节：24（ChromeBridge 插件说明）、221（Loom v2 设备管理根权限与 webcore 集成）、269（JEV 连接保活与 Omega 动态权重拓扑）

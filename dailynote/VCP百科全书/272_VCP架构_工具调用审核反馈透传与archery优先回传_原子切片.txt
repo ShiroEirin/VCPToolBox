@@ -1,0 +1,84 @@
+[2026-10-26] - 哈雷酱
+[VCP百科全书] VCP架构——工具调用审核反馈透传与 archery 优先回传 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-26（第26次上游合并：dd4f7032「工具调用允许提示词透传」、aab375a1「fix: archery 审核反馈优先回传改造」）
+适用范围：`Plugin.js`、`modules/vcpLoop/toolExecutor.js`、`modules/handlers/`、`docs/TOOL_APPROVAL_REASON_PROTOCOL.md` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\docs\TOOL_APPROVAL_REASON_PROTOCOL.md`
+- `D:\github\VCP\VCPToolBox\Plugin.js`（dd4f7032 +27、aab375a1 +47）
+- `D:\github\VCP\VCPToolBox\modules\vcpLoop\toolExecutor.js`（+41 → +42）
+- `D:\github\VCP\VCPToolBox\modules\handlers\streamHandler.js` / `nonStreamHandler.js`（各 +5）
+- `D:\github\VCP\VCPToolBox\TVStxt\VchatRendering.txt`（16 行）
+- `tests\approvalFeedbackPassthrough.test.js`（新增 248 → 254 行）
+
+一、协议变更：新增 `reason` 字段
+
+文档原文：
+
+```text
+后端工具审核 WebSocket 协议已在原有确认/拒绝基础上，新增可选字段 `reason`。
+该字段允许用户在点击通过或拒绝时，额外输入一段文本，说明本次审核决策的原因。
+```
+
+**向后兼容**是明确的：
+
+```text
+这是一个向后兼容改动。
+```
+
+旧客户端仍可只发：
+
+```json
+{
+  "type": "tool_approval_response",
+  "data": {
+    "requestId": "approve-xxx",
+    "approved": false
+  }
+}
+```
+
+新客户端可额外带 `reason`。协议文档的适用对象是「前端应用、管理面板、VCPChat、VCPLog 客户端」——即**所有审核入口都要适配**。
+
+二、透传链路（dd4f7032）
+
+改动分布说明这是**端到端贯通**而非单点新增：
+
+| 层 | 文件 | 变化 |
+|---|---|---|
+| 插件执行层 | `Plugin.js` | +27 |
+| 工具执行循环 | `modules/vcpLoop/toolExecutor.js` | +41 |
+| 流式响应 | `modules/handlers/streamHandler.js` | +5 |
+| 非流式响应 | `modules/handlers/nonStreamHandler.js` | +5 |
+| 渲染提示词 | `TVStxt/VchatRendering.txt` | 16 行 |
+
+**关键点**：`TVStxt/VchatRendering.txt` 被改，意味着**模型能看到「审核者给了理由」这件事**——这是「提示词透传」的实际含义：不只是把理由存下来，而是把它回灌进模型的上下文，让模型知道「上一次为什么被拒/被批」。
+
+三、archery 优先回传改造（aab375a1）
+
+`archery` 是 VCP 的审核/回传机制代号。本提交标题写明「**审核反馈优先回传**」：
+
+| 文件 | 变化 |
+|---|---|
+| `Plugin.js` | +47 |
+| `modules/vcpLoop/toolExecutor.js` | +42 |
+| `tests/approvalFeedbackPassthrough.test.js` | 254 行（本轮累计） |
+
+「优先回传」意味着：当审核反馈与其它待回传内容同时存在时，**审核反馈先出**。对模型而言，这保证它在继续推理前先看到人的裁决理由，而不是被其它消息挤到后面。
+
+四、测试
+
+`tests/approvalFeedbackPassthrough.test.js` 两轮累计 254 行，覆盖：
+- `reason` 字段的透传路径；
+- 向后兼容（无 `reason` 时的旧格式）；
+- 优先回传顺序。
+
+五、风险
+
+1. **`reason` 是自由文本**：目前协议层面未声明长度或内容限制，客户端侧应自行约束，否则会挤占上下文预算。
+2. **透传进提示词意味着可被模型读取**：审核理由中的敏感信息会进入模型上下文，需在 UI 层提示用户。
+3. **优先回传改变消息顺序**：若下游依赖原有顺序（例如按到达序解析），需要重新确认。
+4. 适配面广（前端应用 / 管理面板 / VCPChat / VCPLog），**任一端未适配就会出现「理由输入了但模型看不到」**。
+
+关联章节：236（JEV 语义工具调用实验体系）、239（插件桥接注册表与工具生命周期）、264（渲染协议扫描与工具卡片架构重构）

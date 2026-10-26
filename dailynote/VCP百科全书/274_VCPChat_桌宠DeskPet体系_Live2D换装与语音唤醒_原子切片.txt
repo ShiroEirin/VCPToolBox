@@ -1,0 +1,128 @@
+[2026-10-26] - 哈雷酱
+[VCP百科全书] VCPChat——桌宠 DeskPet 体系（Live2D 换装 · 语音唤醒 · 智能骨骼）原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-26（第26次上游合并：9c4773c8「新增live2d全功能换装器」、73a0e435「新增换装系统」、f1a172de「实现智能骨骼动态绑定」、ea9f9956「新增根据音乐联动动作功能」、ca833a85「实现完整的语音唤醒功能」、b9801051「完成Vpet和语音模式上下文并线和跳线」）
+适用范围：`modules/deskpet/`、`DeskPetmodules/`、`assets/deskpet/`、`scripts/deskpet/` 当前源码
+事实来源：
+- `D:\github\VCP\VCPChat\modules\deskpet\feature.json`（feature 清单）
+- `D:\github\VCP\VCPChat\modules\deskpet\`（45 个文件）
+- `D:\github\VCP\VCPChat\modules\deskpet\wake\`（7 个文件）
+- `D:\github\VCP\VCPChat\DeskPetmodules\`（渲染侧）
+- `D:\github\VCP\VCPChat\assets\deskpet\`（81 文件）、`scripts\deskpet\`（28 文件）
+- `tests\deskpet-wake.test.mjs`（261 行）等 40 个测试
+
+一、本轮的绝对主角
+
+VCPChat 128 提交里，桌宠相关文件合计 **170 个**：
+
+```text
+assets/deskpet          81
+modules/deskpet         45
+scripts/deskpet         28
+DeskPetmodules/mainWindow 16
+```
+
+这是本系列至今单功能最大的一次扩张。上一轮（第23次）桌宠还只在 `feat/deskpet-live2d-v1` 分支、main 里零命中，本轮**已完整进主线**。
+
+二、feature 清单（feature.json 实测）
+
+```json
+{
+  "manifestVersion": "1.0.0",
+  "name": "DeskPet",
+  "displayName": "桌宠",
+  "version": "1.0.0",
+  "description": "助手的桌面形象（Live2D、精灵图或立绘）：显示回复和工具进度、朗读、闲时搭话，也能在桌面上批准工具调用。",
+  "pluginType": "feature",
+  "main": "index.js",
+  "renderer": "DeskPetmodules/mainWindow/index.js",
+  "defaultEnabled": true
+}
+```
+
+`pluginType: "feature"` 是**新的插件类型**——既非 synchronous/asynchronous/static/hybridservice，而是前端「特性模块」，由 `scripts/app-features.cjs` 统一安装/打包（本轮 package.json 新增 `postinstall` 与 `pack`/`dist` 里的 `app-features.cjs package` 调用）。
+
+自定义协议：
+
+```json
+"schemes": [
+  { "scheme": "vcp-deskpet", "privileges": { "standard": true, "secure": true, "supportFetchAPI": true } }
+]
+```
+
+三、模块结构（modules/deskpet，45 文件）
+
+| 分组 | 文件 |
+|---|---|
+| 核心 | `index.js`(2624B)、`feature.json`、`petState.js`、`petContext.js` |
+| Live2D | `cubismCore.js`(12236)、`live2dCapabilities.js`、`live2dWardrobe.js`、`outfits.js`(14706) |
+| 动作/表现 | `petMotion.js`(11107)、`expressionProfile.js`、`petGeometry.js`、`petSizing.js`、`petDisplays.js`、`petPreviews.js` |
+| 交互 | `petControls.js`(10547)、`petMenus.js`、`petTray.js`、`edgeSnap.js`、`fullscreenWatch.js` |
+| 会话 | `petHandlers.js`(19203)、`petIpc.js`(12191)、`petMainBridge.js`、`petStream.js` |
+| 主动行为 | `petProactive.js`、`idleChat.js`、`idleRunner.js` |
+| 偏好 | `petPrefs.js`(17579) |
+| 其它 | `codexPet.js`、`petAssets.js`(13354)、`petCommands.js` |
+
+四、语音唤醒（ca833a85，29 文件 +1859/−99）
+
+`modules/deskpet/wake/` 七个文件：
+
+| 文件 | 体量 | 职责 |
+|---|---|---|
+| `kwsWorker.js` | 3,394B | 关键词唤醒工作线程 |
+| `coordinator.js` | 16,599B | 唤醒协调器 |
+| `modelManager.js` | 7,026B | 模型下载/管理 |
+| `store.js` | 6,764B | 配置持久化 |
+| `keywords.js` | 7,044B | 关键词表 |
+| `workerClient.js` | 2,488B | 主线程侧客户端 |
+| `assets.json` | 1,115B | 资源清单 |
+
+`kwsWorker.js` 头两行注释原文：
+
+```js
+// 与 SenseVoice 共用 sherpa-onnx-node，但使用独立进程，避免离线转写阻塞实时唤醒。
+```
+
+实现细节（实测）：
+
+```js
+const sherpa = require('sherpa-onnx-node');
+rate = 16000;
+spotter = new sherpa.KeywordSpotter({
+    featConfig: { sampleRate: rate, featureDim: 80 },
+    modelConfig: {
+        transducer: { encoder, decoder, joiner },
+        tokens: message.paths.tokens,
+        numThreads: 1,
+        provider: 'cpu',
+    },
+```
+
+关键设计：**独立进程**跑 KWS（关键词唤醒），与 SenseVoice 离线转写共用 `sherpa-onnx-node` 但互不阻塞。采样率 16kHz、特征维 80、CPU provider、单线程。
+
+新增依赖 `pinyin-pro ^3.29.5`（中文关键词匹配需要拼音归一化）。
+
+五、换装与骨骼
+
+| 提交 | 内容 |
+|---|---|
+| `9c4773c8` | 新增 live2d 全功能换装器 |
+| `73a0e435` | 新增换装系统（15 文件 +394/−14，含 `modules/voice/voiceChatSessions.js` +109） |
+| `f1a172de` | 实现智能骨骼动态绑定 |
+| `ea9f9956` | 新增根据音乐联动动作功能 |
+| `b9801051` | 完成 Vpet 和语音模式上下文并线和跳线 |
+
+六、测试面
+
+`feature.json` 的 `tests` 数组列出 **40 个**测试文件，覆盖 wake / session-card / voice-session / assets / stream / bubble-text / lifecycle / send-bridge / life / tool-activity / proactive / controls / mood-order / speech-text / voice / voice-ipc / outfits / gaze / builtin-nova / dictation / cubism-core / expression-map / gestures / fullscreen / edge-snap / hit-areas / missed-reply / attachments / throw / wander / approvals / zip-import / idle-frames / state / backends / drop-import / head-pose / idle-chat-ipc / idle-chat / codex-sprite。
+
+七、风险
+
+1. **`defaultEnabled: true`**：升级后桌宠默认开启，会立刻占资源（Live2D 渲染 + 唤醒监听）。低配机器建议先关。
+2. **`postinstall` 新增 `node scripts/app-features.cjs install`**：`npm install` 时会执行，会下载 Cubism Core（`scripts/deskpet/fetch-cubism-core.cjs`）。**VCPChat 侧禁止跑 npm install 的规则因此更需要遵守**。
+3. **唤醒需要模型文件**：`modelManager.js` 会下载 sherpa-onnx KWS 模型，首次启用需联网。
+4. **独立进程的代价**：KWS 进程常驻，内存与句柄成本高于同进程；`provider: 'cpu'` 也意味着不占 GPU 但吃 CPU。
+5. **`vcp-deskpet` 协议带 `secure: true`**：协议注册后页面可加载本地资源，属权限扩张，需确认加载内容来源可信。
+
+关联章节：227（VCPChat 原生语音输入引擎）、249（主聊天语音输入与语音编排体系）、250（UI 系统 v2）、261（音乐演出舞台繁星如盛与音乐胶囊）

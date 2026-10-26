@@ -1,0 +1,77 @@
+[2026-10-26] - 哈雷酱
+[VCP百科全书] VCP架构——AdminPanel 构建产物摘出版本库与 ensure_admin_panel 自愈构建 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-26（第26次上游合并：6167e642「Merge pull request #525 from infinite-vector/fix/adminpanel-dist-untrack-and-autobuild」）
+适用范围：`.gitignore`、`package.json`、`scripts/ensure_admin_panel.js` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\scripts\ensure_admin_panel.js`（新增）
+- `D:\github\VCP\VCPToolBox\.gitignore`（新增 `AdminPanel-Vue/dist` 规则）
+- `D:\github\VCP\VCPToolBox\package.json`（`build:admin` / `ensure:admin` 脚本改写）
+- 上游 diff：`AdminPanel-Vue/dist` **删除 303 个文件**
+
+一、这是本轮 -60,804 行的主因
+
+ToolBox 本轮净删 43,320 行，其中绝大部分来自一件事：**把 `AdminPanel-Vue/dist` 从版本库摘出去**。
+
+| 项 | 变化 |
+|---|---|
+| `AdminPanel-Vue/dist` | **删除 303 个文件** |
+| `.gitignore` | 新增 `AdminPanel-Vue/dist` |
+| `.gitignore` | 删除 `!AdminPanel-Vue/dist/` 与 `!AdminPanel-Vue/dist/**` 两条反规则 |
+| `.gitignore` | 新增 `.audit`、`Plugin/LinuxShellExecutor/state/` |
+
+被删的两条反规则原文注释是：
+
+```text
+# 但保留 AdminPanel-Vue 构建产物，让用户开箱即用
+!AdminPanel-Vue/dist/
+!AdminPanel-Vue/dist/**
+```
+
+也就是说：**原先刻意保留 dist 是为了「开箱即用」，现在放弃了这个便利，改为自动构建**。
+
+二、package.json 脚本改写
+
+```diff
+- "build:admin": "cd AdminPanel-Vue && npm install && npm run build",
++ "build:admin": "node scripts/ensure_admin_panel.js --force",
++ "ensure:admin": "node scripts/ensure_admin_panel.js",
+```
+
+从「进目录装依赖再构建」变成「调统一脚本」——跨平台（不再依赖 `cd` 语义），且多了幂等入口 `ensure:admin`。
+
+三、ensure_admin_panel.js 的双探针设计（头注释原文）
+
+```text
+跨平台 AdminPanel-Vue 前端静态资产校验与自愈构建中枢
+
+核心职责：
+1. 探针 A（物理与引用自洽）：检查 dist/index.html 是否存在，并反查其引用的主 JS/CSS 在磁盘是否真实存在（杜绝三层指纹错位与白屏）；
+2. 探针 B（源码新鲜度比对）：比对 src/**, public/**, package.json, vite.config.ts 的最新 mtime 是否超过 dist；
+3. 安全极速构建：在必要时调用 npm run build:no-type-check，强制覆盖 NODE_ENV=production，并注入 1024MB 堆上限防御 OOM。
+```
+
+三个设计点值得单独记：
+
+| 点 | 内容 |
+|---|---|
+| **探针 A** | 不只查 `index.html` 在不在，还**反查它引用的主 JS/CSS 是否真实存在**——防的是「三层指纹错位」导致的白屏（HTML 引用了一个不存在的 hash 文件） |
+| **探针 B** | 用 **mtime 比对**判断源码是否比产物新，覆盖 `src/**`、`public/**`、`package.json`、`vite.config.ts` 四类 |
+| **构建策略** | 只在必要时构建；强制 `NODE_ENV=production`；注入 **1024MB 堆上限**防 OOM |
+
+四、对部署的影响（重要）
+
+1. **首次拉取后没有 dist**：必须跑一次 `npm run ensure:admin`（或 `build:admin`）才会生成管理面板静态资源，否则管理面板 404。
+2. **构建需要 AdminPanel-Vue 的依赖**：脚本内部会调 `npm run build:no-type-check`，前提是 `AdminPanel-Vue/node_modules` 已存在（`--force` 不负责装依赖）。
+3. **1024MB 堆**是硬编码值，低内存机器上构建仍可能失败。
+4. **不再有「开箱即用」**：这是上游的明确取舍——用一次构建换仓库体积。
+
+五、风险
+
+1. **`dist` 已进 `.gitignore`**：任何本地对 dist 的改动都不会被 Git 追踪，也无法通过 stash 保护。
+2. **探针 A 只校验主 JS/CSS**：懒加载 chunk 缺失不会被发现，仍可能白屏。
+3. **mtime 比对在 clone 后失效**：Git 不保存 mtime，全新 clone 的源码 mtime 都是「现在」，可能误判为「源码更新」而触发一次多余构建（无害但耗时）。
+4. 若部署流程依赖 `git pull` 后直接启动，必须补上 `ensure:admin` 步骤。
+
+关联章节：161（Web 管理面板与监控体系）、199（AdminPanelVue 管理面板）、268（管理面板语义路由预览代理与几何回退修复）

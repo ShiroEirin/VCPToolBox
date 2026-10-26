@@ -156,3 +156,26 @@ Tag: ChromeBridge, hybridservice, direct, open_url, click, type, wait, screensho
 - siteKey 规范化与校验（isUuid / normalizeSiteKey / isValidSiteKey）
 - `FETCH_COOKIES_RAW_MULTI` JSON 对象严格解析（拒绝重复键、格式校验）
 - VCPChrome/background.js 同步 +145（扩展侧 Cookie 抓取与回传）
+
+【2026-10-26 第26次上游合并：JEV 实体服务与 webcore 大幅升级（add5dbb5，13 文件 +943/−63）】
+
+- **新增 `jevEntityService.js`（115 行）**，头两行原文：
+  ```js
+  // ChromeBridge transport boundary: never expose an unrestricted Jev proxy.
+  const ALLOWED_COMMANDS = new Set([
+      'page_click', 'page_type', 'page_set_value', 'page_send_keys',
+      'page_select_option', 'page_hover', 'page_check', 'page_scroll',
+      'page_wait_for', 'page_query_html'
+  ]);
+  ```
+  **白名单仅 10 条页面级原子命令**，不含导航、脚本注入、文件或系统能力——JEV 经 ChromeBridge 的操作面被硬编码枚举封死，改白名单必须动源码，无配置项可绕。
+- **入参三重校验（实测）**：`requestId` 必须为字符串且匹配 `^[a-zA-Z0-9-]{1,100}$`；整个 payload 的 UTF-8 字节数 **≤ 32,768**。
+- **连接治理**：`connections = new WeakMap()` 按 entry 绑定（断开自动回收）；`active` 计数器控并发；回包前检查 `socket.readyState !== 1`；`send` 包在 try/catch 内，注释原文「A closed transport must not escape the async handler.」。
+- **回包格式**：`{ type: 'jev_entity_result', data: { requestId, ...result } }`。
+- **新增 `web-agent-entity-arbiter.js`（61 行）**：页面多候选实体时的仲裁层，把「自然语言指代」落到「具体 DOM 实体」。
+- **webcore 扩张**：`web-agent-page-runtime-core.js` +259、`web-agent-runtime-core.js` +120、`web-agent-page-core.js` +88、`web-agent-protocol.js` +5、`index.js` +5。
+- **双仓同步**：VCPChat 侧 `modules/loom/webcore/` 存在**同名文件**（77f941d1，11 文件 +867/−65），改动需两边对齐，否则协议漂移。
+- **验证**：`tests/chromeBridge/jev-ws-test.js`（新增 195 行）；VCPChat 侧 `tests/loom-v2-webcore.test.js`（新增 375 行）。
+- 详见切片 270（ChromeBridge JEV 实体服务与 Loom v2 内核重构）。
+
+Tag: ChromeBridge, VCPChrome, 浏览器扩展, Cookie, siteKey, FETCH_COOKIES_RAW_MULTI, 第26次上游合并, jevEntityService, ALLOWED_COMMANDS, web-agent-entity-arbiter, webcore, Loom v2

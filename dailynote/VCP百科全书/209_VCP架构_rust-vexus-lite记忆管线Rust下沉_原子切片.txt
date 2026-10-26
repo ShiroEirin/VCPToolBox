@@ -122,4 +122,21 @@ Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology
 - **新增文档**：`docs/MEMO_FIELD_PROJECTION_BUDGET.md`、`docs/MEMO_DYNAMIC_WORMHOLES.md`；`docs/RIVERMEMO_TOPOLOGY_V3.md` 同步更新。
 - 详见切片 265（双场投影预算）、266（请求级动态虫洞）、267（单轮请求共享观测）。
 
-Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, 第24次上游合并, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容, 第25次上游合并, memo_projection, 双场投影, 动态虫洞, README, 探针脚本
+十二、2026-10-26 第26次上游合并：性能优化连发与确定性修复（PR #528–#547）
+
+- **#531 建图载荷流式写出**（ca647995）：建图载荷直接流式写出，不再先建 JSON 树，**字节不变**。
+- **#532 冷加载零拷贝**（76cb9135）：冷加载不再复制 CSR 数组，且**只解码一次**，结果不变。
+- **#533 共享向量工作区**（45c9c3ac）：几何与建图共用同快照向量工作区；新增 `src/memo_workspace.rs` 与 `memo_workspace_build_tests.rs`。
+- **#534 float_roundtrip**（9da10426）：打开 `serde_json` 的 `float_roundtrip`，**冷加载的图资产与刚建好的逐位相同**。
+- **#535 预编译二进制同步**（42e408b7）：更新 win32-x64 原生产物（同步 #531–#534）。
+- **#538 确定性求和**（05b6fafa）：`memo_sensing.rs` +92、`rivermemo_topology_v3.rs` 10 行——Spike 传播与拓扑对齐**按固定顺序求和，同样输入每次结果逐位相同**。
+- **#529 稳定分组聚合**（4ea706fa）：稳定分组聚合事实和来源贡献，减少重复容器更新。
+- **#528 并行语义增益**（0faa096d）：并行预计算共现语义增益，**保留边权累加顺序**。
+- **#547 稀疏排除有限补找**（964c7974）：`knowledge_runtime.rs` **+435 行**，排除谓词下推至候选池并贯通原生检索通道；`docs/RUST_VECTOR_ENGINE.md` 同步；新增 `tests/nativeRerankSearchOptions.test.js`（64 行）。
+- **新增 `src/native_rerank.rs`**：原生 HTTP 排名器，头部注释 `//! Native HTTP ranking. Candidate bodies never need a JavaScript round trip.`；`RESPONSE_LIMIT = 4 * 1024 * 1024`（4MiB）、`KEY_CURSOR` 多 key 轮询、`HTTP_LIMIT` 全局 Semaphore、`CLIENTS` 按 provider 复用。
+- **新增基准**：`rust-vexus-lite/benchmarks/sm-search/`（Cargo.toml + main.rs + results-summary.json）。
+- **新增测试**：`nativeParallelRerank.test.js`、`nativeGreenLane.test.js`、`ragGreenLane.test.js`、`nativeRerankSearchOptions.test.js`、`memo_workspace_build_tests.rs`。
+- **原生产物**：`vexus-lite.win32-x64-msvc.node` 14,251,008B → 14,259,200B（dd39d7d5 时点）。
+- 详见切片 269（JEV 连接保活与 Omega 动态权重拓扑）、271（TextChunker 零回溯切分）。
+
+Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, 第24次上游合并, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容, 第25次上游合并, memo_projection, 双场投影, 动态虫洞, README, 探针脚本, 第26次上游合并, native_rerank, memo_workspace, 确定性求和, float_roundtrip, 稀疏排除, 性能优化

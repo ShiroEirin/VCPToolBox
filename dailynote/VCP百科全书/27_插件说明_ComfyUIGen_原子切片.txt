@@ -77,4 +77,13 @@ command:「始」ComfyUIGenerateImage「末」,
 prompt:「始」a majestic dragon soaring through cloudy skies at sunset, highly detailed scales, fantasy art style「末」
 <<<[END_TOOL_REQUEST]>>>
 
-Tag: ComfyUIGen, ComfyUIGenerateImage, comfyui-settings, workflow模板, 占位符替换, LoRA注入, seed策略, 图像生成, prompt管线, COMFYUI_BASE_URL, DEBUG_MODE, 0.3.0, .block禁用态, TagMemo V9.1, 第23次上游合并, Qwen21, qwen21edit, qwen21edit2in1, qwen21gen, resolveFileUrl, 20MiB限额
+【2026-10-26 第26次上游合并：分辨率放大与 Anima/Moss 工作流（e2dc7bf0、52dd448b，10 文件 +1241/−140）】
+
+- **新增分辨率放大**（e2dc7bf0）：`workflows/AnimeSharp.json`（1,069B）、`放大工作流.json`、`anime-sharp.test.js`（33 行），`ComfyUIGen.js` +35/−8。
+- **Anima 生图增强**（52dd448b）：新增 `Anima生图增强.json`（265 行）、`anima-enhanced.test.js`（60 行），`workflows/AnimaEZGen.json` 大改（202 行 / +? −131），`README.md` +25。
+- **Moss 文生图**：`moss文生图.json`（589 行）、`workflows/MossGen.json`（3,370B）。
+- **当前 workflows 目录（实测 11 个）**：`测试.json`(9696B)、`AIEasyTextToImageWithLora.json`(4169)、`anima_txt2img_lora.json`(3631)、`AnimaEZGen.json`(4027)、`AnimeSharp.json`(1069)、`MossGen.json`(3370)、`qwen21edit.json`(1844)、`qwen21edit2in1.json`(1963)、`qwen21gen.json`(2731)、`test.json`(1876)、`text2img_basic.json`(2021)。
+- **manifest 版本仍为 0.3.0**（本轮未 bump）。
+- 注意：`Plugin/ComfyUIGen/plugin-manifest.json` 在本机为**本地解锁版**（上游为 `.block` 禁用态），合并时保持本地版本。
+
+Tag: ComfyUIGen, ComfyUIGenerateImage, comfyui-settings, workflow模板, 占位符替换, LoRA注入, seed策略, 图像生成, prompt管线, COMFYUI_BASE_URL, DEBUG_MODE, 0.3.0, .block禁用态, TagMemo V9.1, 第23次上游合并, Qwen21, qwen21edit, qwen21edit2in1, qwen21gen, resolveFileUrl, 20MiB限额, 第26次上游合并, AnimeSharp, AnimaEZGen, MossGen, 分辨率放大

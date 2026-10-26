@@ -1,0 +1,104 @@
+[2026-10-26] - 哈雷酱
+[VCP百科全书] VCP架构——TextChunker 零回溯线性切分与 TextSanitizer 有界 LRU 原子切片
+
+状态：CURRENT_VERIFIED
+最后核验：2026-10-26（第26次上游合并：882a13c3「perf(rag): 重构TextChunker零回溯线性切分与TextSanitizer有界LRU记忆化，消除长文本Event Loop阻塞」，PR #542，7 文件 +671/−217）
+适用范围：`TextChunker.js`、`Plugin/RAGDiaryPlugin/TextSanitizer.js`、`ContextVectorManager.js`、`VectorMathUtils.js` 当前源码
+事实来源：
+- `D:\github\VCP\VCPToolBox\TextChunker.js`（+447/−?，当前 v4.5）
+- `D:\github\VCP\VCPToolBox\Plugin\RAGDiaryPlugin\TextSanitizer.js`（+231 级改动）
+- `D:\github\VCP\VCPToolBox\Plugin\RAGDiaryPlugin\ContextVectorManager.js`（+90）
+- `D:\github\VCP\VCPToolBox\Plugin\RAGDiaryPlugin\VectorMathUtils.js`（+71）
+- `D:\github\VCP\VCPToolBox\EmbeddingUtils.js`（+8）
+- `tests\textChunker.test.js`（+34）
+
+一、解决的问题
+
+长文本切分与清洗此前在超长输入上会长时间占用主线程，导致 Event Loop 阻塞——表现为整个服务「卡住」而不是「变慢」。本轮两条线同时改：切分改成**零回溯线性**，清洗改成**有界 LRU 记忆化**。
+
+二、TextChunker v4.5 关键常量（实测）
+
+```js
+const embeddingMaxToken = parseInt(process.env.WhitelistEmbeddingModelMaxToken, 10) || 8000;
+const safeMaxTokens = Math.floor(embeddingMaxToken * 0.85);
+const defaultOverlapTokens = Math.floor(safeMaxTokens * 0.1);
+
+// v4.5: 全链路 Token 计数 LRU 缓存与安全带水位线常量
+const TOKEN_CACHE_MAX_SIZE = 4096;
+const DIRECT_KEY_MAX_CHARS = 65536;
+const FAST_ACCEPT_MARGIN = 16;
+const tokenCountCache = new Map();
+```
+
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `embeddingMaxToken` | 环境变量 `WhitelistEmbeddingModelMaxToken`，默认 8000 | 模型 token 上限 |
+| `safeMaxTokens` | 上限 × **0.85** | 85% 安全边界 |
+| `defaultOverlapTokens` | 安全上限 × **0.1** | 默认重叠 10% |
+| `TOKEN_CACHE_MAX_SIZE` | 4096 | token 计数缓存条目上限 |
+| `DIRECT_KEY_MAX_CHARS` | 65,536 | 缓存键直接使用原串的阈值 |
+| `FAST_ACCEPT_MARGIN` | 16 | 快速接受余量 |
+
+三、有界缓存键生成（代码注释原文）
+
+```text
+生成定长有界缓存键（纯 JS 实现，100% 兼容 tests/textChunker.test.js 的 VM 沙箱环境）：
+<= 64KB 直接使用原字符串；> 64KB 使用双 32-bit FNV-1a 哈希 + 长度 + 首尾采样，
+避免大字符串常驻内存同时支持任意长度缓存。
+```
+
+设计要点：
+1. **≤64KB 直接用原串**——避免小文本白付哈希成本；
+2. **>64KB 用双 32-bit FNV-1a 哈希 + 长度 + 首尾采样**——定长键，大串不常驻内存；
+3. **纯 JS 实现**——为的是能在 VM 沙箱里跑测试，不依赖 Node 原生 crypto。
+
+四、TextSanitizer 的有界 LRU（实测常量）
+
+```js
+const SANITIZE_CACHE_MAX_SIZE = 512;
+const DIRECT_KEY_MAX_CHARS = 65536;
+const SANITIZE_VALUE_MAX_CHARS = 5000000;
+const stripHtmlCache = new Map();
+const sanitizeEmbeddingCache = new Map();
+```
+
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `SANITIZE_CACHE_MAX_SIZE` | 512 | 缓存条目上限 |
+| `DIRECT_KEY_MAX_CHARS` | 65,536 | 键直接使用阈值（与 TextChunker 一致） |
+| `SANITIZE_VALUE_MAX_CHARS` | 5,000,000 | **单值 5MB 硬上限** |
+
+超长键改用 SHA-256 摘要：
+
+```js
+function toBoundedCacheKey(rawKey) {
+    if (typeof rawKey !== 'string' || rawKey.length === 0) return '';
+    if (rawKey.length <= DIRECT_KEY_MAX_CHARS) return rawKey;
+    const digest = crypto.createHash('sha256').update(rawKey).digest('hex');
+    return `__sha256:${rawKey.length}:${digest}`;
+}
+```
+
+键格式 `__sha256:<原长度>:<hex摘要>` —— 带上原长度是为了降低哈希碰撞时的误命中概率。
+
+五、配套改动
+
+| 文件 | 变化 | 作用 |
+|---|---|---|
+| `ContextVectorManager.js` | +90 | 上下文向量管理适配新切分 |
+| `VectorMathUtils.js` | +71 | 向量数学工具 |
+| `EmbeddingUtils.js` | +8 | 嵌入请求侧 |
+| `RAGDiaryPlugin.js` | +7 | 主链挂载 |
+
+六、验证
+
+`tests/textChunker.test.js`（+34）覆盖零回溯切分与缓存键生成；该测试运行在 VM 沙箱中，因此实现必须保持纯 JS。
+
+七、风险
+
+1. **85% 安全边界是硬编码比例**：换模型后若 `WhitelistEmbeddingModelMaxToken` 未同步，实际可用 token 会偏小或偏大。
+2. **5MB 单值上限**：超过 `SANITIZE_VALUE_MAX_CHARS` 的清洗结果会被拒（具体行为需按调用侧处理），超大 HTML 文档需先分片。
+3. **FNV-1a 双 32-bit 是弱哈希**：碰撞概率高于 SHA-256，但配合「长度 + 首尾采样」已足够；若缓存命中出现内容错乱，优先怀疑这里。
+4. **LRU 上限 4096 / 512**：高频多样本场景下命中率会下降，属于「用内存换确定性」的取舍。
+
+关联章节：03（RAGDiaryPlugin 源码事实切片）、83（RAGDiaryPlugin 插件说明）、230（知识库派生计算鲁棒性）、246（嵌入维度解耦与检索 socket 加固）
