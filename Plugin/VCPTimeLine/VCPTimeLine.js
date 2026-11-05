@@ -4,7 +4,8 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 
-const PLACEHOLDER_REGEX = /\[\[VCPTimeLine::([^:\]\r\n]+?)(?::([^:\]\r\n]+?))?(?::([^:\]\r\n]+?))?\]\]/g;
+const TimelinePlaceholderProcessor = require('../RAGDiaryPlugin/TimelinePlaceholderProcessor');
+const PLACEHOLDER_REGEX = /\[\[VCPTimeLine(Summary|Recall)?::([^:\]\r\n]+?)(?::([^:\]\r\n]+?))?(?::([^:\]\r\n]+?))?\]\]/g;
 const HEADER_REGEX = /^\[?\s*(\d{4})[.-](\d{1,2})[.-](\d{1,2})(?:\.\d+)?\s*\]?\s*-\s*(.+?)\s*$/;
 const MONTH_FILE_REGEX = /^(\d{4})-(\d{2})\.md$/i;
 
@@ -39,6 +40,7 @@ class VCPTimeLine {
         this.projectBasePath = config.PROJECT_BASE_PATH || this.projectBasePath;
         this.dailyNoteRoot = process.env.KNOWLEDGEBASE_ROOT_PATH || path.join(this.projectBasePath, 'dailynote');
         this.contextBridge = dependencies.contextBridge || null;
+        this.isTimelineManagedByRag = dependencies.isTimelineManagedByRag || (() => false);
         this.config = await this.readConfig();
         console.log(`[VCPTimeLine] Initialized. root=${this.dailyNoteRoot}, contextBridge=${!!this.contextBridge}`);
     }
@@ -223,25 +225,7 @@ class VCPTimeLine {
     }
 
     parsePlaceholder(match) {
-        let k = this.config.defaultExpandK;
-        let threshold = this.config.defaultThreshold;
-        const values = [match[2], match[3]].filter(value => value !== undefined).map(value => String(value).trim());
-
-        if (values.length === 1) {
-            const raw = values[0];
-            const numeric = Number(raw);
-            if (/^\d+$/.test(raw) && numeric >= 1) k = Math.floor(numeric);
-            else if (Number.isFinite(numeric) && numeric >= 0.01 && numeric <= 0.99) threshold = numeric;
-        } else if (values.length >= 2) {
-            const parsedK = Number(values[0]);
-            const parsedThreshold = Number(values[1]);
-            if (/^\d+$/.test(values[0]) && parsedK >= 1) k = Math.floor(parsedK);
-            if (Number.isFinite(parsedThreshold) && parsedThreshold >= 0.01 && parsedThreshold <= 0.99) {
-                threshold = parsedThreshold;
-            }
-        }
-
-        return { placeholder: match[0], agentName: match[1].trim(), k, threshold };
+        return TimelinePlaceholderProcessor.parsePlaceholder(match, this.config);
     }
 
     findLatestRealMessage(messages, role) {
@@ -289,26 +273,38 @@ class VCPTimeLine {
     }
 
     async buildInjection(agentName, queryContext, k, threshold) {
-        const { queryVector, userText = '', aiText = '' } = queryContext || {};
-        const [store, files] = await Promise.all([this.readSummaryStore(), this.listTimelineFiles(agentName)]);
+        const [summary, recall] = await Promise.all([
+            this.buildSummaryInjection(agentName),
+            this.buildRecallInjection(agentName, queryContext, k, threshold)
+        ]);
+        return [summary, recall].filter(Boolean).join('\n\n');
+    }
+
+    async buildSummaryInjection(agentName) {
+        const store = await this.readSummaryStore();
         const agentSummaries = store[agentName] || {};
         const summaryLines = Object.keys(agentSummaries).sort().map(month => `- ${month}：${agentSummaries[month]}`).filter(Boolean);
-        const sections = [
+        return [
             `## ${agentName}的所有时间线（月）`,
             summaryLines.length > 0 ? summaryLines.join('\n') : '（暂无月度时间线摘要）'
-        ];
+        ].join('\n\n');
+    }
 
+    async buildRecallInjection(agentName, queryContext, k, threshold) {
+        const { queryVector, userText = '', aiText = '' } = queryContext || {};
+        const sections = [];
         const canRetrieve = typeof this.contextBridge?.retrieveDiary === 'function';
         const canSearch = typeof this.contextBridge?.searchDiary === 'function';
         if (
             !queryVector ||
             !this.contextBridge ||
             (!canRetrieve && !canSearch) ||
-            files.length === 0 ||
             k < 1
         ) {
-            return sections.join('\n\n');
+            return '';
         }
+        const files = await this.listTimelineFiles(agentName);
+        if (files.length === 0) return '';
 
         // Timeline 文档已经位于 dailynote/<Agent>timeline，由 KnowledgeBaseManager 自动建立向量索引。
         // 此处只复用 RAG 生成的 queryVector 搜索现有 chunk，绝不重新向量化 Timeline 文档。
@@ -381,43 +377,53 @@ class VCPTimeLine {
     }
 
     async processMessages(messages) {
+        // RAG 已基于原始声明统一调度并回填，绝不扫描其召回正文。
+        if (this.isTimelineManagedByRag?.()) return messages;
         if (!this.config.enabled || !Array.isArray(messages)) return messages;
 
-        // 整个上下文只接受第一个可信声明：system，或正文以“[系统”开头的 user。
-        // 先确定唯一声明，再以单次正则替换清除其余声明，避免注入内容被递归展开。
-        let declaration = null;
-        for (let index = 0; index < messages.length && !declaration; index++) {
+        // 三种入口共用可信规则，每种仅接受第一个可信声明。
+        // 单次替换清除其余声明，不递归展开注入内容。
+        const declarations = new Map();
+        for (let index = 0; index < messages.length; index++) {
             const message = messages[index];
             const text = this.extractText(message?.content);
             const trusted = message?.role === 'system'
                 || (message?.role === 'user' && /^\s*\[系统/.test(text));
             if (!trusted) continue;
 
-            const match = new RegExp(PLACEHOLDER_REGEX.source).exec(text);
-            if (match) declaration = { index, ...this.parsePlaceholder(match) };
+            for (const match of text.matchAll(new RegExp(PLACEHOLDER_REGEX.source, PLACEHOLDER_REGEX.flags))) {
+                const declaration = this.parsePlaceholder(match);
+                if (!declarations.has(declaration.kind)) {
+                    declarations.set(declaration.kind, { index, ...declaration });
+                }
+            }
         }
 
-        let injection = '';
-        if (declaration) {
-            const queryContext = await this.buildQueryContext(messages);
-            injection = await this.buildInjection(
-                this.safeAgentName(declaration.agentName),
-                queryContext,
-                declaration.k,
-                declaration.threshold
-            );
+        const needsQuery = [...declarations.keys()].some(kind => kind !== 'Summary');
+        const queryContext = needsQuery ? await this.buildQueryContext(messages) : null;
+        const injections = new Map();
+        for (const [kind, declaration] of declarations) {
+            const agentName = this.safeAgentName(declaration.agentName);
+            const injection = kind === 'Summary'
+                ? await this.buildSummaryInjection(agentName)
+                : kind === 'Recall'
+                    ? await this.buildRecallInjection(agentName, queryContext, declaration.k, declaration.threshold)
+                    : await this.buildInjection(agentName, queryContext, declaration.k, declaration.threshold);
+            injections.set(kind, injection);
         }
 
-        let accepted = false;
+        const accepted = new Set();
         return messages.map((message, index) => ({
             ...message,
             content: this.replaceText(message.content, text =>
                 text.replace(
                     new RegExp(PLACEHOLDER_REGEX.source, PLACEHOLDER_REGEX.flags),
-                    (...args) => {
-                        if (!accepted && declaration && index === declaration.index && args[0] === declaration.placeholder) {
-                            accepted = true;
-                            return injection;
+                    (placeholder, suffix) => {
+                        const kind = suffix || 'combined';
+                        const declaration = declarations.get(kind);
+                        if (!accepted.has(kind) && declaration && index === declaration.index && placeholder === declaration.placeholder) {
+                            accepted.add(kind);
+                            return injections.get(kind);
                         }
                         return '';
                     }
