@@ -1,5 +1,7 @@
 [2026-07-29] - 哈雷酱
 [VCP百科全书] DeepMemo - 深度回忆插件
+> 📍 当前实际位置：VCPChat/VCPDistributedServer/Plugin/DeepMemo（已从 VCPToolBox/Plugin 迁出；v2.0.0 hybridservice）（本切片内容基于历史时点，位置以此为准）
+
 
 状态：CURRENT_VERIFIED
 最后核验：2026-07-29（第6次上游合并后重新核验）

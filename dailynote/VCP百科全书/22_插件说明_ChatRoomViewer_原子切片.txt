@@ -1,5 +1,7 @@
 [2026-07-22] - 哈雷酱
 [VCP百科全书] ChatRoomViewer (VCPChat客户端信息查看器) - 静态状态信息插件
+> 📍 当前实际位置：VCPChat/VCPDistributedServer/Plugin/ChatRoomViewer，但当前仅存 plugin-manifest.json.block（禁用态）（本切片内容基于历史时点，位置以此为准）
+
 ⚠️ 当前未找到plugin-manifest.json，以下内容基于历史记录，可能已变更或废弃
 
 一、插件基本信息

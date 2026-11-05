@@ -1,6 +1,9 @@
 [2026-07-22] - 哈雷酱
 [VCP百科全书] MediaShot - 多媒体截取与编辑工具
 
+> 📍 当前实际位置：VCPChat/VCPDistributedServer/Plugin/MediaShot（已从 VCPToolBox/Plugin 迁出）（本切片内容基于历史时点，位置以此为准）
+
+
 ⚠️ 当前未找到plugin-manifest.json
 
 一、插件基本信息
