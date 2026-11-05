@@ -1,0 +1,56 @@
+[2026-11-05] - 哈雷酱
+# 工具返回批次界定符协议
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-05（第28次上游合并：66729cb0，上游 57af514c「推进更标准的全局工具返回界定符协议」）
+适用范围：`modules/toolResultBatch.js` 与 stream/nonStream 处理器、roleDivider 的接线
+事实来源：
+- `modules/toolResultBatch.js`（新增，导出 4 个函数）
+- `docs/TOOL_RESULT_BATCH_PROTOCOL.md`（45 行，新增）
+- `tests/toolResultBatch.test.js`（133 行，新增）
+- 改造：`modules/handlers/streamHandler.js`（−85 净减） / `modules/handlers/nonStreamHandler.js`（34） / `modules/roleDivider.js`（+11）
+- 上游 commit：`57af514c`（6 文件，+261/−85）
+
+## 核心结论
+以前「一批工具结果」在上下文里只是若干段裸文本，模型无法可靠判断「哪里是一次工具返回的开始与结束」。本轮把它们包成**带时间戳的显式批次块**，并在发往上游的请求里只把**包装边界**投影成可读中文，正文与协议原文保持不动——既给模型结构感，又不让协议字符串污染推理上下文。
+
+## 界定符格式（源码字面量）
+```text
+<<<[VCP_TOOL_BATCH_START:<ISO-8601 带毫秒与时区偏移>]>>>
+...正文...
+<<<[VCP_TOOL_BATCH_END:<同一时间戳>]>>>
+```
+- 常量：`START_PREFIX = '<<<[VCP_TOOL_BATCH_START:'`、`END_PREFIX = '<<<[VCP_TOOL_BATCH_END:'`。
+- 时间戳正则 `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(?:Z|[+-]\d{2}:\d{2})`。
+- 开启 roleDivider 时外层再包 `<<<[ROLE_DIVIDE_USER]>>>` / `<<<[END_ROLE_DIVIDE_USER]>>>`。
+
+## 时间戳生成规则
+- 时区取 `process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai'`，用 `Intl.DateTimeFormat('en-GB', {..., fractionalSecondDigits: 3, hourCycle: 'h23', timeZoneName: 'longOffset'})`，因此能正确处理夏令时与半小时/45 分钟偏移（`GMT+05:30` 等）。
+- 非法时区不抛错：捕获后 `console.warn` 并回落 `Asia/Shanghai`。
+- **单调递增**：`lastTimestampMs = Math.max(Date.now(), lastTimestampMs + 1)`，同一毫秒内多次批次也不会撞键。
+- **碰撞规避**：`do { ... } while (body.includes(start) || body.includes(end))`——若正文本身含同形界定符，重新生成时间戳直到不冲突。
+
+## 三个关键函数
+| 函数 | 作用 |
+|---|---|
+| `formatBatchResult`（实为 `formatToolResultBatch(parts, enableRoleDivider = true)`） | 拼接正文、生成唯一时间戳、按需加 roleDivider 外壳；正文为空则返回空串 |
+| `createBatchStartScanner()` | 每次调用生成**新的**全局正则扫描器，避免 `lastIndex` 状态泄漏 |
+| `findBatchEnd(text, match)` | 用匹配到的时间戳拼出对应 END 标记定位结束位置；找不到则视作延伸到文本末尾 |
+| `projectBatchWrapperText(text, role)` | 只替换**包装边界**为 `【工具返回批次开始｜时间：<本地化时间>】` / `【工具返回批次结束｜时间：<…>】` |
+| `projectToolBatchForUpstream(body)` | 生成**仅用于本次请求**的副本；`messages` 逐条投影，其余字段不动 |
+
+## 投影（projection）的严格边界
+- 只对 `role` 为 `assistant` / `user` 的文本生效；已有 `<!-- VCP_TOOL_PAYLOAD -->` 前缀的正文直接跳过。
+- 只在两种情形下改写：① 批次被 `ROLE_DIVIDE_USER` 完整包裹；② `role === 'user'` 且批次独占整段（前后皆空白）。
+- **引用批次不递归解析**：源码头注释 `Even unprojected batches are opaque: do not rewrite nested quotations.`，扫到未投影批次也整体跳过其内部。
+- 数组型 `content` 仅当**恰好存在一个 text part** 时才处理；多 text part 的跨段包装被视为歧义，原样保留。
+- 明确定性：头注释 `This is structural recognition, not authentication of server origin.`——投影不是来源认证，只是结构化识别。
+- 投影是请求级拷贝（`{ ...body, messages: ... }`），不写回历史、不影响媒体与工具参数。
+
+## 为什么这样设计
+1. **模型可读**：中文括号标记比 `<<<[VCP_TOOL_BATCH_START:...]>>>` 更省 token，且不易被模型当作需要复述的协议文本。
+2. **协议不外泄**：上游只看得到可读边界，真正的界定符只留在本地上下文与历史里，避免模型学会伪造批次边界。
+3. **不破坏幂等**：时间戳单调递增 + 碰撞检测，保证同一进程内批次标记唯一，便于事后按时间对齐日志。
+
+关联节点：工具调用审核反馈透传与archery优先回传(272)、思考块剥离边界与代码域隔离(283)、角色分割与上下文注入(02)
+Tag: toolResultBatch, VCP_TOOL_BATCH_START, VCP_TOOL_BATCH_END, ROLE_DIVIDE_USER, 界定符, 批次, 投影, projection, DEFAULT_TIMEZONE, longOffset, 单调时间戳, 碰撞规避, streamHandler, nonStreamHandler, roleDivider, 第28次上游合并, 57af514c

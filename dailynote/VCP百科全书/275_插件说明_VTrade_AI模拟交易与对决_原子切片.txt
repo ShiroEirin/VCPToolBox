@@ -1,0 +1,50 @@
+[2026-11-05] - 哈雷酱
+# VTrade · AI 模拟交易（看盘／模拟交易／对决）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-05（第28次上游合并：66729cb0，上游 24bc6da7「feat(VTrade): 新增 VTrade 插件（看盘、模拟交易、对决）」）
+适用范围：`Plugin/VTrade/` 全目录当前源码（manifest 22,960B，60+ 文件）
+事实来源：
+- `Plugin/VTrade/plugin-manifest.json`（22,960B）：name=VTrade，displayName「VTrade · AI 模拟交易」，version 0.1.0，pluginType=hybridservice，communication=direct
+- 后端核心：`VTrade.js`(4,642B) / `service.cjs`(41,772B) / `engine.cjs`(39,877B) / `duel.cjs`(41,689B) / `duel-career.cjs`(17,286B) / `duel-score.cjs`(8,179B) / `duel-rules.cjs`(6,289B) / `duel-text.cjs`(13,643B)
+- 行情层：`market-repository.cjs`(16,905B) / `market-directory.cjs`(11,974B) / `local-sources.cjs`(15,518B) / `builtins.cjs`(14,109B) / `tencent-intraday.cjs`(4,015B) / `minutes.cjs`(9,450B) / `boards.cjs`(6,495B) / `data.cjs`(10,361B) / `store.cjs`(4,248B)
+- 扩展开关：`slots.cjs`(9,200B) / `extensions.cjs`(2,786B) / `training.cjs`(4,582B) / `http.cjs`(9,388B) / `preview.cjs`(2,196B)
+- 前端工作台 `frontend/`：`panels.mjs`(80,239B) / `settings.mjs`(35,407B) / `app.mjs`(20,335B) / `chart-engine.mjs`(28,330B) / `game.mjs`(23,470B) / `setup.mjs`(16,397B) / `result.mjs`(15,345B) / `indicator-layer.mjs`(11,616B) / `indicator-editor.mjs`(10,833B) / `indicators.mjs`(10,152B) / `home.mjs`(10,644B) / `dock.mjs`(16,956B) / `store.mjs`(11,984B) / `ui.mjs`(7,899B) / `career.mjs`(6,051B) / `duel-chart.mjs`(4,894B) / `equity.mjs`(4,641B) / `chart-scale.mjs`(5,155B) / `chart-model.mjs`(3,314B) / `candle-chart.mjs`(11,626B) / `presets.mjs`(1,750B)
+- 自带组件与样式：`ui/vcp-ui.js`(117,053B) / `components.css`(53,459B) / `tokens.css`(35,117B) / `appearance.css`(17,995B) / `workspace.css`(19,579B) / `duel.css`(34,503B) / `indicator-ui.css`(8,586B)
+- 文档：`README.md`(31,209B) / `AI_GUIDE.md`(8,213B) / `KNOWLEDGE.md`(3,704B) / `SLOTS.md`(10,092B)
+- 数据导入：`vtrade_download.py`(14,652B) / `test_vtrade_download.py`(8,158B)
+- 测试：chart / core / duel / duel-agent / duel-modes / duel-score / features / http / invariants / market / slots / sync（12 个 .test.cjs，合计约 19 万字节）
+
+## 核心结论
+VTrade 是 VCP 首个「本地行情 + Agent 与人共用账本 + 人机对决」三合一插件。它不接券商、不联网取数，直接读本机通达信 `vipdoc` 目录的全市场日线；Agent 与人共享同一套虚拟账本；对决让玩家与 Agent 在同一段历史行情上逐日决定仓位，并与随机操作者比成绩。
+
+## 三种形态
+1. **看盘**（默认布局）：在「设置 → 数据 → 看盘数据目录」填写通达信 `vipdoc` 目录后，列表展示全部股票、指数与基金；支持代码／名称／拼音首字母搜索、列排序、方向键逐只切换；底部切换 A 股、创业板、科创板、北交所、指数、基金、自选与自建板块。
+2. **模拟交易**：一次模拟交易 = 一个虚拟账户 + 一条按数据日推进的时间线；记录模拟意图后点击「推进到下一数据日」查看虚拟成交，持仓、委托、日志与资金曲线随之更新。自选与板块只整理视图，不限制可交易范围；账本仅记录实际用到的股票。
+3. **对决**（`/admin_api/vtrade/duel/`）：单练／观战 Agent／与 Agent 同场，一局 60 个交易日。
+
+## 图表与 UI
+- K 线、成交量与资金曲线由插件自带画布引擎绘制（`frontend/chart-engine.mjs`、`chart-scale.mjs`），不依赖第三方图表库。
+- 指标系统分三层：`indicators.mjs`（计算）→ `indicator-layer.mjs`（渲染层）→ `indicator-editor.mjs`（编辑 UI），样式独立在 `indicator-ui.css`。
+- 控件使用固定版本的 VCPUI 组件（`ui/vcp-ui.js` 117KB 自带，不走外部 CDN）。
+- 模拟交易中图表只显示到当前模拟日；买卖箭头只来自虚拟成交；持仓线是当前均摊成本；水平参考线只留在当前页面，不创建条件单。
+- 首次打开页面显示免责声明与数据获取说明。
+
+## 六个可注册插槽（`SLOTS.md`）
+行情源、指标与信号、股票池、撮合规则、券商接口、AI 工具——全部可替换，核心与网络解耦。
+
+## 接入与配置
+- 工具名 `VTrade`，提示词用 `{{VCPVTrade}}` 注入；`AI_GUIDE.md` 是给 Agent 的操作说明。
+- 页面挂在主后端 `/admin_api/vtrade/`（管理面板端口同可用），页面与 API 都位于现有管理员认证之后，不新增匿名接口；管理面板无需改动。
+- 存储默认 `Plugin/VTrade/data/`（已被 `.gitignore` 排除）；本机 `config.env` 可设 `VTRADE_DATA_DIR`、`VTRADE_SOURCES_FILE`、`VTRADE_ADAPTERS`。
+- 关闭插件时加载器调用 `shutdown()`；direct 插件更新需正常重启。
+- 需要 Node.js 22.7 或更新版本；独立预览与核心不需要 npm 依赖（`node preview.cjs`）。
+
+## 安全边界（README 原文要点）
+- 核心不联网；内置合成日线只用于离线演示；行情由用户自行下载或导入。
+- AI 工具**不接受服务器路径、远程 URL 或下载指令**，只能同步管理员已配置的来源；导入数据、来源设置与看盘只在管理员页面进行（分别走 `/api/import`、`/api/settings`、`/api/market`），工具调用无法访问——因此模拟交易中的 Agent 拿不到模拟日之后的行情。
+- `agentName`、`maid` 都不是身份凭据；本版本面向管理员控制的受信任 Agent，所有运行由同一管理员管理，不提供多租户账户隔离。
+- 预览服务只监听 `127.0.0.1`；访问凭据放 URL fragment，页面读取后移除。
+
+关联节点：游戏体系Gamemodules与游戏工具适配(256)、ProjectForge项目锻造台(248)、插件桥接注册表与工具生命周期(239)
+Tag: VTrade, AI模拟交易, 通达信, vipdoc, 模拟交易, 对决, hybridservice, direct, 六插槽, SLOTS.md, 画布图表引擎, VCPUI, 管理员认证, 不联网, 插槽式扩展, 第28次上游合并, 24bc6da7

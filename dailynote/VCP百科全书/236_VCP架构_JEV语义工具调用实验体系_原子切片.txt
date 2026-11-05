@@ -78,4 +78,17 @@
 - **不改变既有结论**：`enabled: true` 只是声明，JEV 整体仍受 `JEV_*` 配置控制；本地无 `JEV_*` 键时声明不会自动激活服务（见本切片第八节）。
 - 详见切片 251（第三方插件注册表）、262（前端分布式插件 JEV 规范声明）。
 
+十二、2026-11-05 第28次上游合并：JEV 条件长上下文策略（733e285f）
+
+- **新增 `docs/jev调用文档.md` 第 8 节「VCP 条件长上下文策略」（31 行）**：共享 JavaScript Jev 客户端与 Rust 原生 Jev 重排采用同一策略，六条要点原文语义：
+  1. 使用本地 `cl100k_base` 对序列化的 state 与 questions 估算 Token。
+  2. 单题（含共享 state）超过 **32,000 tokens**，或整个请求超过 **64,000 tokens** 时，TypeSafe 请求自动附加 `TypeSafe-Danger-Zone-Long-Context: true`。
+  3. 小请求不自动附加该头；**不进行候选分批**，不改变 choice 概率排序或 RRF 规则。
+  4. 估算超过 **240,000 tokens** 时**在本地拒绝请求**，不静默截掉候选；重排调用方沿用原有失败回退策略。
+  5. 自动长上下文**仅支持 TypeSafe provider**；OpenRouter 等 provider 超出常规预算时明确报错，不假设第三方会转发或支持该实验请求头。
+  6. 这些阈值是**本地策略，不是服务端接受请求的保证**：本地分词器可能不同于官方分词器，实验长上下文的可用性、延迟与判断质量也可能变化。原有候选数量上限与每篇字符截断仍然有效，长上下文支持**不会自动扩大召回窗口**。
+- **实现面**：`modules/jevClient.js` +36、`rust-vexus-lite/src/native_rerank.rs` +41、新增探针 `scripts/probe_jev_batch_probabilities.js`（93 行）、`tests/jevClient.test.js` +39。
+- **原生产物**：`vexus-lite.win32-x64-msvc.node` 14,674,944B → 14,687,744B；文档明确「Rust 源码变更需要重新构建原生模块并重启服务后才能用于生产」。
+- **意义**：此前 JEV 在长上下文场景下要么被服务端拒、要么本地悄悄截断；现在变成三级阶梯——常规直发 / 自动附加危险区头 / 本地明确拒绝，且**不改变任何排序语义**。这是「扩大可用输入」而非「提高判断质量」的改动。
+
 Tag: JEV, 语义工具调用, jevToolCallExp, ToolConfigs, jev_tool_call_exp.json, 能力树, 省略目录, url_fetch, daily_tools, 三级优先级, JEV_THIRD_PARTY_EXP, 插件自述声明, 便利操作, 媒体娱乐, 第24次上游合并

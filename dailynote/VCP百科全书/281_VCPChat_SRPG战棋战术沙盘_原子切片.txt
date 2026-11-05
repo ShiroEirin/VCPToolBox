@@ -1,0 +1,49 @@
+[2026-11-05] - 哈雷酱
+# SRPG 战棋战术沙盘（Tavern-SRPG 移植）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-05（第28次上游合并：29460818，上游 VGame 游戏体系扩展）
+适用范围：`Gamemodules/srpg/` 全目录（39 个文件）
+事实来源：
+- `Gamemodules/srpg/README.md`（上游声明段，逐字引用见下）
+- `Gamemodules/srpg/UPSTREAM_README.md`
+- 根层文件：`index.html` / `package.json` / `preload.cjs` / `service.cjs`（126 行） / `session-store.cjs`
+- `src/`（14 个）：`ai-api.js` / `commander.js` / `commands.js` / `context.js` / `defaults.js` / `designer.js` / `engine.js` / `exchange.js` / `history.js` / `llm.js` / `manual.js` / `narrator.js` / `profiles.js` / `st.js`
+- 同轮游戏侧改动：`Gamemodules/game.html` / `Gamemodules/doudizhu/index.html` / `doudizhu/style.css` / `doudizhu/ui.js`
+
+## 上游归属声明（README 原文要点）
+- 上游项目：**Tavern-SRPG**
+- 原作者：`freezer`（[@DoubleOpenFreezer](https://github.com/DoubleOpenFreezer)）
+- 上游仓库：`https://github.com/DoubleOpenFreezer/Tavern-SRPG`
+- 移植基线版本：**`v0.26.0`**
+- VCPChat 适配与双端同源桥接：**云乌（@78776） & Nova（迟明）**
+- 版权声明原文：`src/` 下战棋核心逻辑与 `style.css` 均归属原作者 freezer；若上游更新或追加许可证条款，对应源码文件严格遵循上游授权协议。
+
+## 核心结论
+SRPG 不是一个「VCP 自研小游戏」，而是把开源战棋引擎 **Tavern-SRPG v0.26.0** 整体移植进 VCPChat 的游戏模块槽位，并在其上加了一层 VCP 适配：`service.cjs`（126 行）作为 Electron 子进程服务入口，`preload.cjs` 作为 IPC 桥，`session-store.cjs` 管理会话持久化。战棋本体逻辑仍由上游的 engine/manual/history/context 负责。
+
+## 三类文件的分层
+1. **VCP 适配层**：`service.cjs`（服务启动与生命周期）、`preload.cjs`（渲染进程与主进程的受限通道）、`session-store.cjs`（战局存档）。
+2. **上游引擎层**：`engine.js`（规则与结算）、`manual.js`、`history.js`、`context.js`、`narrator.js`（叙述）、`commander.js` / `commands.js`（指令）、`designer.js`（编辑器）、`profiles.js`。
+3. **桥接层**：`ai-api.js`（对外 AI 调用）、`llm.js`（模型接入）、`st.js`（双端同源桥接，对应 README 的「双端同源桥接」）、`exchange.js`（数据交换）、`defaults.js`（默认配置）。
+
+## 与斗地主的关系
+同一轮上游还推进了斗地主：
+- PR #305（`riirxx/feat/doudizhu-spectator-models`，合并点 `3b4331d2`）
+- `7b120083` feat(vgame): 支持斗地主局中热切单座模型与续局换模
+- `6894b57a` feat(vgame): 支持斗地主三 AI 观战与单座模型配置
+- `fbcdd256` 优化斗地主智能体验
+
+即：**VGame 大厅现在有「斗地主（卡牌/观战）」与「SRPG（战棋/沙盘）」两类**，且斗地主已支持三 AI 观战与单座模型热切。详见切片 256（游戏体系 Gamemodules）的更新章节。
+
+## 工程观察
+- 战棋引擎与编辑器 UI 移植自上游，但「AI 出手」是由 VCP 侧 `ai-api.js` + `llm.js` 接的——即人机对战里的「机」走的是 VCP 的模型链路，而非上游内置的假 AI。
+- `session-store.cjs` 单独成文件，说明战局需要跨进程持久化（子进程重启不丢盘）。
+- 模块自带 `package.json`，说明它作为独立子工程被拉起，与主进程依赖隔离。
+
+## 未证实的部分
+- 本切片不断言 SRPG 已接入 VCP 工具协议（manifest/commands）——本轮 diff 中未见对应 plugin-manifest 变更；其对外接口是 `service.cjs` + `preload.cjs` 的进程内通道。
+- 不断言战棋规则、兵种数量等具体数值，避免超出本轮可核验范围。
+
+关联节点：游戏体系Gamemodules与游戏工具适配(256)、文坊Scriptorium与ExcalidrawPDF双引擎(280)、ProjectForge工程图纸动态画布(279)
+Tag: SRPG, Tavern-SRPG, 战棋, 战术沙盘, freezer, DoubleOpenFreezer, v0.26.0, 云乌, Nova, 移植, service.cjs, preload.cjs, session-store, VGame, 斗地主三AI观战, 单座模型热切, PR305, 第28次上游合并

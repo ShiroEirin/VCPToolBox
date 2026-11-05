@@ -1,0 +1,43 @@
+[2026-11-05] - 哈雷酱
+# DeedPage — deed.page 网页发布插件
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-05（第28次上游合并：66729cb0，上游 b7dd6a17「新增可选的 deed.page 网页发布插件」）
+适用范围：`Plugin/DeedPage/` 全目录当前源码（7 个文件，+1,522 行新增）
+事实来源：
+- `Plugin/DeedPage/plugin-manifest.json`（44 行）：name=DeedPage，displayName「deed.page 网页发布」，version=1.0.0，pluginType=synchronous，communication=stdio
+- `Plugin/DeedPage/DeedPage.js`（98 行）：`ENDPOINT = 'https://deed.page/mcp'`、`USER_AGENT = 'VCPToolBox-DeedPage/1.0.0 (https://github.com/lioensky/VCPToolBox)'`、`TIMEOUT_MS = 45000`、`SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/`
+- `Plugin/DeedPage/DeedPage.test.js`（91 行）、`README.md`（55 行）、`config.env.example`（3 行）、`package.json`（9 行）、`package-lock.json`（1,222 行）
+- 上游 commit：`b7dd6a17`
+
+## 核心结论
+DeedPage 是一个**可选的**发布出口：把 Agent 生成的完整 HTML 通过 deed.page 的 MCP 端点发布为公开的 `*.deed.page` 网页，**无需账号或 API 密钥**即可新建站点。它是 VCP 目前唯一「零凭据即可对外发布静态页」的插件，也是唯一把发布域完全交给第三方托管、且要求按站点自行保管令牌的实现。
+
+## 三条命令（manifest 原文语义）
+| 命令 | 参数 | 行为 |
+|---|---|---|
+| `publish_site` | `html`（必填，完整 HTML 文档，作为 index.html 发布）、`slug`（可选，小写字母／数字／连字符，1–63 字符，省略则随机生成）、`ttl_seconds`（可选正整数秒，省略则永久保留）、`token`（本次操作使用的 `deed_tok_` 令牌） | 新建站点无需 token，返回公开 `url`、`slug` 和 `token`；**编辑已有网站仍用此命令**，必须显式传入原 `slug`、对应 `token` 和新 `html` |
+| `get_site` | `slug` | 返回站点的公开信息，例如 `url`、版本和到期时间 |
+| `delete_site` | `slug` + `token` | 删除站点；不读取环境变量；**删除前需先征得用户确认** |
+
+## 令牌模型（重要变更）
+- 新建无需 token；发布结果会返回 `deed_tok_` 令牌，需提醒用户按站点妥善保存。
+- 不同网站可分别传入各自的 token；**插件不读取环境变量**。
+- `config.env.example` 原文三条：`新建网站无需令牌；请按站点妥善保存发布结果返回的 token。` / `更新、删除时在每次工具调用中显式传入对应站点的 token。` / `旧版 DEEDPAGE_TOKEN 环境变量不再读取。`
+- 即：本次是从「全局单令牌」迁移到「按站点逐次显式传令牌」，旧环境变量方式已被废止。
+
+## 输入校验
+- `SLUG_PATTERN` 强制 slug 形如 `a-z0-9` 开头结尾、中间允许连字符，长度上限 63，杜绝路径穿越与非法字符。
+- `stringValue(value, name, maxLength)` 统一校验非空字符串与长度上限，错误信息为中文（如「必须是非空字符串，最多 N 字符」）。
+
+## 使用风险提示（manifest 原文）
+- 「网页对任何持有链接的人公开，不要发布密钥或隐私内容。」
+- 发布内容由 Agent 生成，一旦发布即脱离本地控制；`delete_site` 是唯一撤回手段，且需要对应令牌。
+
+## 部署要点
+- pluginType=synchronous、communication=stdio，属于纯请求/响应插件，无后台常驻进程。
+- 超时 45,000ms，适合大体量 HTML（含内联样式/脚本）单次上传。
+- 目录内含独立 `package.json` / `package-lock.json`，其依赖树与主仓隔离。
+
+关联节点：插件桥接注册表与工具生命周期(239)、动态工具桥接(145)、工具调用审核反馈透传(272)
+Tag: DeedPage, deed.page, 网页发布, MCP, synchronized, stdio, publish_site, get_site, delete_site, slug, ttl_seconds, deed_tok_, 零凭据, 静态页托管, 第28次上游合并, b7dd6a17

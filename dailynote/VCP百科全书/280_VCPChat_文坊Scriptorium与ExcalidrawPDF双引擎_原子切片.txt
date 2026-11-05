@@ -1,0 +1,54 @@
+[2026-11-05] - 哈雷酱
+# 文坊 Scriptorium 与 Excalidraw／PDF 双引擎
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-05（第28次上游合并：29460818，上游 PR #301 `CI-IISATO/feat/scriptorium-open-files`（9dae50e2）与 PR #302 `CI-IISATO/feat/scriptorium-board`（c7bd19fe），另有 384de30a「更新文坊白板v2」）
+适用范围：`modules/scriptorium/` 与 `vendor/excalidraw` / `vendor/pdfjs` / `vendor/pdf-lib`
+事实来源：
+- `modules/scriptorium/`（13 个文件，本轮新增）：`atomicReplace.js` / `dropOpen.js` / `textEncoding.js` / `fileTypes.js` / `fileViews.js` / `fileAccess/index.js` / `markdownFiles/index.js` / `pdfFiles/index.js` / `pdfFiles/edit.js` / `pdfFiles/fonts.js` / `sheetFiles/index.js` / `viewFiles/index.js` / `webPages/index.js`
+- `vendor/excalidraw/`：238 文件，**19.23 MB**（本轮新增）
+- `vendor/pdfjs/`：202 文件，**4.49 MB**（本轮新增）
+- `vendor/pdf-lib/`：5 文件，**1.23 MB**（本轮新增）
+- 相关测试：`tests/loom-cover-semantics.test.js`、`tests/memory-protocol-projection.test.js` 等
+
+## 核心结论
+「文坊」从「文档预览 + 白板」升级为**本地文件工作台**：`modules/scriptorium` 是一层可插拔的文件类型分发器（markdown / pdf / sheet / view / webPages），配合三个自带 vendor 依赖，把「打开任意本地文件并在应用内编辑」做成了内建能力，而非调用外部程序。
+
+## 架构：一层分发 + 五类处理器
+| 文件 | 作用 |
+|---|---|
+| `fileTypes.js` | 扩展名 → 类型的映射表 |
+| `fileAccess/index.js` | 统一文件读取抽象 |
+| `fileViews.js` | 类型 → 视图组件的解析 |
+| `markdownFiles/index.js` | Markdown 处理器 |
+| `pdfFiles/index.js` | PDF 查看入口 |
+| `pdfFiles/edit.js` | PDF 编辑（基于 pdf-lib） |
+| `pdfFiles/fonts.js` | PDF 字体嵌入处理 |
+| `sheetFiles/index.js` | 表格文件处理器 |
+| `viewFiles/index.js` | 只读视图类文件 |
+| `webPages/index.js` | 网页文件处理 |
+| `dropOpen.js` | 拖拽打开入口 |
+| `textEncoding.js` | 文本编码探测与转换 |
+| `atomicReplace.js` | **原子写入替换**（防写一半损坏原文件） |
+
+## 三个 vendor 依赖的分工
+- **`vendor/excalidraw`（19.23 MB / 238 文件）**：白板引擎，对应 PR #302 `scriptorium-board`——文坊的「板」能力来自它。
+- **`vendor/pdfjs`（4.49 MB / 202 文件）**：PDF 渲染与解析，负责「看」。
+- **`vendor/pdf-lib`（1.23 MB / 5 文件）**：PDF 结构化写入，配合 `pdfFiles/edit.js` 负责「改」。
+- 三者全部**内置在仓库**，不依赖 CDN、不在运行时下载——离线可用，也避免版本漂移。
+
+## 两个值得注意的工程细节
+1. **`atomicReplace.js` 是写入安全的底座**：编辑器保存不是「先删除再写」，而是先写临时件再原子替换；这是文件工作台最容易出事故的地方（断电／崩溃留下半截文件），单独抽模块是对的。
+2. **`textEncoding.js` 单独成文件**：说明「打开本地文件」第一道坑是编码判定（GBK/UTF-8/BOM），把它抽出比在每个处理器里重复判断更稳。
+3. **`dropOpen.js` 独立**：拖拽是入口而非某类型专属，因此与类型表解耦。
+
+## 与 PR 的对应关系
+- PR #301 `feat/scriptorium-open-files`（9dae50e2，11-02 16:05）：打开本地文件的一侧。
+- PR #302 `feat/scriptorium-board`（c7bd19fe，11-02 16:06）：白板一侧。
+- `384de30a`「更新文坊白板v2」：白板迭代到 v2，与 excalidraw 内置同步。
+
+## 体量提醒
+仅三个 vendor 目录就 **24.95 MB**，是 VCPChat 仓库本轮 727 个新增文件里占比最大的部分（238+202+5 = 445 个文件）。拉取与打包时需注意仓库体积增长。
+
+关联节点：游戏体系Gamemodules与游戏工具适配(256)、ProjectForge工程图纸动态画布(279)、VCPChat侧边栏与工作区体系(254)
+Tag: 文坊, Scriptorium, Excalidraw, pdfjs, pdf-lib, 白板v2, 本地文件工作台, 原子替换, atomicReplace, 编码探测, textEncoding, dropOpen, 拖拽打开, PR301, PR302, CI-IISATO, 第28次上游合并, c7bd19fe, 9dae50e2

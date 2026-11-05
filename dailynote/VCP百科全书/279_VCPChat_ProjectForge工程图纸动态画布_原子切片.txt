@@ -1,0 +1,46 @@
+[2026-11-05] - 哈雷酱
+# ProjectForge 工程图纸动态画布
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-05（第28次上游合并：29460818，上游 PR #306 from raoye830722/feat/projectforge-live-canvas，合并点 e8e318ac）
+适用范围：`ProjectForgemodules/` 工程图纸（blueprint）相关实现
+事实来源：
+- `ProjectForgemodules/projectforge-blueprint.js`（本轮新增）
+- 同步改动：`projectforge.js` / `projectforge.css` / `projectforge.html` / `projectforge-git.js` / `projectforge-source.js`
+- 上游提交序列（非 merge）：`b2cdecc3` → `ca8bc12e` → `707eeaaf` → `1a5dd220` → `3fefdf0c` → `e55f9039` → `07e2d52d` → `ea5b9051` → `1cd533aa`
+- 合并点：`e8e318ac Merge pull request #306`
+
+## 核心结论
+ProjectForge 本轮从「项目结构 + Todo + Git 侧栏」扩出一个**工程图纸（Blueprint）视图**：它不是静态图，而是随施工进度**逐日生长**的动态画布。作者把「代码结构的静态快照」换成了「按批次／泳道逐步展开的施工图」，一个提交一个层次地往上叠。
+
+## 九个提交的演进链（按时间顺序）
+| commit | 主题 | 阶段含义 |
+|---|---|---|
+| `b2cdecc3` | feat(projectforge): 施工图窗口新增工程图纸Tab | 入口：施工图窗口多一个 Tab |
+| `ca8bc12e` | feat(projectforge): 工程图纸动态画布-实时生长二期 | 核心：画布能随进度实时生长（二期） |
+| `707eeaaf` | feat(projectforge): 泳道增删徽章+块体语法修复 | 结构：泳道可增删并带徽章；修复块体语法 |
+| `1a5dd220` | feat(projectforge): 画布纵向布局+todo步骤徽章+原因全文 | 布局转纵向；todo 步骤成徽章；原因不再截断 |
+| `3fefdf0c` | feat(projectforge): 画布美化-两栏看板布局 | 视觉：两栏看板式排布 |
+| `e55f9039` | feat(projectforge): todo徽章升级为seq+标题可读形态 | 语义：徽章带上序号 seq，标题可读 |
+| `07e2d52d` | fix(projectforge): 文件名完整显示+op文字禁竖排 | 可用性：文件名不截断；op 标签不竖排 |
+| `ea5b9051` | fix(projectforge): 卡片原因批次层兜底-节点null时显示批次reason | 鲁棒：节点为 null 时回落到批次 reason |
+| `1cd533aa` | feat(projectforge): 工程图纸tab改名改动脉络 | 收尾：Tab 改名，与「改动脉络」语义对齐 |
+
+## 关键设计特征
+1. **生长而非一次性渲染**：二期提交名直接写「实时生长」，说明画布是按施工事件流逐步落位的增量渲染，而非构建完成后一次性出图。
+2. **纵向为主、两栏为辅**：先转纵向布局，再做两栏看板美化，说明主干是纵向时间线，两栏是阅读密度优化。
+3. **数据缺失不静默**：`ea5b9051` 在节点为 null 时回落到「批次 reason」而不是留空——保证图上每个卡片都能说出「为什么在这里」。
+4. **序号可追溯**：todo 徽章升级为 seq，使施工步骤在图上有稳定编号，便于和 ProjectForge 的 UpdateTodos / SubmitReport 命令面对齐。
+5. **文字不竖排**：`op` 标签禁止竖排，是画布密度提高后的排版修正（避免窄列把单词拆成竖列）。
+
+## 与既有切片的关系
+- 切片 248（ProjectForge 项目锻造台：Rust AST 索引与链接图）描述的是**后端能力面**（`rust_projectforge_indexer` + `ProjectForgeService.js` + 24 条命令）。
+- 本切片描述的是**前端表现层新增的第五个视图**：结构视图（源码/大纲）、Todo 视图、Git 视图之外，多了「工程图纸」。
+- 二者互补而非重叠：248 回答「能查到什么」，279 回答「怎么把查到的画成施工图」。
+
+## 未在源码中证实的部分（避免幻觉）
+- 本切片不声称画布使用了特定图形库（未在本轮 diff 中新增图表依赖）；`projectforge-blueprint.js` 的具体绘制实现未逐行核验。
+- 不声称蓝图数据新増了后端命令；本轮 diff 仅限 `ProjectForgemodules/` 六个前端文件。
+
+关联节点：ProjectForge项目锻造台RustAST索引与链接图(248)、统一聊天上下文组装器chatContextPipeline(282)、VCPChat侧边栏与工作区体系(254)
+Tag: ProjectForge, 工程图纸, Blueprint, 动态画布, 实时生长, 两栏看板, 泳道徽章, todo seq, 批次reason, PR306, raoye830722, projectforge-blueprint.js, 第28次上游合并, e8e318ac

@@ -139,4 +139,17 @@ Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology
 - **原生产物**：`vexus-lite.win32-x64-msvc.node` 14,251,008B → 14,259,200B（dd39d7d5 时点）。
 - 详见切片 269（JEV 连接保活与 Omega 动态权重拓扑）、271（TextChunker 零回溯切分）。
 
+十三、2026-11-05 第28次上游合并：RiverMemo 拓扑 v2.2、RRF 契约分离与元数据自净
+
+- **拓扑 v2.2 保守化（6b98a214）**：`rust-vexus-lite/src/rivermemo_topology_v3.rs` 单文件 **+688/−226**，是本轮最大的单文件改动；配套 `memo_pipeline.rs` +249、`memo_sensing.rs` +66、`light_memo.rs` 2 行。管理面板 `AdminPanel-Vue/src/features/rag-tuning/metadata.ts` +30、`views/RagTuning.vue` +34 同步调整，`rag_params.json` 新增 8 行参数。提交标题原文 `fix(rivermemo): ship conservative topology v2.2 and Windows native artifact`——关键词是 **conservative**（先保守上线，再谈激进收益）。
+- **RRF 与质量分分家（32345bfe，PR #571 Cimo-Yu）**：新增 `docs/RIVERMEMO_RRF_SCORE_CONTRACT.md`（72 行）把「虫洞 RRF 排名分」与「质量分」写成显式契约；`rivermemo_wormhole.rs` +100、`rivermemo_topology_v3.rs` +17。配套产物：`tests/fixtures/rrf_score_contract.json`（17 行）、`tests/fixtures/rrf_real_output_evidence.json`、`scripts/export_rrf_contract_evidence.js`（25 行）、`tests/rrfOutputEvidence.test.js`（33 行）——契约不是文档承诺，而是**从真实输出导出的证据**。
+- **置信度 RRF 融合（d941bdbe）**：`fix(rivermemo): fuse verified wormhole evidence with confidence RRF`——只有「已验证的虫洞证据」参与置信度层面的 RRF 融合。
+- **显式种子落地与残差聚焦（6d57e0f2）**：`fix(rivermemo): ground explicit seeds and preserve residual focus ignition`——显式种子要被「落地」，残差聚焦的点火信号要保留。
+- **单次安全读数与独占锚（4a3386b4）**：`fix(rivermemo): stage one safe readout and exclusive anchors`。
+- **元数据生命周期自净（09cce13e）**：`KnowledgeBaseManager.js` +26、`modules/knowledgeBase/indexRepository.js` +6、`index_lifecycle.rs` +12、`ingestion.rs` +64、`tag_consistency.rs` 4 行；提交标题「完善向量基线与存储元数据生命周期自净回收闭环」——索引与向量基线的「用完即回收」不再依赖外部清理。
+- **原生产物演进**：`vexus-lite.win32-x64-msvc.node` 14,610,432B → 14,674,944B（6b98a214）→ 14,807,040B → 14,813,696B（09cce13e）。
+- **triviumdb 0.9.0（13870a70）**：`TDBKnowledge.js` +24、`package.json`/`package-lock.json` 各 1 处版本提升、`tests/tdbKnowledge085.test.js` +24，标题「upgrade triviumdb to 0.9.0 and wire native memory diagnostics」——原生内存诊断接入。
+- **向量去重上界（bdd98aae，PR #550）**：`ResultDeduplicator.js` +66、`result_deduplicator.rs` +155、`tests/resultDeduplicatorBounds.test.js` +80。JS 侧新增 `_cosineAtLeast` 与 `_dedupSuffixNorms`（256 块后缀范数 + `boundBudget = { remaining: 8 }` 单请求预算）；Rust 侧 `const BOUND_BLOCK: usize = 256`。两处注释原文：`A negative certificate never changes ranking scores` 与 `Falling back changes work only, never candidate or suppression semantics`——即「上界只省算力，不改候选与抑制语义」。
+- **JEV 原生重排长上下文（733e285f）**：`native_rerank.rs` +41，详见切片 236 第十二节。
+
 Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, 第24次上游合并, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容, 第25次上游合并, memo_projection, 双场投影, 动态虫洞, README, 探针脚本, 第26次上游合并, native_rerank, memo_workspace, 确定性求和, float_roundtrip, 稀疏排除, 性能优化

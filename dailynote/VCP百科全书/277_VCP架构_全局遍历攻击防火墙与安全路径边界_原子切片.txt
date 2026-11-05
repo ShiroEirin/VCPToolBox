@@ -1,0 +1,39 @@
+[2026-11-05] - 哈雷酱
+# 全局遍历攻击防火墙与安全路径边界
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-05（第28次上游合并：66729cb0，上游 018cd7fa「全局遍历攻击防火墙」）
+适用范围：`modules/safeFilePath.js` 与 14 个 admin/dailyNotes 路由的路径解析调用点
+事实来源：
+- `modules/safeFilePath.js`（91 行，新增）：导出 `resolveSafePath(root, relative, { singleSegment = false, allowRoot = false })`
+- `docs/ROUTE_FILE_PATH_SECURITY_AUDIT.md`（57 行，新增）
+- `tests/routeFilePathSecurity.test.js`（263 行，新增）
+- 改造路由（14 处）：`routes/admin/agents.js`(24) / `bridgeProfiles.js`(10) / `dream.js`(49) / `emojis.js`(28) / `pluginStore.js`(23) / `plugins.js`(6) / `rag.js`(12) / `toolListEditor.js`(28) / `toolbox.js`(50) / `tvs.js`(12) / `routes/dailyNotesRoutes.js`(29) / `routes/forumApi.js`(6) / `routes/taskScheduler.js`(5)
+- 上游 commit：`018cd7fa`（16 文件，+581/−112）
+
+## 核心结论
+这是对管理面「遍历攻击」（path traversal）的一次**统一收口**：上游没有逐路由补 `path.normalize` 判断，而是抽出一个唯一入口 `resolveSafePath`，把 Windows 语义强制施加到所有平台，让 14 个接受文件名/相对路径的 admin 与 dailyNotes 路由共享同一套边界。
+
+## safeFilePath.js 的边界规则（源码逐条）
+1. **字符集白名单外一律拒绝**：`/[\x00-\x1f\x7f<>:"|?*]/` 命中即抛错——含控制字符、`<>:"|?*`，天然挡掉 Windows 保留字符与 NTFS 备用数据流（`:`）。
+2. **不做 URL 解码**：文件头注释原文 `Do not URL-decode here: Express has already decoded route parameters.`——避免二次解码绕过（`%252e%252e` 类攻击）。
+3. **拒绝绝对路径与根起始**：`normalized.startsWith('/') || path.win32.isAbsolute(relative)` 直接抛错；即无论平台都按 Windows 绝对路径语义判定（`C:\`、`\\server\share`）。
+4. **逐段校验**：空段、`.`、`..` 一律拒绝；**段尾为点或空格**（`/[. ]$/`）也拒绝——这是 Windows 会静默裁剪 `foo.` → `foo`、`foo ` → `foo` 导致的绕过点。
+5. **Windows 设备名黑名单**：`/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i` 拒绝——防止写入设备名触发特殊行为。
+6. **两档约束**：`singleSegment: true` 要求只有一段（用于「只接受文件名，不接受路径」的场景）；`allowRoot: true` 允许空相对路径解析为根本身。
+7. **统一错误契约**：`invalidPath()` 产出 `code = 'UNSAFE_PATH'`、`status = 400`、`statusCode = 400`，上层无需各写映射。
+
+## 为什么强制 Windows 规则
+文件头注释原文：`Apply Windows rules on every platform so deployments have identical boundaries.`——同一份代码在 Linux 上不会因为 `/` 语义宽松而放宽，跨平台部署边界一致，安全行为可预期、可测试。
+
+## 测试与审计
+- `tests/routeFilePathSecurity.test.js`（263 行）覆盖各路由的接受/拒绝矩阵，是本轮单文件最大的新增测试。
+- `docs/ROUTE_FILE_PATH_SECURITY_AUDIT.md`（57 行）给出逐路由审计结论，属于「改动可追溯」文档化。
+
+## 影响面
+- 主要触及管理面板后端（工具列表编辑、插件仓库、表情、梦境、RAG、TVS、Agent、桥接配置、工具箱、插件启停）与每日笔记／论坛／任务调度路由。
+- 对合法调用无感；对以往依赖相对路径多段穿越、或带尾随点/空格文件名的调用会由 500 变为明确的 400 `UNSAFE_PATH`。
+- 与已有的 `modules/toolResultBatch.js`（工具返回批次协议）无耦合，二者分属「入站路径」与「出站结果」两条边界。
+
+关联节点：工具调用审核反馈透传与archery优先回传(272)、插件桥接注册表与工具生命周期(239)、系统安全与沙箱(102)
+Tag: safeFilePath, resolveSafePath, 路径遍历, path traversal, UNSAFE_PATH, 400, Windows设备名, 尾随点空格, 不做URL解码, 跨平台一致, 14个admin路由, dailyNotes, 安全审计, 第28次上游合并, 018cd7fa

@@ -1,0 +1,55 @@
+[2026-11-05] - 哈雷酱
+# 统一聊天上下文组装器 chatContextPipeline
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-05（第28次上游合并：29460818，上游 1b56aaaa「统一vchat上下文发送和组装器」）
+适用范围：`modules/chat/chatContextPipeline.js` 与 `docs/chat-context-pipeline.md`
+事实来源：
+- `modules/chat/chatContextPipeline.js`（**459 行新增**，拥有 `assembleRequestMessages(options)`）
+- `docs/chat-context-pipeline.md`（53 行，新增）
+- `modules/chat/singleChatRequestOrchestrator.js`（**−469 行**，改为委派）
+- `Flowlockmodules/flowlock-integration.js`（−129 行）
+- `modules/chatManager.js`（−37）/ `modules/event-listeners.js`（−61）/ `modules/renderer/messageContextMenu.js`（−133）
+- `tests/chat-context-pipeline.test.mjs`（108 行，新增）
+- 上游 commit：`1b56aaaa`（11 文件，+679/−802）
+
+## 核心结论
+这是一次典型的**「抽干公共躯干」重构**：把原本散在 `singleChatRequestOrchestrator`、`flowlock-integration`、`chatManager`、`event-listeners`、`messageContextMenu` 五处的「怎么把历史拼成一次请求」抽成一个唯一入口 `assembleRequestMessages(options)`，净减 802 行、净增 679 行，总代码量**实际下降**。
+
+## 文档给出的所有权边界（`docs/chat-context-pipeline.md` 原文语义）
+- 调用方负责**选历史**与**确定请求归属**（`context.agentId/topicId`）。
+- 调用方保留**意图专属行为**：重生成的截断、Canvas／附件刷新、上下文正则、心跳归一化、压缩（compaction）与流生命周期。
+- 管线在一次请求内解析**唯一会话快照**，并全程使用该快照的规则与工作区绑定；已显式传入 `conversationSnapshot` 时直接复用。
+- 快照解析失败即**中止**；无快照解析能力的遗留 API 可回落 `tavernGetRules`；工作区展开失败时**保留提示词不变**。
+- 管线**不持久**临时提示词，**不修改**源历史。
+
+## 组装契约（四步，文档编号）
+1. 从**最新压缩检查点**选取有效历史（`effectiveContextHistory` / `isContextCheckpoint`）。
+2. 构建消息内容：内容本体 → 可选文本变换 → 当前用户后缀 → 可选内容后处理；**检查点绕开所有处理器**。
+3. 构建系统文本：会话元数据前缀 → AgentName 替换后的人设 → 可选追加段（默认是自动画像情绪指令）。
+4. 应用 Tavern 系统后缀。
+
+## 关键实现细节（源码可见）
+- 顶部三条 import 直接揭示依赖：`../tavernRulesEngine.js`、`../renderer/toolResultRegions.js` 的 `stripHiddenToolResults`、`./contextCompactionState.js` 的 `effectiveContextHistory` / `isContextCheckpoint`。
+- `requireDependency(value, name)`：缺依赖时抛 `SingleChatRequestOrchestrator requires ${name}`——即管线仍以旧类名报错，保留调用方定位习惯。
+- `normalizeText(value)`：非字符串统一 `String()`，`null/undefined` 归一为空串。
+- `normalizeContentParts(content)`：数组逐项浅拷贝；`{text: string}` 对象归一为 `[{type:'text', text}]`——即兼容「纯文本字段」与「多段内容」两种历史形态。
+
+## 谁在用它（文档明确三条路径）
+1. **普通发送**：经 `singleChatRequestOrchestrator` 委派。
+2. **重新生成**：直接调用。
+3. **键盘续写与 Flowlock**：直接调用同一组装器。
+
+这条清单很重要：它说明 Flowlock（心流锁）不再自己拼上下文，而是与普通发送共用同一份组装逻辑——这也是 `flowlock-integration.js` 被砍掉 129 行的原因。
+
+## 与本轮另一处修复的协同
+同一轮的心流锁修复（`7ed298aa`，PR #304 `infinite-vector/fix/stream-and-flowlock-think-isolation`）改了 `Flowlockmodules/flowlock-protocol.js`（+8/−3）与 `modules/emotion/emotionTags.js`（+22/−2），主题是「修正心流锁代码围栏遮蔽顺序与流式情绪扫描器思考标签边界」。
+两件事叠加的效果：**Flowlock 既共用统一组装器，又修好了围栏/思考标签的边界**——过去在代码块内出现情绪标签或思考块被误扫的问题被收口。
+
+## 工程价值
+- 之前「五处各拼一遍」意味着任一上下文规则（例如隐藏工具结果、压缩检查点）改动都要改五遍，且容易漏。
+- 现在只剩一处真理：`assembleRequestMessages`。测试 `chat-context-pipeline.test.mjs`（108 行）为它建了独立验收。
+- 净减代码量是本轮 VCPChat 唯一「重构而非堆功能」的大型提交。
+
+关联节点：心流锁与流式情绪边界(283)、ProjectForge工程图纸动态画布(279)、VCPChat侧边栏与对话状态面板(254)
+Tag: chatContextPipeline, assembleRequestMessages, 上下文组装器, singleChatRequestOrchestrator, Flowlock, 心流锁, compaction, 检查点, effectiveContextHistory, stripHiddenToolResults, tavernRulesEngine, conversationSnapshot, 重构净减, PR304, 1b56aaaa, 第28次上游合并

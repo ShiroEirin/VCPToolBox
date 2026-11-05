@@ -55,4 +55,15 @@ GameController/ GameControllerService.js · plugin-manifest.json
 - 切片 241（Chartmodules 图表系统）与 242（ScreenPilot）：同属「Chat 内独立功能前端」家族，本切片是新增成员（游戏）。
 - 与 254（侧栏体系）：游戏与侧栏均属 UI 应用面扩张，但两者模块目录不同（Gamemodules/ vs modules/ui-system/）。
 
+七、2026-11-05 第28次上游合并：斗地主三AI观战与 SRPG 战棋沙盘
+
+- **斗地主三 AI 观战（PR #305 `riirxx/feat/doudizhu-spectator-models`，合并点 3b4331d2）**
+  - `6894b57a` feat(vgame): 支持斗地主三 AI 观战与单座模型配置
+  - `7b120083` feat(vgame): 支持斗地主局中热切单座模型与续局换模
+  - `fbcdd256` 优化斗地主智能体验
+  - 前端改动：`Gamemodules/doudizhu/index.html`、`Gamemodules/doudizhu/style.css`、`Gamemodules/doudizhu/ui.js`；大厅入口 `Gamemodules/game.html`
+  - 三项能力语义：「三 AI 观战」= 三个座位各由不同模型驱动、人可旁观；「单座模型热切」= 局中替换某一个座位的模型而不重开牌局；「续局换模」= 已保存的对局可用不同模型继续。
+- **SRPG 战棋战术沙盘**：新增 `Gamemodules/srpg/`（39 文件），移植自开源 **Tavern-SRPG v0.26.0**（原作者 freezer / @DoubleOpenFreezer），VCPChat 适配与双端同源桥接由云乌（@78776）与 Nova（迟明）完成；`service.cjs`（126 行）为 Electron 子进程入口，`src/` 下 14 个 js 承载战棋引擎与编辑器。详见切片 281。
+- **修正既有过时判断**：本切片第五节若称游戏体系只有 ForgeTax 与 vcp-neon-game，该判断已过时——VGame 大厅现在承载斗地主（卡牌/观战）与 SRPG（战棋/沙盘）两类，且都可由 VCP 侧模型驱动（`ai-api.js` + `llm.js`）。
+
 Tag: 游戏体系, Gamemodules, 斗地主, doudizhu, forge-tax, vcp-neon-game, gameRuntime, gameSeatResolver, gameToolAdapter, gameService, gameHandlers, GameController, ForgeTax, gameSessionOrchestrator, gamePrompts, 存档, Live2D桌宠未合并, 第23次上游合并
