@@ -1,0 +1,39 @@
+[2026-11-11] - 哈雷酱
+# Sovist5 本地音频引擎换芯
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-11（第29次上游合并：48b1e2b6，上游 7cf4e1e2「本地音频引擎推理换芯 Sovist5」）
+适用范围：`sovits5cppmanager/` 全目录与 `package.json` 新增脚本
+事实来源：
+- `sovits5cppmanager/README.md`（85）/ `app.js`（74）/ `index.html`（19）/ `server.js`（72）/ `start.bat`（5）
+- 测试：`tests/gsv-manager-ui.test.js`（53）/ `tests/gsv-presets.test.js`（86）
+- 上游 commit：`7cf4e1e2`（14 文件 **+610/−641，净减 31 行**）
+- `package.json` 新增两条：脚本 `"sovits5cppmanager": "node sovits5cppmanager/server.js"` 与 files 条目 `"sovits5cppmanager/**/*"`
+
+## 核心结论
+VCPChat 的本地语音合成从旧引擎换到 **Sovist5（so-vits-svc 5 系）**，并且改成一个**自带管理界面 + 本地 HTTP 服务**的独立子工程（`sovits5cppmanager`）。净减 31 行说明：不是叠加，是**替换式换芯**。
+
+## 新形态：三件套
+| 文件 | 作用 |
+|---|---|
+| `server.js`（72 行） | 本地服务入口，`npm run sovits5cppmanager` 即拉起 |
+| `app.js`（74 行） | 管理端前端逻辑 |
+| `index.html`（19 行） | 极简管理页（模型/预设选择） |
+| `start.bat`（5 行） | Windows 双击启动入口 |
+| `README.md`（85 行） | 使用说明 |
+
+## 与既有音频体系的关系
+- 切片 235 描述的是 **`rust_audio_engine`（原生 Rust 音频链路）**；本切片是 **推理引擎（TTS 声源）** 的换芯，两者不是同一层：前者是音频通道，后者是发声模型。
+- `package.json` 同时登记 `script` 与 `files`，意味着该目录会被**打包进发行物**——即 Sovist5 不依赖用户自行安装。
+
+## 测试面（139 行）
+- `gsv-manager-ui.test.js`（53）：管理界面行为。
+- `gsv-presets.test.js`（86）：**预设（presets）** 体系——比 UI 测试大一倍，说明重点在「多种音色/参数预设」的管理正确性，而非界面。
+
+## 工程观察
+- 采用「本地 HTTP 服务 + 管理页」而非纯进程内调用，好处是**推理可独立重启**、可单独开浏览器调试；代价是多一个端口与生命周期管理。
+- `start.bat` 的存在说明面向 Windows 桌面用户直启，与 VCPChat 的 Electron 分发形态一致。
+- 本切片不声称已核验 Sovist5 的模型文件、推理框架（C++/ONNX/其他）或显存占用，本轮只核验了目录结构与配置登记。
+
+关联节点：VCPChat原生音频引擎rust_audio_engine(235)、SRPG战棋战术沙盘(281)、文坊Scriptorium与ExcalidrawPDF双引擎(280)
+Tag: Sovist5, so-vits-svc, 本地音频, TTS, sovits5cppmanager, 换芯, gsv-manager, gsv-presets, 预设, start.bat, package.json files, rust_audio_engine, 净减, 第29次上游合并, 7cf4e1e2

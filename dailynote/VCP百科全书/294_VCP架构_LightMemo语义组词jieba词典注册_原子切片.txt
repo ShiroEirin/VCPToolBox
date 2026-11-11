@@ -1,0 +1,61 @@
+[2026-11-11] - 哈雷酱
+# LightMemo 语义组词注册进 jieba 词典
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-11（第29次上游合并：863d64e7，上游 9edfb472「fix(LightMemo): 语义组词注册进 jieba 词典，词典外的词也能触发语义组」）
+适用范围：`Plugin/LightMemo/LightMemo.js` 的 `_registerGroupWords` 与 `_tokenize` 路径
+事实来源：
+- `Plugin/LightMemo/LightMemo.js`（**+20 行**，当前 1,122 行）
+- `tests/lightMemoSemanticGroups.test.js`（**+45 行，新增**）
+- 上游 commit：`9edfb472`（2 文件 +65）
+
+## 核心结论
+这是记忆系统里一个**「分词器不认识你的词，语义组永远命不中」**的缺陷修复。语义组词（如「塔罗会」「源堡」这类自造名/圈内黑话）不在 jieba 的通用词典里，会被切成碎片，导致 `_tokenize` 按词查表时**永远匹配不到**。修法是把这些词**运行时注入 jieba 词典**。
+
+## 源码事实（逐行）
+```js
+/**
+ * _tokenize looks group words up by jieba tokens, so a group word missing from jieba's
+ * dictionary (coined names, slang such as "塔罗会" or "源堡") is split and never matches.
+ * Register such words with jieba so they stay whole tokens.
+ */
+_registerGroupWords(words) {
+    if (!this.jiebaInstance) return;
+    const lines = [];
+    for (const word of words) {
+        if (typeof word !== 'string') continue;
+        for (const form of new Set([word.trim(), word.trim().toLowerCase()])) {
+            if (form && !/\s/.test(form) && this.jiebaInstance.cut(form, false).length > 1) {
+                lines.push(`${form} 1000 n`);
+            }
+        }
+    }
+    if (lines.length > 0) this.jiebaInstance.loadDict(Buffer.from(lines.join('\n'), 'utf-8'));
+}
+```
+
+## 四个设计细节
+1. **惰性判定**：先 `cut(form, false).length > 1` 判断「当前是否会被切开」，只有会被切开的词才注册——不需要注册的词不污染词典。
+2. **双形态注册**：原形 + 小写形各注册一次（`new Set([trim, trim.toLowerCase()])`），避免大小写差异导致命中失败。
+3. **跳过含空白词**：`!/\s/.test(form)`——多词短语不注册，因为 jieba 词典条目不能含空格。
+4. **自定义词性 + 高词频**：`${form} 1000 n`，`1000` 是词频（保证切分时优先成词），`n` 是名词词性。
+
+## 调用时机
+在语义组加载处调用：`this._registerGroupWords(group.words);`——即**组定义一变，词典跟着变**，不需要重启。
+
+## 为什么这对记忆系统重要
+- LightMemo 是**主动渠道**（Agent 显式调用「我想起要去查什么」）。
+- 语义组是 LightMemo 的召回触发器之一：组词命不中 → 该组对应的记忆**永远召不回**，而且不会报错，静默失效。
+- 这类缺陷特别隐蔽：用户以为是「记忆里没存」，实际是「分词把它切碎了」。
+
+## 影响面
+- 组词含自造名、英文缩写混写、圈内黑话的场景从「必然失效」变为「正常命中」。
+- 对已有数据无迁移成本：注册发生在运行时，不改变存储格式。
+- 与切片 289（RAG 替换注入防护）互补：289 修「注入越界」，294 修「召回漏空」。
+
+## 未证实部分
+- 不断言 `loadDict` 在 `@node-rs/jieba` 中的具体实现代价；本切片只基于调用方式与参数格式描述。
+- 不断言「源堡」「塔罗会」是否为真实用户数据，这两个词来自上游代码注释原文。
+
+关联节点：LightMemo插件说明(59)、LightMemov1.4.0与RiverMemo适配(211)、RAG占位符替换注入防护(289)
+Tag: LightMemo, jieba, 语义组, _registerGroupWords, _tokenize, loadDict, 自定义词典, 词频1000, 自造名, 黑话, 切分失效, 静默漏召, 主动渠道, 第29次上游合并, 9edfb472

@@ -97,4 +97,11 @@ Flowlockmodules是VCPChat的心流锁模块，实现Agent的自动续写功能�
 3. 上下文限制：注意Agent的上下文窗口限制
 4. 手动干预：可随时停止心流锁
 
+## 2026-11-11 第29次上游合并：跨域认领早夭与多 Pending 死锁修复（0e1861e3）
+
+- **`Flowlockmodules/flowlock.js` +150 行**，配套 `modules/ipc/chatHandlers.js`(86)、`modules/chatManager.js`(5)、`modules/renderer/nonStreamingEventConsumer.js`(12)、`renderer.js`(4)，合计 6 文件 **+661/−39**。
+- **三处缺陷（提交标题原文）**：① 跨域心流锁认领早夭——锁在不同入口（单聊/群聊/侧栏）之间交接时过早失效；② 多 Pending 死锁——多个待处理互相等待；③ 并发抢占守卫——检查与抢占之间的窗口未封。
+- **测试**：`tests/flowlock-cross-domain-claim.test.js` **443 行**，比实现改动大近 3 倍。
+- **与上一轮的分层**：`7ed298aa`（11-05）修的是「代码围栏遮蔽顺序 + 流式情绪扫描器思考标签边界」（识别层）；本轮修的是「并发与生命周期」（调度层）。
+- 详见切片 292。
 Tag: 心流锁, 自动续写, 创作流, 智能重试, 视觉反馈, Agent控制, TagMemo V9.1

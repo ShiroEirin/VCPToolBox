@@ -1,0 +1,57 @@
+[2026-11-11] - 哈雷酱
+# ChatKernelV2 —— 话题准入、生成租约与消息中继
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-11（第29次上游合并：48b1e2b6，上游 303a3b8a「完成ChatKernelV2超级重构和端到端高并发压测」）
+适用范围：`modules/services/topic*.js` 与 `modules/chat/*` 新增模块
+事实来源：
+- 主提交：`303a3b8a`（**85 文件 +8,947/−1,351**）
+- 配套：`c143e959`（对齐级联中止和 K2 内核管线合并事务项）/ `576575ef`（对齐压缩协议边界）/ `6ea66f87`（topic-sponsor 群聊穿透）
+- **新增 10 个模块**（行数实测）：
+  - `modules/services/topicMessageAdmission.js` **721 行**
+  - `modules/services/topicMessageAdmissionHost.js` 152 行
+  - `modules/chat/contextCompactionStream.js` 106 行
+  - `modules/services/toolLoopHandoff.js` 99 行
+  - `modules/chat/topicAdmissionSingleChat.js` 82 行
+  - `modules/services/topicSponsorDelivery.js` 75 行
+  - `modules/services/topicGenerationLease.js` 57 行
+  - `modules/services/topicMessageAdmissionStore.js` 56 行
+  - `modules/services/topicAdmissionGroup.js` 55 行
+  - `modules/services/topicConversationResolver.js` 53 行
+- **新增 25 个 `tests/topic-*.test.*` 测试文件**
+
+## 核心结论
+ChatKernelV2 不是「新功能」，而是给聊天加了**三层行政机制**：谁能发言（admission）、谁能生成（lease）、消息怎么落盘不丢（relay / history CAS / persistence）。作者把它称为「超级重构」并配了「端到端高并发压测」——说明目标是在并发场景下不再丢消息、不再双答、不再抢写。
+
+## 三层职责（自模块名与文件分布倒推）
+| 层 | 模块 | 解决的问题 |
+|---|---|---|
+| **准入** | `topicMessageAdmission`(721) + `topicAdmissionSingleChat`(82) + `topicAdmissionGroup`(55) + `topicMessageAdmissionHost`(152) + `topicMessageAdmissionStore`(56) | 同一话题下消息/请求的**排队与去重**；单聊与群聊两套入口；Host 做宿主侧调度，Store 做持久化 |
+| **租约** | `topicGenerationLease`(57) | 「同一次生成只允许一个持有者」——防止多个请求同时为同一话题生成（双答/串话） |
+| **中继与一致** | 测试面：`topic-relay`(446) / `topic-history-cas`(mjs) / `topic-terminal-persistence`(46) / `topic-stream-uncertain`(97) / `topic-owner-history-barrier` / `topic-manual-continue` / `topic-conversation-resolver` | 中继投递、历史 CAS、终端消息落盘、**流式状态不确定**的收口、历史屏障 |
+
+## 从测试文件反推的硬约束（重要）
+新增测试本身就是规格说明书：
+- `topic-generation-lease`：生成租约存在且互斥。
+- `topic-standalone-lease`(159)：独立会话下的租约行为。
+- `topic-history-cas`：历史写入用 **CAS（比较并交换）**，防并发覆盖。
+- `topic-owner-history-barrier`：属主历史屏障——其他人不能越权写。
+- `topic-stream-uncertain`(97)：**流式结果不确定**时如何收敛（中断/超时/部分到达）。
+- `topic-manual-continue`：手动续写与自动生成的边界。
+- `topic-relay`(446) + `topic-relay-persistence-integration` + `topic-relay-renderer`：中继在**主进程/持久层/渲染层**三边一致。
+- `topic-sponsor-delivery`(180) / `topic-sponsor-retired-entry`(27) / `topic-sponsor-service-routing`(71)：话题发起（sponsor）的投递与退役入口。
+- `topic-agent-delete-updates` / `topic-group-delete-updates`：删除话题后各端更新。
+- `topic-message-admission` / `topic-message-admission-host` / `topic-message-admission-store`：三层准入各自可测。
+- `topic-admission-renderer-failure` / `topic-admission-single-chat` / `topic-admission-group` / `topic-admission-queue-view`：**渲染层失败**也要能正确拒绝准入。
+
+## 与 K2 协议的关系
+- 后端 `handoffGate`（切片 287）负责「交接门」，前端 `toolLoopHandoff`（99 行）负责「接力」——两者同一周落地，说明 ChatKernelV2 与 K2 是**同一套并发治理的两端**。
+- `c143e959`「对齐级联中止和 K2 内核管线合并事物项」明确把两者绑在一起。
+
+## 工程观察
+- **测试先行痕迹明显**：25 个细分测试文件对应 10 个模块，颗粒度到「渲染层失败」「队列视图」「退役入口」。
+- 命名统一用 `topic*` 前缀，说明作者把「话题」当作**并发治理的边界单位**，而非普通数据结构。
+- 本切片不声称已看过 721 行 `topicMessageAdmission` 的逐行实现，结论基于模块名、行数、测试面与提交标题。
+
+关联节点：K2协议与异步工具交接门handoffGate(287)、心流锁跨域认领与并发守卫(292)、统一聊天上下文组装器chatContextPipeline(282)
+Tag: ChatKernelV2, topicMessageAdmission, topicGenerationLease, topicRelay, topicHistoryCAS, topicOwnerHistoryBarrier, topicStreamUncertain, topicSponsorDelivery, topicConversationResolver, 准入, 租约, 中继, 历史CAS, 高并发压测, toolLoopHandoff, 第29次上游合并, 303a3b8a

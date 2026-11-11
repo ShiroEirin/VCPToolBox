@@ -94,4 +94,11 @@ LightMemo 从 v1.0.0 升级至 v1.4.0，默认引擎模式从 tagmemo 变更为 
 | maid作用域 | 不支持 | 支持 [文件夹]署名 |
 
 关联节点：RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), rust-vexus-lite记忆管线(209), RAGDiaryPlugin(03), TagMemoEngine统一构型(198), DailyNote(30), TagMemo V10 Alpha(206)
+## 2026-11-11 第29次上游合并：语义组词注册进 jieba 词典（9edfb472）
+
+- **问题**：`_tokenize` 按 jieba 词元查表，语义组词若不在 jieba 词典（自造名、黑话，如「塔罗会」「源堡」）会被切碎，导致该语义组**永久静默失效**——不报错，只是召不回。
+- **修复**：`LightMemo.js` +20 行新增 `_registerGroupWords(words)`：先用 `cut(form, false).length > 1` 判断是否会被切开，只对会切开的词注册；原形与小写形各注册一次；跳过含空白词；词典行格式为「词 1000 n」（词频 1000、词性 n）；最后 `jiebaInstance.loadDict(Buffer.from(lines.join('\n'), 'utf-8'))`。
+- **调用点**：语义组加载处 `this._registerGroupWords(group.words)`——组定义变即词典变，无需重启。
+- **测试**：`tests/lightMemoSemanticGroups.test.js`（45 行，新增）。
+- 详见切片 294。
 Tag: LightMemo, v1.4.0, rivermemo, tagmemo, knn, SearchRAG, TagMemoAB, TDB冷知识库, Rerank, AIMemo, hybridservice, direct, TagMemo V9.1, topology-v3, 2026-07-24

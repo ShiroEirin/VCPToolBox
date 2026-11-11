@@ -1,0 +1,48 @@
+[2026-11-11] - 哈雷酱
+# K2 协议与异步工具交接门 handoffGate
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-11（第29次上游合并：863d64e7，上游 f23275aa「对齐后端k2协议升级」）
+适用范围：`modules/vcpLoop/handoffGate.js` 与 chatCompletionHandler / streamHandler 的交接路径
+事实来源：
+- `modules/vcpLoop/handoffGate.js`（**本轮新增 74 行**）
+- `modules/chatCompletionHandler.js` +18、`modules/handlers/streamHandler.js` +19、`server.js` +19
+- 测试：`tests/handoffGate.test.js`（59）/ `tests/handoffInterruptRoute.test.js`（62）/ `tests/handoffStreamLoop.test.js`（54）
+- 上游 commit：`f23275aa`（7 文件 +301/−4）
+- 前端侧对齐：VCPChat `0257031a`「对齐前端k2协议升级」、`c143e959`「对齐级联中止和K2内核管线合并事物项」
+
+## 核心结论
+K2 指的是一套**「交接（handoff）」语义**：当一次请求需要把控制权从一段流交给另一段（工具循环、重入、续写）时，旧实现靠时序巧合，新实现给交接装了一道**带版本号的门**。两个仓库同一周各自对齐，说明这是双方约定的协议，而非单侧实现。
+
+## handoffGate 源码事实
+```js
+function createHandoffGate(signal, { timeoutMs = 2000 } = {})
+```
+- 内部状态：`revision`（单调递增）、`last`、`ready`、`closed`、`waiters`（Set）。
+- 中止处理：`signal.addEventListener('abort', onAbort, { once: true })`；`stopped()` = `closed || signal?.aborted`；中止时抛 `AbortError`，消息原文 `Request stopped during handoff`。
+- 对外接口：`control({ action, handoffId, revision })`。
+
+## 控制面错误码（逐字）
+| 错误码 | 触发条件 |
+|---|---|
+| `INVALID_ACTION` | `action` 不是 `prepare_handoff` / `cancel_handoff` |
+| `INVALID_HANDOFF` | `handoffId` 非字符串、为空、**超过 128 字符**，或 `revision` 不是 ≥1 的安全整数 |
+| `REQUEST_STOPPED` | 请求已中止或门已关闭 |
+| `STALE_REVISION` | 传入 `next < revision`（旧版本号迟到） |
+
+## 为什么需要 revision
+- 流式场景下同一个交接可能被重试或重发，若只看 `handoffId` 无法区分「新一次交接」与「旧消息重达」。
+- `next === revision` 走幂等分支（不重复准备）；`next < revision` 直接判旧；`next > revision` 才推进。
+- 即：**版本号做单调闸门，handoffId 做身份校验**，两者职责分离。
+
+## 与既有机制的关系
+- 与切片 278（工具返回批次界定符协议）同属「上下文结构化」家族：278 解决**结果怎么包**，287 解决**控制权怎么交**。
+- 与 VCPChat 侧 `modules/services/toolLoopHandoff.js`（99 行，同一轮新增）构成双端对应：后端给门，前端给接力。
+- 默认超时 2000ms 是短超时——说明设计假设交接是**同步快路径**，不是长任务等待。
+
+## 未证实部分
+- 不断言 K2 是某个缩写词的官方展开（上游未在代码/注释中给出全称）。
+- 不断言前后端协议字段完全一致，仅知两边同一周各自「对齐」。
+
+关联节点：工具返回批次界定符协议(278)、思考块剥离边界与代码域隔离(283)、ChatKernelV2话题准入与生成租约(291)
+Tag: K2协议, handoff, handoffGate, prepare_handoff, cancel_handoff, revision, STALE_REVISION, INVALID_HANDOFF, REQUEST_STOPPED, AbortError, 交接门, 级联中止, toolLoopHandoff, 第29次上游合并, f23275aa

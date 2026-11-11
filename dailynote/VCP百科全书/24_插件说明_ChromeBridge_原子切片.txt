@@ -178,4 +178,11 @@ Tag: ChromeBridge, hybridservice, direct, open_url, click, type, wait, screensho
 - **验证**：`tests/chromeBridge/jev-ws-test.js`（新增 195 行）；VCPChat 侧 `tests/loom-v2-webcore.test.js`（新增 375 行）。
 - 详见切片 270（ChromeBridge JEV 实体服务与 Loom v2 内核重构）。
 
+## 2026-11-11 第29次上游合并：页面监控改为预消息处理器管线（b58c7ef4）
+
+- **不再常驻扫描**：`VCPChrome/content_script.js` 被砍 **110 行**，扫描逻辑移出；改为请求驱动——只有上下文里出现 `{{VCPChromePageInfo}}` 才取快照。
+- **新增 `Plugin/ChromeBridge/pageInfoPreprocessor.js`（49 行）**：常量 `PLACEHOLDER = '{{VCPChromePageInfo}}'`；`textSlots(messages)` 只扫 system / user，user 消息须匹配 `[系统...]` 前缀才参与；`preprocessPageInfo(messages, fetchSnapshot)` 由外部注入取快照函数。
+- **新增仓库根 `preprocessor_order.json`（11 项顺序）**：VCPTavern → CapturePreprocessor → $StaticPlaceholderInjection → ImageProcessor → MemoryThinkingTray → RAGDiaryPlugin → VCPTimeLine → **ChromeBridge** → OpenHerPersona → OneRing → ContextFoldingV2。ChromeBridge 排在第 8 位：晚于记忆注入、早于人设后置与收口。
+- **配套回归**：`chromeBridgePagePreprocessor.test.js`(60) / `chromeBridgeSnapshotProtocol.test.js`(71) / `chromeBridgeReceiverRepair.test.js`(49) / `chromeBridgePopupIdentity.test.js`(61)。
+- 详见切片 288（预处理器管线顺序表）。
 Tag: ChromeBridge, VCPChrome, 浏览器扩展, Cookie, siteKey, FETCH_COOKIES_RAW_MULTI, 第26次上游合并, jevEntityService, ALLOWED_COMMANDS, web-agent-entity-arbiter, webcore, Loom v2

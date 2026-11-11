@@ -1,0 +1,45 @@
+[2026-11-11] - 哈雷酱
+# RAG 占位符替换注入防护
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-11（第29次上游合并：863d64e7，上游 3cc6e679「fix(rag): prevent GetSubstitution injection and RAG block escape in text replacements」）
+适用范围：`Plugin/RAGDiaryPlugin/*` 与 `modules/messageProcessor.js` 的全部占位符替换点
+事实来源：
+- `Plugin/RAGDiaryPlugin/AIMemoHandler.js`（23）/ `DirectDiaryTextProcessor.js`（7）/ `RAGDiaryPlugin.js`（2）/ `RAGResultFormatter.js`（6）/ `TDBPlaceholderProcessor.js`（4）
+- `modules/messageProcessor.js`（47）
+- 上游 commit：`3cc6e679`（6 文件 +50/−39）
+
+## 核心结论
+这是 JavaScript `String.prototype.replace` 的一个**经典陷阱**被系统性堵上：当替换值是**用户内容**（记忆文本、日记正文、文件内容）而非固定字符串时，`replace(placeholder, value)` 会把 value 里的 `$&`、`` $` ``、`$'`、`$1`… 当成**替换模式**解析，从而把别处的文本拽进来或改写。
+
+## 修复模式（源码逐行）
+全部改成**函数式替换**：
+```js
+// 旧
+processedContent = processedContent.replace(placeholder, replacementContent);
+// 新
+processedContent = processedContent.replace(placeholder, () => replacementContent);
+```
+- 传函数时，JS 不解析 `$` 模式，返回值原样插入。
+- 本提交在 6 个文件里把所有涉及**动态内容**的 replace / replaceAll 全部改成函数式，涉及：`AIMemoHandler`、`DirectDiaryTextProcessor`、`RAGResultFormatter`、`TDBPlaceholderProcessor`、`messageProcessor`。
+
+## 第二层防护：RAG 块逃逸
+- 新增正则：`/<!--\s*(VCP_RAG_BLOCK_(?:START|END))\b([\s\S]*?)-->/gi`
+- 输出统一重建为：`<!-- VCP_RAG_BLOCK_START ${metadataString} -->${safeInnerContent}<!-- VCP_RAG_BLOCK_END -->`
+- 含义：记忆内容里如果本来就包含假的 `VCP_RAG_BLOCK_START/END` 注释，旧实现会让它**提前闭合** RAG 区块，使后续内容被当成「非记忆区」而绕过标记；现在先按正则摘出并重建，避免嵌套伪造。
+
+## 为什么这是安全问题而非 bug
+- 记忆是**被动渠道**：RAGDiaryPlugin 在回答前把日记内容注入上下文。如果日记正文里出现 `$&` 或伪造的区块标记，就可能把**其他上下文内容**拉进记忆区，或者让注入的记忆**越界**到系统提示区。
+- 攻击面不在网络，而在**写入记忆的文本**——任何能写日记/知识库的路径都是入口。
+- 与切片 277（路径遍历防火墙）、290（插件回调安全）同属本轮「边界收口」系列。
+
+## 影响面
+- 正常文本内容不受影响（函数式替换语义等价）。
+- 含 `$&`、`$1`、反引号、伪造注释块的记忆文本，行为从「可能被解析」变为「原样保留」。
+- 对已有记忆无破坏性：不需要迁移数据，只在替换时生效。
+
+## 未证实部分
+- 不断言上游是否同时审计了其他语言的替换点（如 Python 侧），本次 diff 只覆盖上述 6 个 JS 文件。
+
+关联节点：全局遍历攻击防火墙与安全路径边界(277)、插件回调安全与异步结果存储(290)、预处理器管线顺序表(288)
+Tag: RAG, GetSubstitution, replace注入, 函数式替换, $&, VCP_RAG_BLOCK_START, VCP_RAG_BLOCK_END, 块逃逸, AIMemoHandler, TDBPlaceholderProcessor, messageProcessor, 记忆注入, 安全边界, 第29次上游合并, 3cc6e679

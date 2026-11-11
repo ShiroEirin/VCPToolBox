@@ -1,0 +1,46 @@
+[2026-11-11] - 哈雷酱
+# 预处理器管线顺序表与 ChromeBridge 页面信息预处理器
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-11（第29次上游合并：863d64e7，上游 b58c7ef4「重构ChromeBridge页面监控功能为预消息处理器管线移除扫描逻辑」）
+适用范围：仓库根 `preprocessor_order.json` 与 `Plugin/ChromeBridge/pageInfoPreprocessor.js`
+事实来源：
+- `preprocessor_order.json`（**本轮新增**，10 行 JSON）
+- `Plugin/ChromeBridge/pageInfoPreprocessor.js`（**本轮新增 49 行**）
+- `Plugin/ChromeBridge/ChromeBridge.js` +66、`VCPChrome/content_script.js` **−110**、`VCPChrome/background.js` 净减约 91 行、`plugin-manifest.json` 版本 +1
+- 测试：`tests/chromeBridgePagePreprocessor.test.js`（60）/ `chromeBridgeSnapshotProtocol.test.js`（71）
+- 上游 commit：`b58c7ef4`（9 文件 +289/−177）
+
+## 核心结论
+本轮把「预处理器执行顺序」从**隐式约定**变成**仓库根的显式清单**，同时把 ChromeBridge 的页面信息采集从「content_script 里主动扫描」改成「挂在预处理器管线里的一个插槽」——`content_script.js` 因此被砍掉 110 行。
+
+## 显式顺序表（`preprocessor_order.json` 全文语义）
+```text
+VCPTavern → CapturePreprocessor → $StaticPlaceholderInjection → ImageProcessor
+→ MemoryThinkingTray → RAGDiaryPlugin → VCPTimeLine → ChromeBridge
+→ OpenHerPersona → OneRing → ContextFoldingV2
+```
+这张表本身就是架构事实：
+1. **Tavern 最先**——人设与规则先定调。
+2. **静态占位符在图像之前**——避免图片处理误改占位符。
+3. **记忆类（MemoryThinkingTray / RAGDiaryPlugin）在时间线与浏览器之前**——保证记忆注入不被后续处理器二次改写。
+4. **ChromeBridge 在第 8 位**——页面信息注入晚于记忆，早于人设后置（OpenHerPersona）与 OneRing 收口。
+5. **ContextFoldingV2 最后**——折叠/裁剪必须是最后一步，否则会折掉前面刚注入的内容。
+
+## pageInfoPreprocessor 实现（源码事实）
+- 占位符常量：`const PLACEHOLDER = '{{VCPChromePageInfo}}';`
+- `textSlots(messages)`：只扫 `system` / `user` 两种 role；`content` 支持字符串与数组（数组只取 `type === 'text'` 的 part）；**user 消息必须匹配** `/^\s*\[系统[^\]]*\]/u` 才参与，否则跳过。
+- `preprocessPageInfo(messages, fetchSnapshot)`：接收取快照的函数，异步取页面信息并替换槽位。
+- 设计含义：把「取什么」与「怎么取」解耦——预处理器只负责**定位槽位与落值**，快照由 ChromeBridge 侧提供。
+
+## 为什么移除扫描逻辑
+- 旧方式：`content_script.js` 常驻页面扫描，成本高且与页面生命周期强耦合（页面刷新、iframe、SPA 路由都可能让其失准）。
+- 新方式：**请求驱动**——只有上下文里真出现 `{{VCPChromePageInfo}}` 时才取快照。
+- 配套新增 `chromeBridgeSnapshotProtocol.test.js`（71 行）与 `chromeBridgeReceiverRepair.test.js`（49 行）、`chromeBridgePopupIdentity.test.js`（61 行）——即**快照协议、接收端修复、弹窗身份**三块都进了回归。
+
+## 影响面
+- 对使用者：`{{VCPChromePageInfo}}` 占位符行为不变，但只在被引用时才触发浏览器侧取数，空闲时零开销。
+- 对开发者：新增预处理器需要同时在 `preprocessor_order.json` 登记位置，否则执行顺序不确定（这是把隐式变显式的代价与收益）。
+
+关联节点：ChromeBridge插件说明(24)、ChromeBridge JEV实体服务与Loomv2内核重构(270)、RAG占位符替换注入防护(289)
+Tag: preprocessor_order.json, 预处理器管线, ChromeBridge, pageInfoPreprocessor, VCPChromePageInfo, content_script瘦身, 请求驱动, 快照协议, 弹窗身份, 接收端修复, 顺序显式化, 第29次上游合并, b58c7ef4

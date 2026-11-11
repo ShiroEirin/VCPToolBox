@@ -1,0 +1,60 @@
+[2026-11-11] - 哈雷酱
+# 插件回调安全与异步结果存储
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-11（第29次上游合并：863d64e7，上游 682a6701「多个安全补丁升级」+ eff29b1f「安全fix2」）
+适用范围：`modules/asyncResultStore.js` 与 5 个插件的回调触发路径、server.js 路由收敛
+事实来源：
+- `modules/asyncResultStore.js`（**本轮新增 71 行**）
+- `server.js`（**净减 78 行**）、`WebSocketServer.js` +15、`modules/messageProcessor.js` +5
+- 插件侧：`AgentAssistant.js`(4) / `LinuxLogMonitor/core/CallbackTrigger.js`(6) / `MimoDubbing.js`(2) / `PowerShellExecutor.js`(3) / `VCPTavern.js`(7)
+- 测试：`tests/pluginCallbackSecurity.test.js`（135）/ `tests/magiCallbackAuth.test.js`（119）
+- 上游 commit：`682a6701`（10 文件 +246/−80）、`eff29b1f`
+
+## 核心结论
+异步插件（跑完才回调）的**结果落盘路径**与**回调鉴权**本轮一起收口：新增 `asyncResultStore` 统一管理异步结果文件，并把 5 个插件的回调触发点改成走同一套校验。
+
+## asyncResultStore 的硬规则（源码逐字）
+```js
+const { invalidPath, resolveSafePath, assertSafePath } = require('./safeFilePath');
+
+// Identifiers are names, never paths. Reject percent escapes as well: decode once only.
+function validateResultId(value, maxLength = 120) {
+    if (typeof value !== 'string' || value.length > maxLength
+        || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(value)
+        || value.includes('..') || value.endsWith('.'))
+        throw invalidPath('Invalid task or plugin identifier');
+    return value;
+}
+```
+- **复用 277 的 `safeFilePath`**：`resolveSafePath` / `assertSafePath` / `invalidPath` 三条一起 import，说明路径安全已形成单一入口。
+- 标识符是**名字不是路径**：只允许 `[A-Za-z0-9_-]` 开头，后续可含 `.`，但**禁止 `..`、禁止尾随点**。
+- 注释明确处理百分号转义：`Reject percent escapes as well: decode once only.`——只解一次码，防双重编码绕过。
+- `resultPath(root, pluginName, taskId)` 对两个标识符分别校验（pluginName 上限 100、taskId 上限 120）。
+
+## 插件侧同批修正（5 处）
+| 插件 | 改动 |
+|---|---|
+| `AgentAssistant` | 回调触发参数校验 |
+| `LinuxLogMonitor/core/CallbackTrigger` | 回调触发参数校验 |
+| `MimoDubbing` | 回调触发参数校验 |
+| `PowerShellExecutor` | 回调触发参数校验（高风险插件，尤其重要） |
+| `VCPTavern` | 回调触发参数校验 |
+
+## server.js 净减 78 行
+- 异步结果相关的读写/清理逻辑被抽到 `asyncResultStore`，`server.js` 只保留编排。
+- `WebSocketServer.js` +15 行用于回调通道对接。
+
+## 测试规模
+- `pluginCallbackSecurity.test.js` 135 行 + `magiCallbackAuth.test.js` 119 行——两个安全测试合起来 254 行，是本轮单主题最大的测试投入之一。
+- 说明这不是「顺手加个校验」，而是把回调安全当作**独立攻击面**对待。
+
+## 与既有切片的关系
+- 277 定义了 `safeFilePath`（路径层）；290 是它的**第一个非路由消费者**（异步结果层）。
+- 289 防的是「文本注入」，290 防的是「标识符注入 + 回调伪造」，277 防的是「路径遍历」——三条边界互补。
+
+## 未证实部分
+- 不断言 `magiCallbackAuth` 中 MAGI 的具体含义（测试文件存在，但本轮未核验其协议文档）。
+
+关联节点：全局遍历攻击防火墙与安全路径边界(277)、RAG占位符替换注入防护(289)、K2协议与异步工具交接门handoffGate(287)
+Tag: asyncResultStore, pluginCallbackSecurity, magiCallbackAuth, 回调鉴权, 异步结果, validateResultId, 标识符即名字, 百分号转义, safeFilePath, resolveSafePath, AgentAssistant, PowerShellExecutor, VCPTavern, MimoDubbing, LinuxLogMonitor, server.js瘦身, 第29次上游合并, 682a6701

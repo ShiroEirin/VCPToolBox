@@ -49,4 +49,12 @@ VCPChat 的独立 Rust 音频服务：解码、重采样、DSP 链、响度分�
 - 五种 resampler 后端的运行时选择规则（仅确认 `processor::RESAMPLER_BACKEND_NAME` 会出现在启动日志）；
 - `audio_engine/` 下各 exe 的构建时刻与对应 commit（本轮只确认文件与体积）。
 
+## 2026-11-11 第29次上游合并：推理引擎换芯 Sovist5（7cf4e1e2）
+
+- **注意分层**：本切片描述的 `rust_audio_engine` 是**音频通道**（Rust 原生链路）；本轮换芯的是**发声模型（TTS 推理）**，两者不是同一层。
+- **新子工程 `sovits5cppmanager/`**：`server.js`(72) / `app.js`(74) / `index.html`(19) / `start.bat`(5) / `README.md`(85)；本地 HTTP 服务 + 管理页形态，推理可独立重启。
+- **`package.json` 新增两条**：脚本 `sovits5cppmanager: node sovits5cppmanager/server.js`，files 条目 `sovits5cppmanager/**/*`——随发行物打包，不依赖用户自装。
+- **净减 31 行**（14 文件 +610/−641）：替换式换芯，不是叠加。
+- **测试**：`tests/gsv-manager-ui.test.js`(53) / `tests/gsv-presets.test.js`(86)——预设体系测试约为 UI 测试的两倍。
+- 详见切片 293。
 Tag: rust_audio_engine, vcp_audio_engine, VCPChat, Rust音频引擎, Rubato, DSP, Symphonia, cpal, WASAPI, actix-web, actix-ws, rubato_backend, FFTConvolver, crossfeed, 响度, EBU R128, TruePeakDetector, assert_no_alloc, 零分配回调, audio_server, 第19次上游合并

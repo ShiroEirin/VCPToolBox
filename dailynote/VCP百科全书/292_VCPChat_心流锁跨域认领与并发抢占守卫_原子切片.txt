@@ -1,0 +1,46 @@
+[2026-11-11] - 哈雷酱
+# 心流锁跨域认领与并发抢占守卫
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-11（第29次上游合并：48b1e2b6，上游 0e1861e3「fix(flowlock): 修复跨域心流锁认领早夭、多Pending死锁与并发抢占守卫」）
+适用范围：`Flowlockmodules/flowlock.js` 与 chatHandlers / chatManager / 渲染层消费端
+事实来源：
+- `Flowlockmodules/flowlock.js` **+150**
+- `modules/ipc/chatHandlers.js`（86）/ `modules/chatManager.js`（5）/ `modules/renderer/nonStreamingEventConsumer.js`（12）/ `renderer.js`（4）
+- 测试：`tests/flowlock-cross-domain-claim.test.js`（**443 行，新增**）
+- 上游 commit：`0e1861e3`（6 文件 +661/−39）
+
+## 核心结论
+心流锁（Flowlock）本轮修的是三类**并发时序病**：认领早夭（claim 还没生效就死）、多 Pending 互等死锁、并发抢占无守卫。修法是在锁的认领与释放路径上补状态与守卫，而非重写协议。
+
+## 三个已修复的缺陷（提交标题逐字拆解）
+| 缺陷 | 含义 | 为什么发生 |
+|---|---|---|
+| **跨域心流锁认领早夭** | 锁在「跨域」（单聊↔群聊↔侧栏等不同入口）认领后过早失效 | 不同入口各自创建/销毁上下文，锁的生命周期没有跟随真实持有者 |
+| **多 Pending 死锁** | 多个待处理（Pending）互相等待，无人推进 | 缺「优先级/顺序」仲裁，谁都等对方先动 |
+| **并发抢占守卫** | 并发请求抢同一把锁时缺防护 | 旧实现是「先检查再抢」，检查与抢占之间有窗口 |
+
+## 测试面（443 行）
+- `tests/flowlock-cross-domain-claim.test.js` 单文件 443 行，比实现改动（150 行）大近 3 倍——典型的「先写用例再改实现」痕迹。
+- 测试名直接指出验证对象：**cross-domain claim**（跨域认领）。
+
+## 与既有心流锁修复的时间线
+1. `7ed298aa`（本轮前，11-05）：修正**代码围栏遮蔽顺序**与流式情绪扫描器思考标签边界（协议层）。
+2. `0e1861e3`（本轮，11-10）：修**并发与生命周期**（调度层）。
+两轮修的是同一个模块的不同层：前者防「误识别」，后者防「抢与等」。
+
+## 影响面
+- `chatHandlers.js` 改动 86 行——说明 IPC 层需要配合锁的认领/释放时序。
+- `nonStreamingEventConsumer.js` +12：**非流式**消费路径也要感知锁状态（旧实现可能只处理了流式）。
+- `renderer.js` +4：渲染入口微调，推测是初始化顺序。
+
+## 与 ChatKernelV2 的关系
+- ChatKernelV2（切片 291）用 `topicGenerationLease` 管「一次生成只一个持有者」；心流锁管「一次流转只一个执行者」。两者分工：租约在**话题级**，心流锁在**请求级**。
+- 同周两个模块都在补并发守卫，说明作者正在把「并发」从偶然正确变成结构正确。
+
+## 未证实部分
+- 不声称已逐行读完 `flowlock.js` 的 150 行新增，结论基于提交标题的三个关键词、文件分布与测试规模。
+- 不断言「跨域」具体涵盖哪些入口（单聊/群聊/侧栏为推断，测试文件名只写 cross-domain）。
+
+关联节点：ChatKernelV2话题准入与生成租约(291)、Flowlockmodules模块说明(126)、思考块剥离边界与代码域隔离(283)
+Tag: flowlock, 心流锁, 跨域认领, claim早夭, 多Pending死锁, 并发抢占守卫, cross-domain, chatHandlers, nonStreamingEventConsumer, 租约vs心流锁, 第29次上游合并, 0e1861e3
