@@ -19,7 +19,7 @@ use crate::storage::{TagVectorPool, ensure_tag_vectors_loaded};
 mod wormhole;
 
 const RESULT_SCHEMA: &str = "rivermemo-topology-v3-native-result-v1";
-const ALGORITHM_VERSION: &str = "rivermemo.conservative-topology-v2.5-confidence-rrf";
+const ALGORITHM_VERSION: &str = "rivermemo.unified-omega-experiment-c-v1";
 
 fn clamp01(value: f64) -> f64 {
     if value.is_finite() {
@@ -220,6 +220,8 @@ struct NativeInput {
     #[serde(default)]
     candidates: Vec<CandidateInput>,
     query_state: QueryStateInput,
+    #[serde(default)]
+    calibration: QueryCalibration,
     #[serde(default)]
     allowed_file_ids: Option<Vec<i64>>,
     #[serde(default)]
@@ -500,9 +502,20 @@ impl NativeArtifact {
 ///
 /// 请求上下文而非跨请求结果缓存：持有河网、双场和已读取的 Tag 向量池。
 /// 最后一个内部消费者完成后由拥有者释放句柄；不复制常驻全库图。
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub(crate) struct QueryCalibration {
+    pub(crate) differentia_vector: Vec<f32>,
+    pub(crate) superseded_ids: Vec<i64>,
+    pub(crate) differentia_confidence: f64,
+    pub(crate) explained_ratio: Option<f64>,
+}
+
 pub(crate) struct MemoQueryObservation {
+    pub(crate) calibration: QueryCalibration,
+    pub(crate) artifact: Arc<NativeArtifact>,
     pub(crate) artifact_sig: String,
-    pub(crate) artifact_generation: u64,
+
     pub(crate) observation: Arc<SenseOutput>,
     pub(crate) original_query_vector: Arc<Vec<f32>>,
     pub(crate) enhanced_query_vector: Arc<Vec<f32>>,
@@ -523,6 +536,8 @@ impl MemoQueryObservation {
         let observation = &self.observation;
         self.artifact_sig.capacity()
             + size_of::<Self>()
+            + self.calibration.differentia_vector.capacity() * size_of::<f32>()
+            + self.calibration.superseded_ids.capacity() * size_of::<i64>()
             + size_of::<SenseOutput>()
             + observation.schema.capacity()
             + observation.algorithm_version.capacity()
@@ -556,7 +571,7 @@ struct MemoQueryCacheEntry {
 /// VexusIndex 实例拥有的统一 Memo 原生运行时。
 ///
 /// 活动资产使用 Arc 快照：查询开始时克隆一次 Arc，后续发布不会改变本次查询；
-/// 旧代资产在最后一个查询释放后自动回收。请求观测缓存与活动资产代际绑定，
+/// 旧代资产在最后一个查询释放后自动回收。请求观测持有自己的背景快照，
 /// 让 RiverMemo Topology V3 直接复用统一管线产物，避免河网经 JS JSON 往返。
 pub(crate) struct MemoRuntime {
     active_artifact: RwLock<Option<(String, u64, Arc<NativeArtifact>)>>,
@@ -621,26 +636,9 @@ impl MemoRuntime {
         *guard = Some((artifact_sig.to_string(), generation, artifact));
         drop(guard);
 
-        // 只有真正切换到不同 Artifact 时，旧代请求观测才必须失效。
-        self.clear_query_cache()?;
+        // Existing observations own their immutable background snapshot.
+        // Publishing a newer background must not invalidate accepted requests.
         Ok(generation)
-    }
-
-    fn active_generation(&self, artifact_sig: &str) -> std::result::Result<u64, String> {
-        let guard = self
-            .active_artifact
-            .read()
-            .map_err(|error| format!("memo runtime generation lock failed: {}", error))?;
-        guard
-            .as_ref()
-            .filter(|(signature, _, _)| signature == artifact_sig)
-            .map(|(_, generation, _)| *generation)
-            .ok_or_else(|| {
-                format!(
-                    "memo runtime artifact {} is not the active generation",
-                    artifact_sig
-                )
-            })
     }
 
     fn clear_query_cache(&self) -> std::result::Result<(), String> {
@@ -669,8 +667,11 @@ impl MemoRuntime {
         transfer_domain_ids: Vec<i64>,
         tag_vectors: Arc<TagVectorPool>,
         database_generation: u64,
+        calibration: QueryCalibration,
+        artifact: Arc<NativeArtifact>,
     ) -> std::result::Result<String, String> {
-        let artifact_generation = self.active_generation(artifact_sig)?;
+        // This is a request identity, not a dependency on the currently active slot.
+        let artifact_generation = self.generation.load(AtomicOrdering::Acquire);
         let sequence = self.query_sequence.fetch_add(1, AtomicOrdering::AcqRel) + 1;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -683,8 +684,9 @@ impl MemoRuntime {
             (timestamp as u64) ^ sequence.rotate_left(17)
         );
         let value = Arc::new(MemoQueryObservation {
+            calibration,
+            artifact,
             artifact_sig: artifact_sig.to_string(),
-            artifact_generation,
             observation: Arc::new(observation),
             original_query_vector: Arc::new(original_query_vector),
             enhanced_query_vector: Arc::new(enhanced_query_vector),
@@ -707,22 +709,12 @@ impl MemoRuntime {
             .query_cache_order
             .lock()
             .map_err(|error| format!("memo query cache order lock failed: {}", error))?;
-        while let Some(front) = order.front().cloned() {
-            let expired = cache
-                .get(&front)
-                .map(|entry| now.duration_since(entry.inserted_at) > self.query_cache_ttl)
-                .unwrap_or(true);
-            if !expired && cache.len() < self.query_cache_capacity {
-                break;
-            }
-            order.pop_front();
-            cache.remove(&front);
-        }
-        while cache.len() >= self.query_cache_capacity {
-            let Some(oldest) = order.pop_front() else {
-                break;
-            };
-            cache.remove(&oldest);
+        // Never evict an accepted request to admit another request.
+        if cache.len() >= self.query_cache_capacity {
+            return Err(format!(
+                "MEMO_OBSERVATION_CAPACITY: active={} max={}",
+                cache.len(), self.query_cache_capacity
+            ));
         }
         cache.insert(
             handle.clone(),
@@ -740,23 +732,12 @@ impl MemoRuntime {
         handle: &str,
         artifact_sig: &str,
     ) -> std::result::Result<Arc<MemoQueryObservation>, String> {
-        let active_generation = self.active_generation(artifact_sig)?;
-        let now = Instant::now();
-        let mut cache = self
-            .query_cache
-            .lock()
+        let cache = self.query_cache.lock()
             .map_err(|error| format!("memo query cache lock failed: {}", error))?;
-        let entry = cache
-            .get(handle)
+        let entry = cache.get(handle)
             .ok_or_else(|| format!("memo query observation handle {} is unavailable", handle))?;
-        if now.duration_since(entry.inserted_at) > self.query_cache_ttl {
-            cache.remove(handle);
-            return Err(format!("memo query observation handle {} expired", handle));
-        }
-        if entry.value.artifact_sig != artifact_sig
-            || entry.value.artifact_generation != active_generation
-        {
-            return Err("memo query observation artifact generation mismatch".to_string());
+        if entry.value.artifact_sig != artifact_sig {
+            return Err("memo query observation artifact signature mismatch".to_string());
         }
         Ok(entry.value.clone())
     }
@@ -819,7 +800,9 @@ impl MemoRuntime {
             "tagVectorNodes": tag_vector_nodes, "tagVectorBytes": tag_vector_bytes,
             "ownership": "request-context-release-after-last-consumer",
             "oldestAgeMs": oldest_ms,
-            "note": "Retained observation payload capacities; excludes allocator/container overhead and active task clones. Read-only: does not evict expired entries."
+            "expirationPolicy": "explicit-release; ttlMs is an age-warning threshold only",
+            "capacityPolicy": "reject-new-never-evict-active",
+            "note": "Retained observation payload capacities; excludes shared background, allocator/container overhead and active task clones. Read-only; old entries are not automatically expired."
         })).map_err(|error| error.to_string())
     }
 
@@ -1090,11 +1073,10 @@ fn decode_artifact(
     }.prepared()))
 }
 
-pub(crate) fn load_artifact_with_connection(
-    runtime: &MemoRuntime,
+fn validate_artifact_with_connection(
     connection: &Connection,
     artifact_sig: &str,
-) -> std::result::Result<Arc<NativeArtifact>, String> {
+) -> std::result::Result<(), String> {
     let dependency_keys = serde_json::to_string(crate::storage::MEMO_ARTIFACT_DEPENDENCIES)
         .map_err(|e| e.to_string())?;
     let dependency_count = crate::storage::MEMO_ARTIFACT_DEPENDENCIES.len() as i64;
@@ -1128,6 +1110,15 @@ pub(crate) fn load_artifact_with_connection(
     if !compatible {
         return Err("KNOWLEDGE_STORE_DERIVED_DEPENDENCY_CONFLICT: Memo artifact is incompatible (format, missing dependencies or version rollback)".to_string());
     }
+    Ok(())
+}
+
+pub(crate) fn load_artifact_with_connection(
+    runtime: &MemoRuntime,
+    connection: &Connection,
+    artifact_sig: &str,
+) -> std::result::Result<Arc<NativeArtifact>, String> {
+    validate_artifact_with_connection(connection, artifact_sig)?;
     if let Some(artifact) = runtime.get(artifact_sig)? {
         return Ok(artifact);
     }
@@ -1730,7 +1721,16 @@ fn field_resonance(curve: &Curve, input: &NativeInput, support: f64) -> (f64, f6
         positive(input.config.pure_transfer_weight)
     } else { 0.0 };
     let total = local + transfer;
-    let query = clamp01(curve.query_score);
+    let raw_query = clamp01(curve.query_score);
+    let calibration = &input.calibration;
+    let mixing = if calibration.differentia_vector.len() == input.query.vector.len()
+        && !calibration.differentia_vector.is_empty() {
+        0.5 * clamp01(calibration.differentia_confidence)
+    } else { 0.0 };
+    let query = if mixing > 0.0 {
+        (1.0 - mixing) * raw_query + mixing
+            * clamp01(cosine(&calibration.differentia_vector, &curve.chunk_vector))
+    } else { raw_query };
     let field = if total > 1e-12 {
         clamp01((local * clamp01(curve.local_score)
             + transfer * clamp01(curve.transfer_score)) / total)
@@ -2532,7 +2532,8 @@ fn compute_omega(input: &NativeInput) -> OmegaOutput {
     } else {
         0.5
     };
-    let omega = clamp01(geometric * observation_factor);
+    let explained = input.calibration.explained_ratio.map(clamp01).unwrap_or(1.0);
+    let omega = clamp01(geometric * observation_factor * explained);
     let regime = if omega < input.config.collapsed_threshold {
         "collapsed"
     } else if omega < input.config.sparse_threshold {
@@ -2613,6 +2614,7 @@ fn assign_v3_scores(
         {
             item.role = "thematic_neighbor".to_string();
         }
+
         item.gated_bonus = (item.v2_bonus * graph_gate)
             .min(positive(config.topology_bonus_cap - item.path_bonus));
         item.final_score = clamp01(item.pure_score + item.path_bonus + item.gated_bonus + item.anchor_bonus);
@@ -2707,16 +2709,33 @@ pub(crate) fn run_native_with_connection(
     artifact_sig: &str,
     input_json: &str,
 ) -> std::result::Result<String, String> {
+    run_native_with_observation(runtime, connection, artifact_sig, input_json, None)
+}
+
+pub(crate) fn run_native_with_observation(
+    runtime: &MemoRuntime,
+    connection: &Connection,
+    artifact_sig: &str,
+    input_json: &str,
+    observation: Option<&Arc<MemoQueryObservation>>,
+) -> std::result::Result<String, String> {
     let total_started = Instant::now();
     let mut input: NativeInput = serde_json::from_str(input_json)
         .map_err(|error| format!("invalid RiverMemo native input JSON: {}", error))?;
     let mut tag_vectors = TagVectorPool::new();
+    let mut pinned_artifact = None;
     if let Some(handle) = input.observation_handle.as_deref() {
-        let cached = runtime.get_query_observation(handle, artifact_sig)?;
+        let cached = match observation {
+            Some(value) if value.artifact_sig == artifact_sig => value.clone(),
+            Some(_) => return Err("memo query observation artifact signature mismatch".into()),
+            None => runtime.get_query_observation(handle, artifact_sig)?,
+        };
         if cached.database_generation != crate::storage::read_generation(connection)? {
             return Err("MEMO_OBSERVATION_STALE: database changed during Memo request".into());
         }
+        pinned_artifact = Some(cached.artifact.clone());
         tag_vectors.extend(cached.tag_vectors.iter().map(|(id, vector)| (*id, vector.clone())));
+        input.calibration = cached.calibration.clone();
         input.query.vector = cached.original_query_vector.as_ref().clone();
         input.denoised_vector = cached.enhanced_query_vector.as_ref().clone();
         input.local_vector = cached.local_vector.as_ref().clone();
@@ -2778,7 +2797,12 @@ pub(crate) fn run_native_with_connection(
     }
 
     let load_started = Instant::now();
-    let artifact = load_artifact_with_connection(runtime, connection, artifact_sig)?;
+    let artifact = if let Some(artifact) = pinned_artifact {
+        validate_artifact_with_connection(connection, artifact_sig)?;
+        artifact
+    } else {
+        load_artifact_with_connection(runtime, connection, artifact_sig)?
+    };
     let curve_load = load_curves(connection, &input.candidates, dimension)?;
     let mut curves = curve_load.curves;
     // 显式空集合也意味着无权限；必须在候选归一化和统计前移除越权项。
@@ -2904,7 +2928,7 @@ pub(crate) fn run_native_with_connection(
     let query_and_seed_tag_vectors = tag_vectors;
     let mut wormhole_model = wormhole::build(&input, &query_and_seed_tag_vectors, &artifact);
     let mut wormhole_gate = wormhole::gate(&mut wormhole_model, connection)?;
-    wormhole::refine(&mut wormhole_model, &mut wormhole_gate, connection, &input)?;
+    wormhole::refine(&mut wormhole_model, &mut wormhole_gate, connection, &input, &artifact)?;
     let load_ms = load_started.elapsed().as_secs_f64() * 1000.0;
 
     let compute_started = Instant::now();
@@ -2942,6 +2966,10 @@ pub(crate) fn run_native_with_connection(
         })
         .collect();
 
+    let omega = compute_omega(&input);
+    let path_gate = if omega.omega > 0.0 {
+        omega.omega.powf(input.config.omega_gamma.max(0.0))
+    } else { 0.0 };
     let mut work: Vec<ScoredWork> = curves
         .into_par_iter()
         .zip(anchor_results.into_par_iter())
@@ -2971,7 +2999,7 @@ pub(crate) fn run_native_with_connection(
             let topology_bonus =
                 input.config.topology_bonus_cap * topology_raw * topology_reliability;
             let pure_score = semantic_base;
-            let path_bonus = topology_bonus.min(input.config.topology_bonus_cap);
+            let path_bonus = topology_bonus.min(input.config.topology_bonus_cap) * path_gate;
             let atomic_score = 0.75 * topology.node_graph_score + 0.25 * topology.edge_graph_score;
             let propositional_score =
                 0.25 * topology.node_graph_score + 0.75 * topology.edge_graph_score;
@@ -3004,7 +3032,6 @@ pub(crate) fn run_native_with_connection(
         })
         .collect();
 
-    let omega = compute_omega(&input);
     let mode = morphology.dominant_mode.as_str();
     assign_v3_scores(&mut work, mode, &omega, &input.config);
     work.sort_by(|left, right| {
@@ -3021,7 +3048,8 @@ pub(crate) fn run_native_with_connection(
             })
             .then_with(|| left.curve.union_rank.cmp(&right.curve.union_rank))
     });
-    let wormhole_traces = wormhole::fuse_rrf(&mut work, &wormhole_model, &input, &omega);
+    let wormhole_traces = wormhole::apply_unified_bonus(
+        &mut work, &wormhole_model, &input, &omega, &artifact);
     // Stable sort retains the complete baseline comparator for equal fusion scores.
     work.sort_by(|a, b| b.ranking_score.total_cmp(&a.ranking_score));
     let ranked_count = work.len();
@@ -3057,6 +3085,7 @@ pub(crate) fn run_native_with_connection(
                     "fieldSupport": item.observables.field_support,
                     "fieldResonanceBeforeSupport": field_resonance(&item.curve, &input, 1.0).2,
                     "queryScore": clamp01(item.curve.query_score),
+
                     "fieldScore": item.field_score,
                     "fieldResonanceBonus": item.field_resonance_bonus,
                     "directEvidence": item.direct_evidence,
@@ -3089,7 +3118,12 @@ pub(crate) fn run_native_with_connection(
                     "finalScore": item.final_score,
                     "nativeBackend": "rust-rayon"
                 })).map(|mut trace| {
-                    trace["wormholeRrf"] = wormhole_traces
+                    trace["differentiaScore"] = if input.calibration.differentia_vector.is_empty() {
+                        Value::Null
+                    } else {
+                        serde_json::json!(cosine(&input.calibration.differentia_vector, &item.curve.chunk_vector))
+                    };
+                    trace["wormholeUnified"] = wormhole_traces
                         .get(&item.curve.id).cloned().unwrap_or(Value::Null);
                     trace
                 })
@@ -3109,8 +3143,7 @@ pub(crate) fn run_native_with_connection(
                 path_bonus: item.path_bonus,
                 graph_bonus: item.gated_bonus,
                 score_clipping: positive(item.pure_score + item.path_bonus + item.gated_bonus
-                    + item.anchor_bonus - wormhole_traces.get(&item.curve.id)
-                        .and_then(|v| v["baselineScore"].as_f64()).unwrap_or(item.final_score)),
+                    + item.anchor_bonus - item.final_score),
                 role: item.role,
                 omega: omega.omega,
                 river_regime: omega.regime.clone(),
@@ -3165,8 +3198,13 @@ pub(crate) fn run_native_with_connection(
             "wormholeGate": wormhole_gate,
             "wormholeEligibleRoutes": wormhole_model.eligible_routes,
             "wormholeAcceptedRoutes": wormhole_model.routes.len(),
-            "wormholeScoring": "strict-global-gate; explanation-weighted-RRF; untouched-baseline-channel",
-            "wormholeRrfK": 60,
+            "wormholeScoring": "continuous-shared-topology-budget; rankingScore=finalScore",
+            "queryCalibration": {
+                "supersededIds": input.calibration.superseded_ids,
+                "differentiaConfidence": input.calibration.differentia_confidence,
+                "explainedRatio": input.calibration.explained_ratio,
+                "differentiaMixingCap": 0.5
+            },
             "wormholeStrongFlowRatio": 0.5,
             "wormholeWeightReference": "maximum observed non-return ordinary edge flow; observation maximum if absent",
             "baselineAlgorithm": "rivermemo.conservative-topology-v2.2",
@@ -3896,5 +3934,47 @@ mod conservative_topology_tests {
         mixed.anchor.explicit_exact_contacts = 1;
         assign_v3_scores(std::slice::from_mut(&mut mixed), "narrative", &omega(), &config);
         assert_eq!(mixed.role, "direct_answer");
+    }
+}
+
+#[cfg(test)]
+mod observation_ownership_tests {
+    use super::*;
+    use crate::memo_sensing::{sense_typed, SenseConfig, SenseInput, SenseSeed};
+
+    fn store(runtime: &MemoRuntime, graph: &Arc<NativeArtifact>) -> std::result::Result<String, String> {
+        let observation = sense_typed(graph, "old", SenseInput {
+            query_id: None, config: SenseConfig::default(),
+            seeds: vec![SenseSeed { id: 1, energy: 1.0, source_type: "seed".into() }],
+        })?;
+        runtime.store_query_observation("old", observation,
+            vec![1.0, 0.0], vec![1.0, 0.0], vec![1.0, 0.0], vec![1.0, 0.0],
+            vec![], vec![], vec![], vec![], Arc::new(TagVectorPool::new()), 0,
+            QueryCalibration::default(), graph.clone())
+    }
+
+    #[test]
+    fn accepted_observations_survive_capacity_age_and_background_publish() {
+        let mut runtime = MemoRuntime::new();
+        runtime.query_cache_capacity = 2;
+        let graph = Arc::new(NativeArtifact {
+            node_ids: vec![1], node_index: HashMap::from([(1, 0)]),
+            row_offsets: vec![0, 0], ..NativeArtifact::default()
+        }.prepared());
+        runtime.publish("old", graph.clone()).unwrap();
+        let first = store(&runtime, &graph).unwrap();
+        let second = store(&runtime, &graph).unwrap();
+        let error = store(&runtime, &graph).unwrap_err();
+        assert!(error.starts_with("MEMO_OBSERVATION_CAPACITY:"));
+        runtime.query_cache.lock().unwrap().get_mut(&first).unwrap().inserted_at =
+            Instant::now() - Duration::from_secs(600);
+        runtime.publish("new", Arc::new(NativeArtifact::default())).unwrap();
+        let pinned = runtime.get_query_observation(&first, "old").unwrap();
+        assert!(Arc::ptr_eq(&pinned.artifact, &graph));
+        assert!(runtime.get_query_observation(&first, "new").is_err());
+        assert!(runtime.get_query_observation(&second, "old").is_ok());
+        assert!(runtime.release_query_observation(&first).unwrap());
+        assert!(store(&runtime, &graph).is_ok());
+        assert!(Arc::ptr_eq(&pinned.artifact, &graph));
     }
 }

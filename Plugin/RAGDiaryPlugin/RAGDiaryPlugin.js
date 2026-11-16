@@ -38,6 +38,17 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
+// 日记日期在配置时区的零点只取决于日期字符串，按字符串复用，
+// 避免 ::Time 每次请求对日记本里的每篇日记重做一次时区换算。
+const diaryDayStartMs = new Map();
+function diaryDayStart(dateStr) {
+    let ms = diaryDayStartMs.get(dateStr);
+    if (ms === undefined) {
+        ms = dayjs.tz(dateStr, DEFAULT_TIMEZONE).startOf('day').valueOf();
+        diaryDayStartMs.set(dateStr, ms);
+    }
+    return new Date(ms);
+}
 // 从 DailyNoteGet 插件借鉴的常量和路径逻辑
 const projectBasePath = process.env.PROJECT_BASE_PATH;
 const dailyNoteRootPath = process.env.KNOWLEDGEBASE_ROOT_PATH || (projectBasePath ? path.join(projectBasePath, 'dailynote') : path.join(__dirname, '..', '..', 'dailynote'));
@@ -1400,6 +1411,15 @@ class RAGDiaryPlugin {
     }
 
     async _processMessagesWithMemoScope(messages, pluginConfig) {
+        const signal = pluginConfig?.signal || null;
+        const throwIfRagAborted = () => {
+            if (signal?.aborted) {
+                const abortErr = new Error('RAGDiaryPlugin preprocessing aborted');
+                abortErr.name = 'AbortError';
+                throw abortErr;
+            }
+        };
+        throwIfRagAborted();
         const ownedMemoObservations = new Set();
         let systemMessageTasks = [];
         try {
@@ -1483,8 +1503,10 @@ class RAGDiaryPlugin {
             // 仅在确实存在 RAG / 记忆 / 元思考占位符时构建上下文向量。
             // CONTEXT_VECTOR_ALLOW_API_HISTORY=false 只禁止 API 请求，并不会自动省略缓存扫描，
             // 因此该门控必须放在调用方，才能让普通请求真正走零开销快速路径。
+            throwIfRagAborted();
             await this.contextVectorManager.updateContext(messages, {
-                allowApi: this.contextVectorAllowApi
+                allowApi: this.contextVectorAllowApi,
+                signal
             });
 
             // V2 折叠同步同样只服务于记忆链路，避免普通请求重复扫描全部 assistant 历史。
@@ -1577,10 +1599,12 @@ class RAGDiaryPlugin {
             const config = this.ragParams?.RAGDiaryPlugin || {};
             const mainWeights = config.mainSearchWeights || [0.7, 0.3]; // 默认 用户0.7 : AI 0.3
 
+            throwIfRagAborted();
             const [userVector, aiVector] = await Promise.all([
-                userContent ? this.getSingleEmbeddingCached(userContent) : Promise.resolve(null),
-                aiContent ? this.getSingleEmbeddingCached(aiContent) : Promise.resolve(null)
+                userContent ? this.getSingleEmbeddingCached(userContent, { signal }) : Promise.resolve(null),
+                aiContent ? this.getSingleEmbeddingCached(aiContent, { signal }) : Promise.resolve(null)
             ]);
+            throwIfRagAborted();
 
             const queryVector = this._getWeightedAverageVector([userVector, aiVector], mainWeights);
 
@@ -1666,6 +1690,7 @@ class RAGDiaryPlugin {
             }
             // 🌟 优化：并发处理所有目标 system 消息，显著提升多日记本场景下的 Rerank 速度
             systemMessageTasks = targetSystemMessageIndices.map(async (index) => {
+                throwIfRagAborted();
                 console.log(`[RAGDiaryPlugin] Processing system message at index: ${index}`);
                 const systemMessage = newMessages[index];
 
@@ -1775,8 +1800,13 @@ class RAGDiaryPlugin {
                 }
             }
 
+            throwIfRagAborted();
             return newMessages;
         } catch (error) {
+            if (error?.name === 'AbortError' || signal?.aborted) {
+                throwIfRagAborted();
+                throw error;
+            }
             console.error('[RAGDiaryPlugin] processMessages 发生严重错误:', error);
             console.error('[RAGDiaryPlugin] Error stack:', error.stack);
             console.error('[RAGDiaryPlugin] Error name:', error.name);
@@ -2570,9 +2600,15 @@ class RAGDiaryPlugin {
         return Math.max(0, Math.min(1, parsedWeight));
     }
 
+    // ::TimeDecay 是独立修饰符，不能被识别为 ::Time
+    _hasTimeModifier(modifiers) {
+        return typeof modifiers === 'string'
+            && /::Time(?!Decay)(?:\d*\.?\d+)?(?=$|::|[^\d.])/i.test(modifiers);
+    }
+
     _extractTimeRatio(modifiers) {
         if (!modifiers || typeof modifiers !== 'string') return 0.2;
-        const timeRatioMatch = modifiers.match(/::Time(\d*\.?\d+)?(?=$|::|[^\d.])/i);
+        const timeRatioMatch = modifiers.match(/::Time(?!Decay)(\d*\.?\d+)?(?=$|::|[^\d.])/i);
         if (!timeRatioMatch || timeRatioMatch[1] === undefined) return 0.2;
 
         const parsedRatio = parseFloat(timeRatioMatch[1]);
@@ -3001,7 +3037,7 @@ class RAGDiaryPlugin {
         // 3️⃣ 缓存未命中，执行原有逻辑
 
         const kMultiplier = this._extractKMultiplier(modifiers);
-        const useTime = allowTimeAndGroup && /::Time(?:\d*\.?\d+)?(?=$|::|[^\d.])/i.test(modifiers);
+        const useTime = allowTimeAndGroup && this._hasTimeModifier(modifiers);
         const timeRatio = useTime ? this._extractTimeRatio(modifiers) : null;
         const useGroup = allowTimeAndGroup && modifiers.includes('::Group');
         if (/::TagMemo/i.test(modifiers)) {
@@ -3026,7 +3062,7 @@ class RAGDiaryPlugin {
         // ✅ 解析 TimeDecay 参数：::TimeDecay[halfLife]/[minScore]/[whitelistTags]
         // 示例：::TimeDecay30/0.5/box归档
         // 统一使用 / 分隔符
-        const timeDecayMatch = modifiers.match(/::TimeDecay(\d+)?(?:\/(\d+\.?\d*))?(?:\/([\w,]+))?/);
+        const timeDecayMatch = modifiers.match(/::TimeDecay(\d+)?(?:\/(\d+\.?\d*))?(?:\/([^:]+))?/);
         const useTimeDecay = !!timeDecayMatch;
 
         const tagWeight = null;
@@ -3647,12 +3683,15 @@ class RAGDiaryPlugin {
 
         if (greenTask) {
             const external = await greenTask;
+            const timeQuota = useTime ? Math.max(1, Math.round(finalK * timeRatio)) : 0;
             if (external.error) {
                 console.warn(`[RAGDiaryPlugin] Green lane failed; keeping River order: ${external.error.message}`);
-                finalResultsForBroadcast = finalResultsForBroadcast.slice(0, finalK);
+                finalResultsForBroadcast = this._applyTimeQuota(
+                    finalResultsForBroadcast, finalResultsForBroadcast, finalK, timeQuota
+                );
             } else {
                 finalResultsForBroadcast = this._fuseIndependentRankings(
-                    finalResultsForBroadcast, external.value.results, rrfAlpha, finalK
+                    finalResultsForBroadcast, external.value.results, rrfAlpha, finalK, timeQuota
                 );
             }
             const diagnostics = {
@@ -3669,8 +3708,14 @@ class RAGDiaryPlugin {
             console.log(`[RAGDiaryPlugin] Green lane RRF: diaries=${dbScopeKey}, backend=${useJev ? 'jev' : 'rerank'}, httpReadyMs=${diagnostics.httpReadyMs ?? 'n/a'}, totalMs=${diagnostics.totalMs}, returned=${finalResultsForBroadcast.length}, degraded=${!!external.error}.`);
         }
 
-        // 统一添加 source 标识并格式化
-        finalResultsForBroadcast = finalResultsForBroadcast.map(r => ({ ...r, source: r.source || 'rag' }));
+        // 统一添加 source 标识并格式化；时间路 chunk 缺 date 时从本请求已加载的日期索引补上。
+        const diaryDates = new Map(diaryNames
+            .flatMap(name => requestCache?.diaryDateIndex?.get(name) || [])
+            .map(meta => [meta.relativePath, meta.date]));
+        finalResultsForBroadcast = finalResultsForBroadcast.map(r => {
+            const date = r.source === 'time' && !r.date && diaryDates.get(r.fullPath || r.sourceFile);
+            return date ? { ...r, date } : { ...r, source: r.source || 'rag' };
+        });
 
         // 🌟 Time 连续性补充：主召回完成后，额外追加最近 3 条，不占用 K，并与主结果去重
         if (extraContinuityResults.length > 0) {
@@ -3877,7 +3922,9 @@ class RAGDiaryPlugin {
         return 1 - Math.max(0.3, Math.min(0.7, 0.5 + 0.8 * (omega - 0.65)));
     }
 
-    _fuseIndependentRankings(river, external, alpha = 0.5, limit = 10) {
+    // timeQuota > 0 keeps the best River-order Time entries (the ::Time route quota);
+    // the remaining slots come from the fused ranking of non-Time entries.
+    _fuseIndependentRankings(river, external, alpha = 0.5, limit = 10, timeQuota = 0) {
         const weight = Math.max(0, Math.min(1, Number(alpha ?? 0.5)));
         const merged = new Map();
         const identity = doc => {
@@ -3904,10 +3951,20 @@ class RAGDiaryPlugin {
                 merged.set(key, result);
             }
         }
-        return [...merged.values()].filter(doc => doc.rrf_score > 0)
+        const ranked = [...merged.values()].filter(doc => doc.rrf_score > 0)
             .sort((a, b) => b.rrf_score - a.rrf_score
-                || identity(a).localeCompare(identity(b)))
-            .slice(0, limit);
+                || identity(a).localeCompare(identity(b)));
+        return this._applyTimeQuota(ranked, [...merged.values()], limit, timeQuota);
+    }
+
+    // ::Time 路名额：语义路按 ordered 的顺序，时间路取 river 顺序里最靠前的 timeQuota 条；
+    // 名额规则与非 GreenLane 路径相同（语义路至少 1 条）。没有时间条目时等同于截断到 limit。
+    _applyTimeQuota(ordered, river, limit, timeQuota) {
+        const time = timeQuota > 0 ? river.filter(doc => doc.source === 'time').slice(0, timeQuota) : [];
+        if (time.length === 0) return ordered.slice(0, limit);
+        const semantic = ordered.filter(doc => doc.source !== 'time')
+            .slice(0, Math.max(1, limit - time.length));
+        return [...semantic, ...time];
     }
 
     async _rerankRAGCandidatesWithRiverMemo({
@@ -4393,11 +4450,14 @@ class RAGDiaryPlugin {
         const metaGroups = await Promise.all(
             diaryNames.map(name => this._getDiaryDateIndexCached(name, requestCache))
         );
-        const fileMetas = metaGroups.flat();
+        // 连续性唤起是 K 外极小补充，不应先 hydrate 整个日记日期索引。
+        // 每本的日期索引已按新到旧排序；联合日记本先各取最近 limit 个再按日期合并。
+        const fileMetas = metaGroups.length === 1 ? metaGroups[0] : metaGroups
+            .flatMap(metas => metas.slice(0, Math.max(1, limit)))
+            .sort((a, b) => b.diaryDate.getTime() - a.diaryDate.getTime()
+                || a.relativePath.localeCompare(b.relativePath));
 
         if (fileMetas.length === 0) return [];
-        // 连续性唤起是 K 外极小补充，不应先 hydrate 整个日记日期索引。
-        // 日期索引已按新到旧排序；只展开最近 limit 个文件即可。
         const recentFileMetas = fileMetas.slice(0, Math.max(1, limit));
         const recentFilePaths = recentFileMetas.map(meta => meta.relativePath);
         const fileDateMap = new Map(
@@ -4427,8 +4487,8 @@ class RAGDiaryPlugin {
 
             recentResults = this._filterContextDuplicates(recentResults, contextDiaryPrefixes);
             recentResults.sort((a, b) => {
-                const dateA = a.date ? new Date(a.date).getTime() : 0;
-                const dateB = b.date ? new Date(b.date).getTime() : 0;
+                const dateA = a.date ? diaryDayStart(a.date).getTime() : 0;
+                const dateB = b.date ? diaryDayStart(b.date).getTime() : 0;
                 if (dateB !== dateA) return dateB - dateA;
                 return (b.score || 0) - (a.score || 0);
             });
@@ -4473,7 +4533,7 @@ class RAGDiaryPlugin {
             .map(meta => ({
                 relativePath: meta.relativePath,
                 date: meta.date,
-                diaryDate: meta.diaryDate || dayjs.tz(meta.date, DEFAULT_TIMEZONE).startOf('day').toDate()
+                diaryDate: meta.diaryDate || diaryDayStart(meta.date)
             }))
             .sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -4509,7 +4569,7 @@ class RAGDiaryPlugin {
                             fileMetas.push({
                                 relativePath: path.join(dbName, file),
                                 date: normalizedDateStr,
-                                diaryDate: dayjs.tz(normalizedDateStr, DEFAULT_TIMEZONE).startOf('day').toDate()
+                                diaryDate: diaryDayStart(normalizedDateStr)
                             });
                         }
                     } finally {
@@ -5211,7 +5271,12 @@ class RAGDiaryPlugin {
         return RAGResultFormatter.aggregateTagStats(results);
     }
 
-    async getSingleEmbedding(text) {
+    async getSingleEmbedding(text, options = {}) {
+        if (options?.signal?.aborted) {
+            const abortErr = new Error('Embedding request aborted');
+            abortErr.name = 'AbortError';
+            throw abortErr;
+        }
         if (!text) {
             console.error('[RAGDiaryPlugin] getSingleEmbedding was called with no text.');
             return null;
@@ -5243,7 +5308,12 @@ class RAGDiaryPlugin {
             // 🌟 统一调用 EmbeddingUtils：自动享受模型容灾链、并发批量、token 精确切分、429 退避。
             // 对超长用户/AI 上下文，先按 TextChunker 的 safeMaxTokens 切分，再对各 chunk 向量做 token 加权平均，
             // 避免单条 6800+ token 文本被 EmbeddingUtils 直接跳过导致 RAG 查询向量为 null。
-            const results = await getEmbeddingsBatch(chunks, { apiUrl, apiKey });
+            const results = await getEmbeddingsBatch(chunks, {
+                apiUrl,
+                apiKey,
+                ...(options?.signal ? { signal: options.signal } : {}),
+                ...(typeof options?.onBatchComplete === 'function' ? { onBatchComplete: options.onBatchComplete } : {})
+            });
             const weights = chunks.map(chunk => Math.max(
                 1,
                 typeof getTokenCount === 'function' ? getTokenCount(chunk) : this._estimateTokens(chunk)
@@ -5255,6 +5325,11 @@ class RAGDiaryPlugin {
             }
             return vector || null;
         } catch (error) {
+            if (error?.name === 'AbortError' || options?.signal?.aborted) {
+                const abortErr = error instanceof Error ? error : new Error('Embedding request aborted');
+                abortErr.name = 'AbortError';
+                throw abortErr;
+            }
             console.error('[RAGDiaryPlugin] getSingleEmbedding failed via EmbeddingUtils:', error.message);
             return null;
         }
@@ -5343,7 +5418,12 @@ class RAGDiaryPlugin {
     /**
      * ✅ 批量向量化方法（支持 OpenAI 兼容接口）
      */
-    async getBatchEmbeddings(texts) {
+    async getBatchEmbeddings(texts, options = {}) {
+        if (options?.signal?.aborted) {
+            const abortErr = new Error('Batch embedding request aborted');
+            abortErr.name = 'AbortError';
+            throw abortErr;
+        }
         if (!texts || !Array.isArray(texts) || texts.length === 0) return [];
 
         const apiKey = process.env.API_Key;
@@ -5356,14 +5436,29 @@ class RAGDiaryPlugin {
 
         try {
             // 🌟 统一调用 EmbeddingUtils：自动享受模型容灾链、并发批量、token 精确切分、429 退避
-            return await getEmbeddingsBatch(texts, { apiUrl, apiKey });
+            return await getEmbeddingsBatch(texts, {
+                apiUrl,
+                apiKey,
+                ...(options?.signal ? { signal: options.signal } : {}),
+                ...(typeof options?.onBatchComplete === 'function' ? { onBatchComplete: options.onBatchComplete } : {})
+            });
         } catch (error) {
+            if (error?.name === 'AbortError' || options?.signal?.aborted) {
+                const abortErr = error instanceof Error ? error : new Error('Batch embedding request aborted');
+                abortErr.name = 'AbortError';
+                throw abortErr;
+            }
             console.error('[RAGDiaryPlugin] getBatchEmbeddings failed via EmbeddingUtils:', error.message);
             return new Array(texts.length).fill(null);
         }
     }
 
-    async getBatchEmbeddingsCached(texts) {
+    async getBatchEmbeddingsCached(texts, options = {}) {
+        if (options?.signal?.aborted) {
+            const abortErr = new Error('Batch embedding request aborted');
+            abortErr.name = 'AbortError';
+            throw abortErr;
+        }
         if (!texts || !Array.isArray(texts) || texts.length === 0) return [];
 
         const results = new Array(texts.length).fill(null);
@@ -5372,9 +5467,11 @@ class RAGDiaryPlugin {
 
         texts.forEach((text, index) => {
             if (!text || !text.trim()) return;
-            const cacheKey = this.cacheManager.generateKey({ text: text.trim() });
+            const normalized = text.trim();
+            const cacheKey = this.cacheManager.generateKey({ text: normalized });
             const vector = this.cacheManager.get('embedding', cacheKey);
             if (vector) {
+                this._rememberEmbeddingText(cacheKey, normalized);
                 results[index] = vector;
             } else {
                 missingIndices.push(index);
@@ -5384,14 +5481,25 @@ class RAGDiaryPlugin {
 
         if (missingTexts.length > 0) {
             console.log(`[RAGDiaryPlugin] Batch cache miss: ${missingTexts.length}/${texts.length} texts. Requesting API...`);
-            const newEmbeddings = await this.getBatchEmbeddings(missingTexts);
+            const persistCompletedItem = (text, vec) => {
+                if (!vec || !text || !text.trim()) return;
+                const normalized = text.trim();
+                const cacheKey = this.cacheManager.generateKey({ text: normalized });
+                this.cacheManager.set('embedding', cacheKey, vec);
+                this._rememberEmbeddingText(cacheKey, normalized);
+            };
+            const newEmbeddings = await this.getBatchEmbeddings(missingTexts, {
+                ...(options?.signal ? { signal: options.signal } : {}),
+                onBatchComplete: ({ texts: batchTexts, vectors: batchVectors }) => {
+                    if (!Array.isArray(batchTexts) || !Array.isArray(batchVectors)) return;
+                    batchVectors.forEach((vec, idx) => persistCompletedItem(batchTexts[idx], vec));
+                }
+            });
             newEmbeddings.forEach((vec, i) => {
                 if (vec) {
                     const originalIndex = missingIndices[i];
                     results[originalIndex] = vec;
-                    const text = missingTexts[i];
-                    const cacheKey = this.cacheManager.generateKey({ text: text.trim() });
-                    this.cacheManager.set('embedding', cacheKey, vec);
+                    persistCompletedItem(missingTexts[i], vec);
                 }
             });
         }
@@ -5399,8 +5507,44 @@ class RAGDiaryPlugin {
         return results;
     }
 
-    async getSingleEmbeddingCached(text) {
+    async getSingleEmbeddingCached(text, options = {}) {
+        const signal = options?.signal || null;
+        if (signal?.aborted) {
+            const abortErr = new Error('Embedding request aborted');
+            abortErr.name = 'AbortError';
+            throw abortErr;
+        }
         if (!text || !text.trim()) return null;
+
+        const awaitWithSignal = (promise) => {
+            if (!signal) return promise;
+            return new Promise((resolve, reject) => {
+                if (signal.aborted) {
+                    promise.catch(() => {});
+                    const abortErr = new Error('Embedding request aborted');
+                    abortErr.name = 'AbortError';
+                    reject(abortErr);
+                    return;
+                }
+                const onAbort = () => {
+                    promise.catch(() => {});
+                    const abortErr = new Error('Embedding request aborted');
+                    abortErr.name = 'AbortError';
+                    reject(abortErr);
+                };
+                signal.addEventListener('abort', onAbort, { once: true });
+                promise.then(
+                    value => {
+                        signal.removeEventListener('abort', onAbort);
+                        resolve(value);
+                    },
+                    err => {
+                        signal.removeEventListener('abort', onAbort);
+                        reject(err);
+                    }
+                );
+            });
+        };
 
         const normalizedText = text.trim();
         const cacheKey = this.cacheManager.generateKey({ text: normalizedText });
@@ -5411,7 +5555,7 @@ class RAGDiaryPlugin {
         }
 
         if (this.pendingEmbeddingRequests.has(cacheKey)) {
-            return await this.pendingEmbeddingRequests.get(cacheKey);
+            return await awaitWithSignal(this.pendingEmbeddingRequests.get(cacheKey));
         }
 
         // 🌟 最小修复：精确缓存未命中时，在 API 前尝试高阈值 fuzzy 复用。
@@ -5428,6 +5572,8 @@ class RAGDiaryPlugin {
             return fuzzyMatch.vector;
         }
 
+        // 共享单飞请求不绑定单个调用方的取消信号：调用侧通过 awaitWithSignal 0ms 脱钩，
+        // 在途向量请求继续静默收割入库供重发/模糊匹配复用，同时避免误杀搭便车的并发请求。
         const requestPromise = (async () => {
             try {
                 const vector = await this.getSingleEmbedding(normalizedText);
@@ -5442,7 +5588,7 @@ class RAGDiaryPlugin {
         })();
 
         this.pendingEmbeddingRequests.set(cacheKey, requestPromise);
-        return await requestPromise;
+        return await awaitWithSignal(requestPromise);
     }
 
     _rememberEmbeddingText(cacheKey, normalizedText) {

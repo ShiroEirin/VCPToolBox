@@ -180,7 +180,7 @@ class StreamHandler {
     };
 
     // 辅助函数：处理 AI 响应流 (优化版：直通转发 + 后台解析 + chunk 空闲超时保护)
-    const processAIResponseStreamHelper = async (aiResponse, isInitialCall) => {
+    const readAIResponseStream = async (aiResponse, isInitialCall) => {
       return new Promise((resolve, reject) => {
         const decoder = new StringDecoder('utf8');
         let collectedContentThisTurn = '';
@@ -188,24 +188,43 @@ class StreamHandler {
         let streamAborted = false;
         let keepAliveTimer = null;
         let chunkIdleTimer = null;
-        const CHUNK_IDLE_TIMEOUT = 90000; // 90 秒无新 chunk 则判定上游流冻结
+        let toolTailTimer = null;
+        let streamSettled = false;
+        const TOOL_TAIL_TIMEOUT_MS = 15000;
+        const configuredIdleTimeout = Number(process.env.STREAM_CHUNK_IDLE_TIMEOUT_MS);
+        const CHUNK_IDLE_TIMEOUT = Number.isFinite(configuredIdleTimeout) && configuredIdleTimeout > 0 ? configuredIdleTimeout : 90000; // 默认 90 秒（可通过 STREAM_CHUNK_IDLE_TIMEOUT_MS 配置）
         let message = { content: '', reasoning_content: '' };
         let clientReasoningBlockOpen = false;
         let clientReasoningEndsWithNewline = false;
 
         let finishReason = null;
+        let malformedFunctionCall = false;
         let sawDone = false;
         let invalidPayload = false;
+        let hasPayloadError = false;
         let upstreamEnded = false;
-        const result = () => ({
-          content: collectedContentThisTurn,
-          message,
-          completed: !streamAborted && !invalidPayload && aiResponse.ok &&
-            collectedContentThisTurn.trim().length > 0 &&
-            (finishReason === 'stop' || (!finishReason && sawDone))
-        });
+        const result = () => {
+          streamSettled = true;
+          if (toolTailTimer) clearTimeout(toolTailTimer);
+          return {
+            content: collectedContentThisTurn, message, malformedFunctionCall,
+            streamAborted, hasPayloadError,
+            completed: !streamAborted && !invalidPayload && aiResponse.ok &&
+              collectedContentThisTurn.trim().length > 0 &&
+              (finishReason === 'stop' || (!finishReason && sawDone))
+          };
+        };
         const observePayload = (parsedData) => {
-          if (parsedData?.error) invalidPayload = true;
+          if (parsedData?.error) {
+            invalidPayload = true;
+            hasPayloadError = true;
+          }
+          const choice = parsedData?.choices?.[0];
+          if ([choice?.native_finish_reason, choice?.finish_reason]
+            .some(reason => typeof reason === 'string' && reason.toLowerCase() === 'malformed_function_call')) {
+            malformedFunctionCall = true;
+            invalidPayload = true;
+          }
           const reason = parsedData?.choices?.[0]?.finish_reason;
           if (reason) finishReason = reason;
         };
@@ -222,14 +241,25 @@ class StreamHandler {
             // 客户端展示转换在独立副本上进行，避免进入 VCP Loop、OneRing 和日记。
             message.reasoning_content += reasoningText;
           }
+          if (delta?.content || reasoningText) refreshToolTailTimer();
         };
 
         const transformParsedDataForClient = (parsedData) => {
-          if (!reasoningToContentEnabled || !parsedData || typeof parsedData !== 'object') {
-            return parsedData;
-          }
+          if (!parsedData || typeof parsedData !== 'object') return parsedData;
 
           const transformed = JSON.parse(JSON.stringify(parsedData));
+          for (const item of transformed.choices || []) {
+            for (const payload of [item.delta, item.message]) {
+              if (!payload || typeof payload !== 'object') continue;
+              delete payload.tool_calls;
+              delete payload.function_call;
+            }
+            // Native FC is not a frontend termination or execution channel in VCP.
+            for (const key of ['finish_reason', 'native_finish_reason']) {
+              if (['tool_calls', 'function_call'].includes(item[key])) item[key] = null;
+            }
+          }
+          if (!reasoningToContentEnabled) return transformed;
           const choice = transformed.choices?.[0];
           const delta = choice?.delta;
           if (!delta || typeof delta !== 'object') return transformed;
@@ -293,6 +323,37 @@ class StreamHandler {
           };
           res.write(`data: ${JSON.stringify(closePayload)}\n\n`);
         };
+        const canTakeToolTail = () =>
+          !streamSettled && !streamAborted && !hasPayloadError && aiResponse.ok &&
+          !vcpToolUseForbidden && !abortController?.signal.aborted &&
+          !res.writableEnded && !res.destroyed &&
+          (!finishReason || ['stop', 'tool_calls', 'function_call'].includes(finishReason) || malformedFunctionCall) &&
+          !sseLineBuffer.trim() &&
+          ToolCallParser.endsWithCompleteToolRequest?.(collectedContentThisTurn) === true;
+
+        const takeToolTail = (reason) => {
+          if (!canTakeToolTail()) return false;
+          streamSettled = true;
+          if (toolTailTimer) clearTimeout(toolTailTimer);
+          if (chunkIdleTimer) clearTimeout(chunkIdleTimer);
+          if (keepAliveTimer) clearInterval(keepAliveTimer);
+          abortController?.signal.removeEventListener('abort', abortHandler);
+          writeClientReasoningCloseChunk();
+          console.warn(`[VCP Stream ToolTail] requestId=${id || 'unknown'} reason=${reason}；完整工具尾部接管，关闭旧上游流并继续 ToolLoop。`);
+          aiResponse.body?.destroy();
+          resolve({ ...result(), malformedFunctionCall: false, completed: true });
+          return true;
+        };
+
+        const refreshToolTailTimer = () => {
+          if (toolTailTimer) clearTimeout(toolTailTimer);
+          toolTailTimer = null;
+          if (!streamSettled && !vcpToolUseForbidden &&
+              ToolCallParser.endsWithCompleteToolRequest?.(collectedContentThisTurn) === true) {
+            toolTailTimer = setTimeout(() => takeToolTail('tool_tail_idle_15s'), TOOL_TAIL_TIMEOUT_MS);
+          }
+        };
+
         // 🌟 核心修复：注入 SSE 幽灵心跳保活，防止上游卡顿时浏览器假死
         keepAliveTimer = setInterval(() => {
           if (!res.writableEnded && !res.destroyed) {
@@ -310,7 +371,8 @@ class StreamHandler {
         const resetChunkIdleTimer = () => {
           if (chunkIdleTimer) clearTimeout(chunkIdleTimer);
           chunkIdleTimer = setTimeout(() => {
-            if (streamAborted) return;
+            if (streamSettled || streamAborted) return;
+            if (takeToolTail('upstream_idle')) return;
             console.warn(`[Stream IdleTimeout] No upstream chunk received for ${CHUNK_IDLE_TIMEOUT / 1000}s. Assuming stream stalled. Forcing end.`);
             streamAborted = true;
             // 通知前端这次流异常结束
@@ -338,6 +400,7 @@ class StreamHandler {
         resetChunkIdleTimer(); // 启动首次空闲计时
 
         const abortHandler = () => {
+          if (streamSettled) return;
           streamAborted = true;
           if (keepAliveTimer) clearInterval(keepAliveTimer);
           if (chunkIdleTimer) clearTimeout(chunkIdleTimer);
@@ -353,7 +416,8 @@ class StreamHandler {
         }
 
         aiResponse.body.on('close', () => {
-          if (upstreamEnded) return;
+          if (streamSettled || upstreamEnded) return;
+          if (takeToolTail('upstream_close')) return;
           streamAborted = true;
           if (keepAliveTimer) clearInterval(keepAliveTimer);
           if (chunkIdleTimer) clearTimeout(chunkIdleTimer);
@@ -362,7 +426,7 @@ class StreamHandler {
         });
 
         aiResponse.body.on('data', chunk => {
-          if (streamAborted) return;
+          if (streamSettled || streamAborted) return;
           resetChunkIdleTimer(); // 每收到一个 chunk 就重置空闲计时器
 
           const chunkString = decoder.write(chunk);
@@ -387,16 +451,18 @@ class StreamHandler {
                   observePayload(parsedData);
                   // 后台始终收集未经展示转换的原始 delta。
                   appendDelta(parsedData.choices?.[0]?.delta);
-                } catch (e) { invalidPayload = true; }
+                } catch (e) { invalidPayload = true; hasPayloadError = true; }
               }
             }
 
+            // Failed terminal payloads must not end the frontend listener before recovery.
+            if (malformedFunctionCall) continue;
             // 转发时才将 reasoning 字段改写成标签化正文；内部处理仍使用原始 parsedData。
             if (!res.writableEnded && !res.destroyed) {
               try {
                 if (isDoneLine) {
                   writeClientReasoningCloseChunk();
-                } else if (reasoningToContentEnabled && parsedData) {
+                } else if (parsedData) {
                   const transformedData = transformParsedDataForClient(parsedData);
                   res.write(`data: ${JSON.stringify(transformedData)}\n`);
                 } else {
@@ -411,6 +477,7 @@ class StreamHandler {
         });
 
         aiResponse.body.on('end', () => {
+          if (streamSettled) return;
           upstreamEnded = true;
           if (keepAliveTimer) clearInterval(keepAliveTimer);
           if (chunkIdleTimer) clearTimeout(chunkIdleTimer);
@@ -433,7 +500,7 @@ class StreamHandler {
                   parsedData = JSON.parse(jsonData);
                   observePayload(parsedData);
                   appendDelta(parsedData.choices?.[0]?.delta);
-                } catch (e) { invalidPayload = true; }
+                } catch (e) { invalidPayload = true; hasPayloadError = true; }
               }
             }
 
@@ -441,21 +508,26 @@ class StreamHandler {
               try {
                 if (isDoneLine) {
                   writeClientReasoningCloseChunk();
-                } else if (reasoningToContentEnabled && parsedData) {
+                } else if (parsedData && !malformedFunctionCall) {
                   res.write(`data: ${JSON.stringify(transformParsedDataForClient(parsedData))}\n`);
                 } else {
-                  res.write(sseLineBuffer + '\n');
+                  if (!malformedFunctionCall) res.write(sseLineBuffer + '\n');
                 }
               } catch (e) { }
             }
           }
 
+          sseLineBuffer = '';
+          if (!finishReason && !sawDone && takeToolTail('upstream_end_without_terminal')) return;
           writeClientReasoningCloseChunk();
           if (abortController?.signal) abortController.signal.removeEventListener('abort', abortHandler);
           resolve(result());
         });
 
         aiResponse.body.on('error', streamError => {
+          if (streamSettled) return;
+          if (takeToolTail('upstream_error')) return;
+          if (toolTailTimer) clearTimeout(toolTailTimer);
           if (keepAliveTimer) clearInterval(keepAliveTimer);
           if (chunkIdleTimer) clearTimeout(chunkIdleTimer);
           if (abortController?.signal) abortController.signal.removeEventListener('abort', abortHandler);
@@ -471,9 +543,90 @@ class StreamHandler {
               res.end();
             } catch (e) { }
           }
+          streamSettled = true;
           reject(streamError);
         });
       });
+    };
+
+    // Only normal body content is eligible; never recover tools from reasoning or error diagnostics.
+    const acceptMalformedToolTurn = (data) => {
+      if (!data.malformedFunctionCall || data.streamAborted || data.hasPayloadError ||
+          vcpToolUseForbidden || abortController?.signal.aborted || res.writableEnded || res.destroyed) return null;
+      const calls = ToolCallParser.parse(data.content);
+      if (calls.length === 0) return null;
+      console.warn(`[VCP Stream Recovery] requestId=${id || 'unknown'} MALFORMED_FUNCTION_CALL，但正文含 ${calls.length} 个可解析 VCP 工具请求；保留正文交由 ToolLoop 执行，不重生成、不执行原生 FC。`);
+      return { ...data, completed: true };
+    };
+
+    // Semantic recovery is per upstream turn, separate from transport retries and tool execution.
+    const processAIResponseStreamHelper = async (aiResponse, isInitialCall) => {
+      let data = await readAIResponseStream(aiResponse, isInitialCall);
+      if (data.streamAborted) return { ...data, content: '', completed: false };
+      if (!data.malformedFunctionCall) return data;
+      if (abortController?.signal.aborted || data.streamAborted || res.writableEnded || res.destroyed) return data;
+
+      const accepted = acceptMalformedToolTurn(data);
+      if (accepted) return accepted;
+
+      // Never replay visible body; only complete parsed body tools can survive malformed FC.
+      if (!data.content.trim() && !data.message.reasoning_content) {
+        // Internal ToolLoop continuation only: reuse processed messages; never re-enter handle/preprocessors.
+        currentMessagesForLoop.push({
+          role: 'user',
+          content: '[系统提示]你的上一个回复在思维链里输出了call导致报错，不要在思维链里输出call啦，正常回复用户的回复吧！'
+        });
+        const heartbeat = setInterval(() => {
+          if (!res.writableEnded && !res.destroyed) {
+            try { res.write(': vcp-recovery-keepalive\n\n'); } catch (_) {}
+          }
+        }, 5000);
+        heartbeat.unref?.();
+        let response;
+        try {
+          console.warn(`[VCP Stream Recovery] requestId=${id || 'unknown'} 上游 HTTP ${aiResponse.status} 返回 MALFORMED_FUNCTION_CALL；正在 ToolLoop 内追加 user 纠偏消息并直接补发上游（第 1/1 次，不经过预消息处理管线，不结束前端 SSE）。`);
+          response = await fetchWithRetry(`${apiUrl}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+              Accept: 'text/event-stream'
+            },
+            body: JSON.stringify(projectToolBatchForUpstream({
+              ...originalBody, messages: currentMessagesForLoop, stream: true
+            })),
+            signal: abortController.signal
+          }, {
+            retries: 1, delay: apiRetryDelay, debugMode: DEBUG_MODE,
+            connectionTimeout: apiConnectionTimeoutMs
+          });
+        } finally {
+          clearInterval(heartbeat);
+        }
+        if (abortController.signal.aborted || res.writableEnded || res.destroyed) {
+          return { ...data, content: '', completed: false };
+        }
+        if (!response.ok) {
+          await streamUpstreamErrorAndEnd(res, response, originalBody.model, 'Malformed FC Recovery');
+          return { ...data, content: '', completed: false };
+        }
+        data = await readAIResponseStream(response, false);
+        if (data.streamAborted) return { ...data, content: '', completed: false };
+        if (!data.malformedFunctionCall) return data;
+        const acceptedRecovery = acceptMalformedToolTurn(data);
+        if (acceptedRecovery) return acceptedRecovery;
+      }
+
+      if (!abortController.signal.aborted && !res.writableEnded && !res.destroyed) {
+        res.write(`data: ${JSON.stringify({
+          object: 'chat.completion.chunk', model: originalBody.model,
+          choices: [{ index: 0, delta: {
+            content: '\n[ERROR] 上游生成失败：MALFORMED_FUNCTION_CALL。恢复未成功或已有输出；本轮工具未执行。\n'
+          }, finish_reason: null }]
+        })}\n\n`);
+      }
+      // Let the outer handler own the single final stop/DONE; invalid tool text stays out of ToolLoop.
+      return { ...data, content: '', completed: false };
     };
 
     // --- 初始 AI 调用 ---
@@ -655,8 +808,22 @@ class StreamHandler {
         break;
       }
 
-      // 执行普通调用
-      const toolResults = await toolExecutor.executeAll(normalCalls, clientIp, currentMessagesForLoop);
+      // 执行普通调用（启动 SSE 保活心跳，防止长耗时工具/RAG刷新/下轮首字等待期间连接空闲断开）
+      const loopKeepAliveTimer = setInterval(() => {
+        if (!res.writableEnded && !res.destroyed) {
+          try {
+            res.write(': vcp-tool-keepalive\n\n');
+          } catch (e) { /* ignore */ }
+        }
+      }, 5000);
+      loopKeepAliveTimer.unref?.();
+      let toolResults;
+      try {
+        toolResults = await toolExecutor.executeAll(normalCalls, clientIp, currentMessagesForLoop);
+      } catch (toolExecErr) {
+        clearInterval(loopKeepAliveTimer);
+        throw toolExecErr;
+      }
       const combinedToolResultsForAI = toolResults.map(r => r.content).flat();
       if (archeryErrorContents.length > 0) combinedToolResultsForAI.push(...archeryErrorContents);
 
@@ -742,22 +909,27 @@ class StreamHandler {
         } catch (e) { }
       }
 
-      if (this.context.handoffGate?.isReady()) await waitForHandoff();
-      if (abortController.signal.aborted || res.writableEnded || res.destroyed) break;
-      const nextAiAPIResponse = await fetchWithRetry(
-        `${apiUrl}/v1/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-            Accept: 'text/event-stream',
+      let nextAiAPIResponse;
+      try {
+        if (this.context.handoffGate?.isReady()) await waitForHandoff();
+        if (abortController.signal.aborted || res.writableEnded || res.destroyed) break;
+        nextAiAPIResponse = await fetchWithRetry(
+          `${apiUrl}/v1/chat/completions`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+              Accept: 'text/event-stream',
+            },
+            body: JSON.stringify(projectToolBatchForUpstream({ ...originalBody, messages: currentMessagesForLoop, stream: true })),
+            signal: abortController.signal,
           },
-          body: JSON.stringify(projectToolBatchForUpstream({ ...originalBody, messages: currentMessagesForLoop, stream: true })),
-          signal: abortController.signal,
-        },
-        { retries: apiRetries, delay: apiRetryDelay, debugMode: DEBUG_MODE, connectionTimeout: apiConnectionTimeoutMs, modelFallbackCandidates: semanticModelFallbackCandidates }
-      );
+          { retries: apiRetries, delay: apiRetryDelay, debugMode: DEBUG_MODE, connectionTimeout: apiConnectionTimeoutMs, modelFallbackCandidates: semanticModelFallbackCandidates }
+        );
+      } finally {
+        clearInterval(loopKeepAliveTimer);
+      }
 
       if (!nextAiAPIResponse.ok) {
         await streamUpstreamErrorAndEnd(res, nextAiAPIResponse, originalBody?.model, 'Normal Tool Loop');

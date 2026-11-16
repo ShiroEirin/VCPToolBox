@@ -52,6 +52,7 @@ pub struct LightMemoTask {
     pub(crate) plan_json: String,
     pub(crate) table: Arc<Mutex<Option<GlobalChunks>>>,
     pub(crate) runtime: Arc<MemoRuntime>,
+    pub(crate) observation: Option<Arc<crate::rivermemo_topology_v3::MemoQueryObservation>>,
 }
 
 fn cosine(a: &[f32], b: &[f32]) -> f64 {
@@ -109,13 +110,33 @@ impl Task for LightMemoTask {
         let started = std::time::Instant::now();
         let plan: Plan = serde_json::from_str(&self.plan_json)
             .map_err(|e| Error::from_reason(format!("Invalid LightMemo plan: {e}")))?;
-        if plan.k == 0 || plan.k > 1000 || plan.candidate_k == 0 || plan.candidate_k > 2000
-            || plan.model_sig.trim().is_empty()
-            || !matches!(plan.engine_mode.as_str(), "knn" | "rivermemo")
-            || plan.query_tokens.len() > 256
-            || plan.query_tokens.iter().any(|t| t.len() > 1024)
-            || self.query.len() != self.dimension || self.query.iter().any(|v| !v.is_finite()) {
-            return Err(Error::from_reason("LIGHTMEMO_INVALID_PLAN"));
+        if plan.query_tokens.len() > 256 {
+            return Err(Error::from_reason(format!(
+                "LIGHTMEMO_INVALID_PLAN: field=queryTokens.length actual={} max=256",
+                plan.query_tokens.len()
+            )));
+        }
+        if let Some((index, token)) = plan.query_tokens.iter().enumerate().find(|(_, t)| t.len() > 1024) {
+            return Err(Error::from_reason(format!(
+                "LIGHTMEMO_INVALID_PLAN: field=queryTokens[{index}].bytes actual={} max=1024",
+                token.len()
+            )));
+        }
+        let invalid = if plan.k == 0 || plan.k > 1000 {
+            Some(format!("field=k actual={} min=1 max=1000", plan.k))
+        } else if plan.candidate_k == 0 || plan.candidate_k > 2000 {
+            Some(format!("field=candidateK actual={} min=1 max=2000", plan.candidate_k))
+        } else if plan.model_sig.trim().is_empty() {
+            Some("field=modelSig reason=empty".into())
+        } else if !matches!(plan.engine_mode.as_str(), "knn" | "rivermemo") {
+            Some("field=engineMode reason=unsupported".into())
+        } else if self.query.len() != self.dimension {
+            Some(format!("field=query.length actual={} expected={}", self.query.len(), self.dimension))
+        } else if self.query.iter().any(|v| !v.is_finite()) {
+            Some("field=query reason=nonfinite".into())
+        } else { None };
+        if let Some(detail) = invalid {
+            return Err(Error::from_reason(format!("LIGHTMEMO_INVALID_PLAN: {detail}")));
         }
         let _gate = crate::publication_gate::acquire_read(&self.db_path, &["*".into()])
             .map_err(Error::from_reason)?;
@@ -137,9 +158,13 @@ impl Task for LightMemoTask {
                 let synchronized = table.synchronize(connection)?;
                 table.compact_if_needed(connection)?;
                 let diaries = plan.scope.diaries(connection)?;
-                let allowed = table.rows.values().filter(|row| plan.scope.admits(row, &diaries))
-                    .map(|row| row.id).collect::<HashSet<_>>();
-                let ids = table.search(&self.query, plan.candidate_k.max(plan.k), &allowed)?;
+                // Count admitted rows during the scan instead of materializing a scope set.
+                let mut scope_chunks = 0usize;
+                let ids = table.search(&self.query, plan.candidate_k.max(plan.k), |row| {
+                    let admitted = plan.scope.admits(row, &diaries);
+                    scope_chunks += usize::from(admitted);
+                    admitted
+                })?;
                 let vectors = crate::storage::load_vectors_by_ids(connection, "chunks", &ids, self.dimension)?;
                 let mut candidates = ids.into_iter().filter_map(|id| {
                     vectors.get(&id).map(|vector| json!({
@@ -150,6 +175,12 @@ impl Task for LightMemoTask {
                 candidates.sort_by(|a,b| b["vectorScore"].as_f64().unwrap()
                     .total_cmp(&a["vectorScore"].as_f64().unwrap())
                     .then(a["id"].as_i64().cmp(&b["id"].as_i64())));
+                // Plain knn returns only the first k and nothing reads the rest of
+                // the pool (keyword scores would, through idf and average length).
+                if plan.engine_mode == "knn" && !plan.ab_mode
+                    && !(plan.use_bm25 && !plan.query_tokens.is_empty()) {
+                    candidates.truncate(plan.k);
+                }
                 let mut hydrate = connection.prepare(
                     "SELECT c.content,f.path,f.diary_name,c.file_id FROM chunks c
                      JOIN files f ON f.id=c.file_id WHERE c.id=?1"
@@ -188,14 +219,18 @@ impl Task for LightMemoTask {
                     input["candidates"] = json!(candidates);
                     input["allowedFileIds"] = json!(candidates.iter()
                         .filter_map(|c| c["fileId"].as_i64()).collect::<HashSet<_>>());
-                    river = serde_json::from_str(&crate::rivermemo_topology_v3::run_native_with_connection(
+                    river = serde_json::from_str(&crate::rivermemo_topology_v3::run_native_with_observation(
                         &self.runtime, connection, &plan.artifact_sig, &input.to_string(),
+                        self.observation.as_ref(),
                     )?).map_err(|e| e.to_string())?;
                     if plan.ab_mode {
                         // Export a bounded read-only view of this exact observation, never
                         // truncate the graph used by propagation or topology scoring.
-                        let cached = self.runtime.get_query_observation(
-                            input["observationHandle"].as_str().unwrap(), &plan.artifact_sig)?;
+                        let cached = match self.observation.as_ref() {
+                            Some(value) => value.clone(),
+                            None => self.runtime.get_query_observation(
+                                input["observationHandle"].as_str().unwrap(), &plan.artifact_sig)?,
+                        };
                         let observation = &cached.observation;
                         let nodes = observation.nodes.iter().take(128).collect::<Vec<_>>();
                         let node_ids = nodes.iter().map(|node| node.id).collect::<HashSet<_>>();
@@ -255,7 +290,7 @@ impl Task for LightMemoTask {
                     "schema":"vcp-lightmemo-result-v1","results":results,
                     "tdbTopK":tdb,"river":river,
                     "comparisonPool":if plan.ab_mode { candidates } else { Vec::new() },
-                    "diagnostics":{"scopeChunks":allowed.len(),"candidateCount":vectors.len(),
+                    "diagnostics":{"scopeChunks":scope_chunks,"candidateCount":vectors.len(),
                         "synchronizedRows":synchronized,"databaseGeneration":generation,
                         "bm25Mode":"candidate-substring-tf-v1","ffiTrips":1}
                 }))
@@ -324,11 +359,18 @@ fn score_keywords(candidates: &mut [Value], tokens: &[String]) {
     let lengths = texts.iter().map(|t| t.chars().count().max(1) as f64).collect::<Vec<_>>();
     let avg = lengths.iter().sum::<f64>() / lengths.len().max(1) as f64;
     let mut scores = vec![0.; texts.len()];
-    for token in tokens.iter().filter(|t| !t.is_empty()).collect::<HashSet<_>>() {
-        let df = texts.iter().filter(|text| text.contains(token.as_str())).count() as f64;
+    // Input order, first occurrence: a fixed summation order makes scores reproducible.
+    let mut seen = HashSet::new();
+    let mut counts = vec![0usize; texts.len()];
+    for token in tokens.iter().filter(|t| !t.is_empty()) {
+        if !seen.insert(token.as_str()) { continue; }
+        for (count, text) in counts.iter_mut().zip(&texts) {
+            *count = text.matches(token.as_str()).count();
+        }
+        let df = counts.iter().filter(|count| **count > 0).count() as f64;
         let idf = ((texts.len() as f64-df+0.5)/(df+0.5)+1.).ln();
-        for (i,text) in texts.iter().enumerate() {
-            let tf = text.matches(token.as_str()).count() as f64;
+        for (i,&count) in counts.iter().enumerate() {
+            let tf = count as f64;
             if tf > 0. { scores[i] += idf*tf*2.5/(tf+1.5*(0.25+0.75*lengths[i]/avg)); }
         }
     }
@@ -340,6 +382,67 @@ fn score_keywords(candidates: &mut [Value], tokens: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyword_plan_boundaries_report_actual_field_before_database_access() {
+        let mut task = LightMemoTask {
+            db_path: "unregistered-lightmemo-test.sqlite".into(),
+            dimension: 2, query: vec![1., 0.], plan_json: String::new(),
+            table: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(MemoRuntime::new()),
+            observation: None,
+        };
+        for count in [256, 257] {
+            task.plan_json = json!({
+                "scope": {"searchAll": true}, "modelSig": "test",
+                "engineMode": "knn", "k": 1, "candidateK": 256,
+                "queryTokens": (0..count).map(|i| format!("word_{i}")).collect::<Vec<_>>()
+            }).to_string();
+            let error = task.compute().unwrap_err().reason;
+            if count == 257 {
+                assert!(error.contains("field=queryTokens.length actual=257 max=256"), "{error}");
+            } else {
+                assert!(!error.contains("LIGHTMEMO_INVALID_PLAN"), "{error}");
+            }
+        }
+        task.plan_json = json!({
+            "scope": {"searchAll": true}, "modelSig": "test",
+            "engineMode": "knn", "k": 1, "candidateK": 256,
+            "queryTokens": ["汉".repeat(342)]
+        }).to_string();
+        let error = task.compute().unwrap_err().reason;
+        assert!(error.contains("field=queryTokens[0].bytes actual=1026 max=1024"), "{error}");
+    }
+
+    #[test]
+    fn keyword_scores_sum_in_token_order_and_repeat_bit_for_bit() {
+        let texts: Vec<String> = (0..48).map(|i| (0..80)
+            .map(|j| format!("W{} ", (i * 7 + j * 13) % 97)).collect()).collect();
+        // Includes a duplicate and an empty token; both must be ignored.
+        let tokens: Vec<String> = (0..96).map(|t| format!("w{t}"))
+            .chain(["w5".to_string(), String::new()]).collect();
+        let lowered = texts.iter().map(|t| t.to_lowercase()).collect::<Vec<_>>();
+        let lengths = lowered.iter().map(|t| t.chars().count().max(1) as f64).collect::<Vec<_>>();
+        let avg = lengths.iter().sum::<f64>() / lengths.len() as f64;
+        let mut expected = vec![0.0_f64; lowered.len()];
+        let mut seen = HashSet::new();
+        for token in tokens.iter().filter(|t| !t.is_empty()) {
+            if !seen.insert(token) { continue; }
+            let df = lowered.iter().filter(|text| text.contains(token.as_str())).count() as f64;
+            let idf = ((lowered.len() as f64-df+0.5)/(df+0.5)+1.).ln();
+            for (i, text) in lowered.iter().enumerate() {
+                let tf = text.matches(token.as_str()).count() as f64;
+                if tf > 0. { expected[i] += idf*tf*2.5/(tf+1.5*(0.25+0.75*lengths[i]/avg)); }
+            }
+        }
+        for _ in 0..8 {
+            let mut candidates = texts.iter().map(|t| json!({"text": t})).collect::<Vec<_>>();
+            score_keywords(&mut candidates, &tokens);
+            for (candidate, expected) in candidates.iter().zip(&expected) {
+                assert_eq!(candidate["bm25Score"].as_f64().unwrap().to_bits(), expected.to_bits());
+            }
+        }
+    }
 
     #[test]
     fn native_filters_preserve_signature_dates_music_and_negative_cosine() {
@@ -376,6 +479,7 @@ mod tests {
             db_path:db.clone(),dimension:2,query:vec![1.,0.],
             plan_json:String::new(),table:Arc::new(Mutex::new(None)),
             runtime:Arc::new(MemoRuntime::new()),
+            observation:None,
         };
         let run = |task:&mut LightMemoTask,scope:Value| {
             task.plan_json=json!({"scope":scope,"modelSig":"test","engineMode":"knn",
@@ -393,6 +497,18 @@ mod tests {
         assert_eq!(music["results"][0]["id"],3);
         let excluded=run(&mut task,json!({"searchAll":true,"excludedFolders":["MusicDiary"]}));
         assert_eq!(excluded["results"].as_array().unwrap().len(),2);
+        // Scope size counts admitted rows, independent of the candidate limit.
+        assert_eq!(signature["diagnostics"]["scopeChunks"],1);
+        assert_eq!(folder["diagnostics"]["scopeChunks"],1);
+        assert_eq!(excluded["diagnostics"]["scopeChunks"],2);
+        // knn with k below the pool returns the same leading rows, fully hydrated.
+        task.plan_json=json!({"scope":{"searchAll":true,"excludedFolders":["MusicDiary"]},
+            "modelSig":"test","engineMode":"knn","k":1,"candidateK":20}).to_string();
+        let top=serde_json::from_str::<Value>(&task.compute().unwrap()).unwrap();
+        assert_eq!(top["results"],json!([excluded["results"][0].clone()]));
+        assert_eq!(top["tdbTopK"],top["results"]);
+        assert_eq!(top["diagnostics"]["candidateCount"],2);
+        assert_eq!(top["diagnostics"]["scopeChunks"],2);
         assert!(!std::fs::read_dir(&root).unwrap().any(|entry|
             entry.unwrap().file_name().to_string_lossy().contains(".vec")));
         crate::storage::with_registered_read_transaction(&db, |connection| {
