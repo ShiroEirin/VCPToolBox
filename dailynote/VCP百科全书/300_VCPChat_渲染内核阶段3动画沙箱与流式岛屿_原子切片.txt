@@ -1,0 +1,53 @@
+[2026-11-16] - 哈雷酱
+# VCPChat 渲染内核阶段3：动画沙箱、流式岛屿与渲染模板编译器
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-16（第30次上游合并：1f97cd1f，上游阶段3系列提交 + 026a9af9「流式Js动画渲染回归！」）
+适用范围：`modules/renderer/` 本轮新增 12 个模块
+事实来源：
+- **新增 12 个渲染模块（行数实测）**：
+  - `renderTemplateCompiler.js` **1,236 行**
+  - `streamIslandGate.js` 244 行
+  - `offscreenDomWindow.js` 204 行
+  - `vcpDocumentScanner.js` 195 行
+  - `mathRenderer.js` 194 行
+  - `vcpParseContext.js` 180 行
+  - `animationMountController.js` 177 行
+  - `strictAnimationIsland.js` 112 行
+  - `renderWorkerClient.js` 97 行
+  - `renderWorkerRuntime.js` 56 行
+  - `messagePreviewText.js` 35 行
+  - `renderWorker.js` 11 行
+- **阶段3系列提交（行数）**：`39cbd6e6` P1阶段推进（11 文件 **+12,308/−11,746**）/ `c9c0c372` 阶段2推进（18 文件 +799/−234）/ `c1bf27db` p1-1（15 文件 +1,180/−539）/ `fda8aa67` P3-2前置基建（10 文件 +743/−126）/ `0a99f041` p3 权威 core 落地（7 文件 +633/−51）/ `66a382f3` p3-5（19 文件 **+2,580/−1,189**）/ `d90b8199` p5-3 边界性能（5 文件 +408/−26）/ `47b6be91` p5-7 动画沙箱（8 文件 +1,067/−252）/ `289c59be` p4-1（8 文件 +877/−187）/ `3b5b2e06` p4-2 收尾（3 文件 +174/−35）/ `681836ef` p6-5（4 文件 +613/−5）
+- `026a9af9` 流式 Js 动画渲染回归（6 文件 +490/−27）
+
+## 核心结论
+Chat 的消息渲染正在从「一次性 innerHTML + 全局重绘」重构为**带岛屿（island）、带沙箱、带 worker 的分层渲染架构**。`39cbd6e6` 单提交 +12,308/−11,746 几乎是**推倒重建**。
+
+## 从模块名读出的架构
+| 模块 | 推测职责 |
+|---|---|
+| `renderTemplateCompiler.js`（1,236 行） | **模板编译器**——把消息内容编译成可增量更新的渲染指令，而不是每次重解析 |
+| `streamIslandGate.js`（244） | **流式岛屿门**——决定哪些片段可以独立更新（岛屿），哪些必须整体重绘 |
+| `strictAnimationIsland.js`（112） | **严格动画岛屿**——动画只能在岛屿内运行，不得污染全局 |
+| `animationMountController.js`（177） | 动画挂载控制器——控制动画生命周期 |
+| `offscreenDomWindow.js`（204） | **离屏 DOM 窗口**——在不可见窗口预渲染 |
+| `renderWorker.js` / `renderWorkerClient.js` / `renderWorkerRuntime.js` | **渲染 worker 三件套**——主线程/worker 分离 |
+| `vcpDocumentScanner.js`（195） / `vcpParseContext.js`（180） | VCP 文档扫描与解析上下文——把消息拆成可识别的结构块 |
+| `mathRenderer.js`（194） | 数学公式渲染（对应 `06ef625c katex原生多线程渲染`） |
+| `messagePreviewText.js`（35） | 预览文本提取（侧栏/列表用） |
+
+## 与既有切片的对应
+- 切片 282（chatContextPipeline）解决「**上下文怎么拼**」；本切片解决「**拼好后怎么画**」。
+- 切片 264（渲染协议扫描与工具卡片架构重构）是本主题的前身；本轮是它的**阶段3 大版本**。
+- `026a9af9`「流式 Js 动画渲染回归！」标题带感叹号，说明这是一次**功能回补**（之前丢了，现在补回来），配 `tests/message-renderer-animation-island.test.mjs`（193 行）。
+
+## 新增测试面（部分）
+`stream-island-gate.test.mjs` / `stream-local-work-skips.test.mjs` / `stream-stage2-animation-lifecycle.test.mjs` / `strict-animation-island.test.mjs` / `offscreen-dom-window.test.mjs` / `render-worker.test.mjs` / `vcp-document-scanner.test.mjs` / `vcp-parse-context.test.mjs` / `message-renderer-animation-island.test.mjs`（193）/ `terminal-race-performance.test.js` / `topic-list-virtualization.test.js`
+
+## 未证实部分
+- 本切片基于模块名、行数、提交标题与测试文件名归纳，**未逐行阅读** `renderTemplateCompiler.js` 的 1,236 行实现。
+- 不断言「岛屿」的具体边界判定规则（推测与 `streamIslandGate` 的 gate 条件相关）。
+
+关联节点：渲染协议扫描与工具卡片架构重构(264)、统一聊天上下文组装器chatContextPipeline(282)、ProjectForge Rust服务迁移(299)
+Tag: 渲染内核, 阶段3, renderTemplateCompiler, streamIslandGate, strictAnimationIsland, animationMountController, offscreenDomWindow, renderWorker, vcpDocumentScanner, vcpParseContext, mathRenderer, katex多线程, 岛屿渲染, 沙箱, 流式动画回归, 推倒重建, 第30次上游合并, 026a9af9

@@ -1,0 +1,42 @@
+[2026-11-16] - 哈雷酱
+# ProjectForge Rust 服务迁移与阶段3渲染内核
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-16（第30次上游合并：1f97cd1f，上游 d1ceec6e「feat(projectforge): complete Rust service migration」）
+适用范围：`rust_projectforge_indexer/src/` 与 `VCPDistributedServer/Plugin/ProjectForge/`
+事实来源：
+- 主提交：`d1ceec6e`（**42 文件 +12,360/−3,957**）
+- **新增 22 个 Rust 源文件**：`commit_coordinator.rs` / `commit_journal.rs` / `edit.rs` / `edit_pipeline.rs` / `edit_service.rs` / `edit_tickets.rs` / `elision.rs` / `file_commit.rs` / `file_replace.rs` / `file_service.rs` / `line_diff.rs` / `project_path.rs` / `service.rs` / `service_config.rs` / `storage.rs` / `storage_schema.sql` / `symbol_address.rs` / `text_snapshot.rs` / `todo_refs.rs` / `transport.rs` / `validation.rs` / `validation_process.rs`
+- 配套：`467ce9ca refactor(projectforge): simplify conflict locking and internal expectedHash`、`9dfc5055 wip(projectforge): archive Rust service implementation and pause plan (pm82m)`、`681836ef 核心实现 p6-5`
+- `package.json` 新增：`test:pf-service` 脚本；files 条目新增 `VCPDistributedServer/Plugin/ProjectForge/**/*`、`VCPDistributedServer/shared/**/*`、`ProjectForgemodules/**/*`
+
+## 核心结论
+ProjectForge 从「Rust 索引器 + JS 服务层」变成了**全 Rust 服务**：22 个新源文件覆盖了编辑、提交、存储、校验、传输全链路。这是本轮 Chat 侧最大的单笔改动（12,360 行新增）。
+
+## 新增模块的职责分层（自文件名推）
+| 层 | 文件 | 作用 |
+|---|---|---|
+| **服务入口** | `service.rs` / `service_config.rs` / `transport.rs` | 服务主体、配置、传输层 |
+| **编辑** | `edit.rs` / `edit_pipeline.rs` / `edit_service.rs` / `edit_tickets.rs` | 编辑请求 → 管线 → 票据（tickets）机制 |
+| **文件操作** | `file_service.rs` / `file_commit.rs` / `file_replace.rs` / `line_diff.rs` | 文件级提交、替换、行差异 |
+| **提交一致** | `commit_coordinator.rs` / `commit_journal.rs` | 提交协调器 + **提交日志**（可回放） |
+| **存储** | `storage.rs` / `storage_schema.sql` / `text_snapshot.rs` | 存储层与**文本快照** |
+| **符号与引用** | `symbol_address.rs` / `todo_refs.rs` | 符号地址、todo 引用 |
+| **安全与校验** | `validation.rs` / `validation_process.rs` / `project_path.rs` / `elision.rs` | 校验、校验进程、**项目路径**、省略/裁剪 |
+
+## 三个值得注意的设计信号
+1. **`commit_journal.rs`（提交日志）**：说明编辑不是「直接改文件」，而是走**可回放的日志**——与切片 248 描述的 `Rollback` / `HistorySearch` 命令面对应。
+2. **`edit_tickets.rs`（编辑票据）**：把一次编辑抽象为「票据」，意味着可审计、可撤销、可并发控制。
+3. **`project_path.rs` 独立成文件**：与 ToolBox 侧的 `safeFilePath`（切片 277）同构——路径安全在每个大模块里都要单独建边界。
+
+## 与既有切片的关系
+- 切片 248（ProjectForge 项目锻造台：Rust AST 索引与链接图）描述的是**索引侧**；本切片描述的是**服务与编辑侧**。
+- 切片 279（工程图纸动态画布）描述的是**前端表现层**；本切片是它背后的**服务端底座**。
+- 三者构成完整链条：索引（248）→ 服务/编辑（299）→ 画布（279）。
+
+## 未证实部分
+- 不断言 `transport.rs` 的具体协议（stdio/HTTP/WebSocket）。
+- 不断言 `9dfc5055`「archive Rust service implementation and pause plan」与本提交的关系——标题看是「归档并暂停」，但 4 小时后又有 `d1ceec6e` 完成迁移，推测是**先归档旧实现再落地新实现**，但未逐行核实。
+
+关联节点：ProjectForge项目锻造台RustAST索引与链接图(248)、ProjectForge工程图纸动态画布(279)、VCPChat渲染内核阶段3(300)
+Tag: ProjectForge, Rust服务迁移, commit_journal, commit_coordinator, edit_tickets, edit_pipeline, file_commit, line_diff, text_snapshot, storage_schema, symbol_address, todo_refs, project_path, validation, 22个新源文件, 12360行, 第30次上游合并, d1ceec6e

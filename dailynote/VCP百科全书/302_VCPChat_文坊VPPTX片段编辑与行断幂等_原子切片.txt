@@ -1,0 +1,47 @@
+[2026-11-16] - 哈雷酱
+# 文坊 VPPTX 片段编辑与行断幂等
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-16（第30次上游合并：1f97cd1f，上游 ad931b80「fix(scriptorium): make line break saves idempotent」+ 文坊相关测试批量）
+适用范围：`modules/scriptorium/` 的 VPPTX 与文本片段编辑链路
+事实来源：
+- 上游 commit：`ad931b80`
+- **新增测试（8 个 scriptorium 相关）**：`scriptorium-linebreak-consumers.test.js` / `scriptorium-source-normalization.test.js` / `scriptorium-text-fragment.test.js` / `scriptorium-vpptx-fragment-commit.test.js` / `scriptorium-vpptx-history-electron.test.js` / `scriptorium-vpptx-layout-electron.test.js` / `scriptorium-vpptx-linebreak-electron.test.js` / `scriptorium-vpptx-linebreak-stress-electron.test.js` / `scriptorium-vpptx-source-roundtrip.test.js`
+
+## 核心结论
+文坊（Scriptorium）本轮从「打开/预览/白板」推进到**结构化编辑**：新增 VPPTX（演示文稿）片段编辑与文本片段编辑，并且专门修了「**换行保存不幂等**」这个典型编辑器缺陷。
+
+## 一个缺陷的完整闭环（值得学习）
+`ad931b80 fix(scriptorium): make line break saves idempotent`
+- **幂等的含义**：保存一次与保存十次，文件内容必须一致。
+- **换行为什么容易不幂等**：
+  1. 源文件用 `\n`，编辑器内部用 `\r\n`，来回转换会**累积**；
+  2. 保存时「规范化 → 序列化 → 再规范化」若顺序错，会把用户的换行吃掉或加倍；
+  3. 片段编辑（只改一段）时，拼接回全文的边界处理最容易出错。
+- **配套测试的针对性**：
+  - `scriptorium-linebreak-consumers.test.js`——验证**所有消费方**（不只一处）
+  - `scriptorium-vpptx-linebreak-electron.test.js`——Electron 真实环境
+  - `scriptorium-vpptx-linebreak-stress-electron.test.js`——**压力测试**（反复保存）
+  - `scriptorium-source-normalization.test.js`——源规范化
+  - `scriptorium-vpptx-source-roundtrip.test.js`——**往返一致性**（打开→保存→再打开）
+
+## VPPTX 片段编辑的能力面（自测试名推）
+| 测试 | 能力 |
+|---|---|
+| `vpptx-fragment-commit` | 片段提交 |
+| `vpptx-history-electron` | 历史/撤销 |
+| `vpptx-layout-electron` | 布局编辑 |
+| `vpptx-linebreak-electron` | 换行处理 |
+| `vpptx-source-roundtrip` | 源往返 |
+
+## 与既有切片的关系
+- 切片 280（文坊 Scriptorium 与 Excalidraw/PDF 双引擎）描述的是**基础设施**（文件分发器 + vendor 引擎）；
+- 本切片描述的是**编辑语义层**（片段、历史、布局、幂等）。
+- 两者合起来才是完整的「文坊」：280 = 能打开，302 = 能安全地改。
+
+## 未证实部分
+- 不断言 VPPTX 是自研格式还是基于 pptx 的封装（测试名只体现能力，不体现格式）。
+- 不断言片段编辑的存储粒度（段落/行/字符）。
+
+关联节点：文坊Scriptorium与ExcalidrawPDF双引擎(280)、瞬态会话状态分离与CAS冲突修复(301)
+Tag: 文坊, Scriptorium, VPPTX, 片段编辑, 行断幂等, idempotent, 换行, CRLF, 往返一致性, roundtrip, 压力测试, 源规范化, 历史撤销, 布局编辑, 第30次上游合并, ad931b80

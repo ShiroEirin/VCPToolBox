@@ -1,0 +1,39 @@
+[2026-11-16] - 哈雷酱
+# 插件子进程继承 Node 运行时（ABI 冲突防护）
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-16（第30次上游合并：f08b16b0，上游 70267d0f「fix(Plugin): 插件子进程自动继承父进程 Node 运行时以防止原生模块 ABI 冲突」）
+适用范围：`Plugin.js` 中插件子进程的 `spawn` 环境构造
+事实来源：
+- 上游 commit：`70267d0f`（1 文件 **+6/−1**）
+- 新增行原文（两处，分别对应两种启动路径）：
+```js
+// 无论系统默认 PATH 是什么，子进程优先继承运行当前 VCP 主服务的同一个 Node.js 运行时
+const currentNodeBinDir = path.dirname(process.execPath);
+envForProcess.PATH = `${currentNodeBinDir}${path.delimiter}${envForProcess.PATH || process.env.PATH || ''}`;
+```
+
+## 核心结论
+6 行代码，解决的是**「同一台机器装了多个 Node，插件子进程跑在另一个版本上，原生模块 ABI 不匹配」**这类极难排查的问题。做法异常简单：把**当前主服务正在用的 Node 可执行文件所在目录**插到子进程 `PATH` 的最前面。
+
+## 问题机理
+- Node 原生模块（`.node`）是按 **NODE_MODULE_VERSION（ABI 号）** 编译的。
+- 主服务跑在 Node 22（ABI 127），若子进程被 `PATH` 解析到 Node 20（ABI 115），`require('better-sqlite3')` 就会报 `was compiled against a different Node.js version`。
+- 典型触发场景：nvm/fnm 多版本共存、系统安装版与内嵌版共存、CI 与本地环境不同。
+
+## 修法的三个要点
+1. **用 `process.execPath` 而非 `process.version`**：前者是**当前进程可执行文件的绝对路径**，后者只是版本号字符串；从路径取目录才能直接拼进 `PATH`。
+2. **`path.dirname` + `path.delimiter`**：跨平台正确（Windows `;` / POSIX `:`）。
+3. **前置插入而非覆盖**：`${currentNodeBinDir}${delimiter}${原 PATH}`——保留用户环境，只把正确版本排在最前。
+
+## 与既有问题的对应
+- 本机历史上出现过同类问题：VCPChat 侧 `node-pty` 的 `conpty.node` 缺失、`better-sqlite3` ABI 不匹配。
+- 本修复在**ToolBox 侧**统一处理，意味着以后新增插件不必各自处理运行时选择。
+
+## 影响面
+- 对所有以子进程方式启动的插件生效（`envForProcess` 是统一构造点）。
+- 对纯 JS 插件无感；对带原生模块的插件（sqlite / canvas / sharp / hnswlib）是硬保障。
+- 若用户故意希望子进程用系统 Node，本改动会**覆盖该意图**——这是有意的取舍（一致性优先于灵活性）。
+
+关联节点：插件桥接注册表与工具生命周期(239)、插件回调安全与异步结果存储(290)
+Tag: 插件子进程, spawn, PATH, process.execPath, path.dirname, path.delimiter, ABI冲突, NODE_MODULE_VERSION, 原生模块, better-sqlite3, nvm, fnm, 运行时继承, 6行修复, 第30次上游合并, 70267d0f

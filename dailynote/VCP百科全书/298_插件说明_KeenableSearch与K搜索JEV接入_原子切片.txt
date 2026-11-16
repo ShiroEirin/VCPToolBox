@@ -1,0 +1,29 @@
+[2026-11-16] - 哈雷酱
+# KeenableSearch 插件与 K 搜索 JEV 接入
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-16（第30次上游合并：f08b16b0，上游 a59e4de7「新增可选的 KeenableSearch 联网搜索插件（默认禁用）」+ 51aecdca「将K搜索纳入jev范围」）
+适用范围：`Plugin/KeenableSearch/` 与 JEV 能力树
+事实来源：
+- `a59e4de7`：**5 文件 +214**（新增插件）
+- `51aecdca`：**4 文件 +33**（JEV 接入）
+- 插件目录已存在于 `Plugin/KeenableSearch/`（本轮新增）
+
+## 核心结论
+新增一个**默认禁用**的联网搜索插件 KeenableSearch，并紧接着把它纳入 JEV 语义调用范围。两个提交相隔不到 3 小时，说明作者把「新增插件 → 接入 JEV」做成了**标准流程**，而不是事后补。
+
+## 关键事实
+1. **默认禁用**：提交标题明写「默认禁用」——符合 VCP 一贯的「新增能力不默认开启」原则（对比：DeedPage 也是可选、ChromeBridge 需配置）。
+2. **JEV 接入**：`将K搜索纳入jev范围` 意味着 KeenableSearch 成为 JEV 能力树中的一个可被自然语言唤起的工具别名。
+3. **与既有搜索插件的关系**：现役搜索类已有 AnySearch / VSearch / YouSearch / TavilySearch / BrowserSearch / ParallelSearch / FlashDeepSearch / GitSearch / IMAPSearch / CodeSearcher。KeenableSearch 是**第 11 个搜索入口**。
+
+## 为什么值得单独立切片
+- 它验证了 JEV 的**扩展路径已经成熟**：新增插件 + 4 文件 33 行就能进能力树，不需要改服务端大 JSON。
+- 与切片 251（第三方插件注册表）不同：251 是「第三方插件自带 `jev` 块」，本条是**官方插件**纳入 JEV，属于第一方扩展。
+
+## 未证实部分
+- 不断言 KeenableSearch 的具体 API 端点、密钥需求与返回格式（本轮只核验了文件数与提交标题）。
+- 不断言它在 JEV 能力树中的 `category` 与工具别名（需读 `ToolConfigs/jev_tool_call_exp.json` 或 manifest，本轮未展开）。
+
+关联节点：JEV语义工具调用实验体系(236)、JEV第三方插件注册表与提示词登记(251)、ParallelSearch免密钥MCP搜索(253)
+Tag: KeenableSearch, 联网搜索, 默认禁用, JEV, 能力树, 官方插件扩展, 4文件33行, 第11个搜索入口, 第30次上游合并, a59e4de7, 51aecdca

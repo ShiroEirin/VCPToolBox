@@ -91,4 +91,11 @@
 - **原生产物**：`vexus-lite.win32-x64-msvc.node` 14,674,944B → 14,687,744B；文档明确「Rust 源码变更需要重新构建原生模块并重启服务后才能用于生产」。
 - **意义**：此前 JEV 在长上下文场景下要么被服务端拒、要么本地悄悄截断；现在变成三级阶梯——常规直发 / 自动附加危险区头 / 本地明确拒绝，且**不改变任何排序语义**。这是「扩大可用输入」而非「提高判断质量」的改动。
 
+十三、2026-11-16 第30次上游合并：KeenableSearch 纳入 JEV 范围（51aecdca）
+
+- `51aecdca「将K搜索纳入jev范围」`（4 文件 +33）：新增的 KeenableSearch 官方插件被纳入 JEV 能力树。
+- 新增插件 `a59e4de7`（5 文件 +214），提交标题明写**默认禁用**。
+- 意义：**官方插件扩展 JEV 只需 4 文件 33 行**，不必改服务端大 JSON——与切片 251（第三方插件自带 `jev` 块）形成两条互补的扩展路径：251 是第三方自述，本条是第一方登记。
+- 现役搜索入口因此增至 11 个（AnySearch / VSearch / YouSearch / TavilySearch / BrowserSearch / ParallelSearch / FlashDeepSearch / GitSearch / IMAPSearch / CodeSearcher / KeenableSearch）。
+- 详见切片 298。
 Tag: JEV, 语义工具调用, jevToolCallExp, ToolConfigs, jev_tool_call_exp.json, 能力树, 省略目录, url_fetch, daily_tools, 三级优先级, JEV_THIRD_PARTY_EXP, 插件自述声明, 便利操作, 媒体娱乐, 第24次上游合并

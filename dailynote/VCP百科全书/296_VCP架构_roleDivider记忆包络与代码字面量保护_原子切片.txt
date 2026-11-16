@@ -1,0 +1,50 @@
+[2026-11-16] - 哈雷酱
+# roleDivider 记忆包络与代码字面量保护
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-16（第30次上游合并：f08b16b0，上游 56dbdcd8「fix(roleDivider): 保护记忆包络与代码字面量免受角色误切分并保留多模态缓存断点」）
+适用范围：`modules/roleDivider.js` 的包络识别与掩码管线
+事实来源：
+- 上游 commit：`56dbdcd8`（2 文件 **+411/−59**）
+- 新增常量：`ENVELOPE_MARKERS`
+- 新增函数：`findEnvelopeRanges(text)` / `findCodeLiteralRanges(text)` / `maskMessageRanges(message, envelopeRanges, 'TOOL')` / `extractConcatenatedText(...)`
+- 新增测试：`RAG and TDB memory envelopes inside moved tray user carrier preserve literal role tags` / `HTML code/pre blocks are shielded and multimodal cache_control is preserved`
+
+## 核心结论
+这是切片 278（工具返回批次界定符）与 283（思考块剥离边界）的**第三个同类收口**：roleDivider（角色分割器）过去会把「看起来像角色标记」的文本当成真的分割点，包括**记忆包络里的内容**与**代码块里的字面量**。本轮把它们划成保护区，并额外解决了一个**多模态缓存断点被误删**的问题。
+
+## 三层保护（源码事实）
+1. **包络层**：`ENVELOPE_MARKERS` 常量列出需保护的包络标记；`findEnvelopeRanges(text)` 扫出区间。
+2. **代码字面量层**：`findCodeLiteralRanges(text)` 识别代码块（测试名提到 `HTML code/pre blocks`）。
+3. **掩码机制**：`maskMessageRanges(message, envelopeRanges, 'TOOL')` 把区间替换为**私有区字符占位**——前缀格式字面量为 `\uE000VCP_${label}_LITERAL_`（`\uE000` 是 Unicode 私用区首字符，不会与正常文本冲突）。
+
+## 关键工程细节：两阶段掩码
+```js
+const stage1 = maskMessageRanges(message, envelopeRanges, 'TOOL');
+const stage1Text = envelopeRanges.length > 0 ? extractConcatenatedText(stage1.message) : text;
+const codeRanges = findCodeLiteralRanges(stage1Text);
+```
+- **先掩包络，再在掩码后文本上找代码区间**——避免包络与代码嵌套时互相干扰。
+- `extractConcatenatedText` 把掩码后的多个 part 拼回单串再扫描，保证跨 part 的代码块也能识别。
+
+## 多模态缓存断点保护（注释原文）
+```js
+// No split occurred in this text part; preserve part metadata such as cache_control
+```
+- 背景：roleDivider 可能会把一条消息拆成多个 part。如果**没发生拆分**，就必须保留原 part 的元数据（如 `cache_control`）。
+- 为什么重要：`cache_control` 是上游提示词缓存的断点标记，丢了会导致**缓存失效、成本上升**，但功能上看不出来。
+
+## 与既有切片的家族关系
+| 切片 | 保护的层 |
+|---|---|
+| 278 工具返回批次界定符 | 工具结果**怎么包** |
+| 283 思考块剥离边界 | 思考块**怎么剔** |
+| **295/296 本节** | 角色分割**怎么不误切** |
+三者共同原则：**先划出不可解释的字面量区，再在剩余区域里找协议**。
+
+## 未证实部分
+- 不断言 `ENVELOPE_MARKERS` 的具体成员列表（本轮只核验到常量存在与其使用方式）。
+- 不断言私有区占位符在后续阶段如何还原（推测在分割完成后统一回填）。
+
+关联节点：工具返回批次界定符协议(278)、思考块剥离边界与代码域隔离(283)、RAG占位符替换注入防护(289)
+Tag: roleDivider, 角色分割, ENVELOPE_MARKERS, findEnvelopeRanges, findCodeLiteralRanges, maskMessageRanges, 私有区字符, uE000, cache_control, 多模态缓存断点, 两阶段掩码, 记忆包络, 代码字面量, 第30次上游合并, 56dbdcd8

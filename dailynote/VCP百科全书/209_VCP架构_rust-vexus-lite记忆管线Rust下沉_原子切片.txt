@@ -152,4 +152,12 @@ Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology
 - **向量去重上界（bdd98aae，PR #550）**：`ResultDeduplicator.js` +66、`result_deduplicator.rs` +155、`tests/resultDeduplicatorBounds.test.js` +80。JS 侧新增 `_cosineAtLeast` 与 `_dedupSuffixNorms`（256 块后缀范数 + `boundBudget = { remaining: 8 }` 单请求预算）；Rust 侧 `const BOUND_BLOCK: usize = 256`。两处注释原文：`A negative certificate never changes ranking scores` 与 `Falling back changes work only, never candidate or suppression semantics`——即「上界只省算力，不改候选与抑制语义」。
 - **JEV 原生重排长上下文（733e285f）**：`native_rerank.rs` +41，详见切片 236 第十二节。
 
+十四、2026-11-16 第30次上游合并：第二轮性能批量与 memo_nnls（18 文件 +2,009/−206）
+
+- **新增 `src/memo_nnls.rs`（569 行）**：NNLS（非负最小二乘）求解器，依赖 `nalgebra`。常量 `DUAL_TOL=1e-10` / `RANK_TOL=1e-12` / `CHECK_TOL=2e-8`；`Diagnostics` 含 `iterations` / `active_tags` / `dual_violation` / `stationarity_error` / `complementarity_error` / `energy_closure_error` / `residual_ratio`——前三个正好是 KKT 三条件，把「解对不对」变成可量化验收。
+- **性能连发（10 条）**：sensing 无更深残差层时跳过动态虫洞扫描（d0bd3b6c）；ingestion 每 Tag 向量只修复一次并复用预备插入（fe739d03）；memo-pipeline 融合去重缓存向量范数（70ddc6eb）；wormhole 仅在请求 trace 时构建对象（c1e9c4a9）；memo-nnls 双扫描跳过被动列并复用缓冲（9a9031de）；storage 借用 BLOB + 归还只通知一个读者 + 注册锁前规范化路径（494d91e4）；LightMemo 纯 KNN 先截到 k 再读文本（fcde5b88）；thinking 每阶段只预过滤一次路由边（d3bae4a8）；vcp-tdb-index 仅 k 接近重排预算时记录 rerank 分数（84cad1ea）；index 用 `RetrievalIndex::model_hash` 作 SQL 构建身份（f73945c2）。
+- **两个修正**：`0235474a` 边数上限截断节点行时必须标记泳道 truncated；`1ad5d4aa` 文档自纠——保留的外围机会是 **2 不是 8**。
+- 大幅改动文件：`memo_pipeline.rs`(+328) / `rivermemo_wormhole.rs`(+299) / `rivermemo_topology_v3.rs`(224) / `memo_geometry.rs`(+193) / `light_memo.rs`(+152) / `memo_sensing.rs`(+122) / `ingestion.rs`(+102)。
+- 编译产物 `719b8ff1` 同步更新。
+- 详见切片 295。
 Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, 第24次上游合并, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容, 第25次上游合并, memo_projection, 双场投影, 动态虫洞, README, 探针脚本, 第26次上游合并, native_rerank, memo_workspace, 确定性求和, float_roundtrip, 稀疏排除, 性能优化

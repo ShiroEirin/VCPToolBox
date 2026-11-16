@@ -103,3 +103,10 @@ K 现在约束双场选点的去重并集，包含全部核心骨架；不再是
 4. 原生二进制需同步更新：`vexus-lite.win32-x64-msvc.node` 本轮多轮增长至 10,628,608B。
 
 关联章节：209（rust-vexus-lite 记忆管线）、210（RiverMemo 拓扑 V3 理论）、212（原生 Artifact 构建器与统一 Memo 运行时）、259（RiverMemo 生产契约）、266（请求级动态虫洞）、267（单轮请求共享观测）
+
+## 2026-11-16 第30次上游合并：参数自纠——保留外围机会是 2 不是 8（1ad5d4aa）
+
+- 上游文档提交原文：`docs(projection): reserved outer opportunities are 2, not 8`。
+- **本切片正文若把「保留外围机会」写作 8，应按上游更正为 2。**
+- 同轮配套修正 `0235474a`：`mark a lane truncated when the edge limit cuts a node's row`——边数上限截断节点行时，必须把该泳道标记为 truncated，否则下游会把它当完整数据使用。
+- 同轮 `memo_projection.rs` 另有 21 行改动；`memo_nnls.rs` 新增 569 行（NNLS 非负最小二乘求解器，详见切片 295）。

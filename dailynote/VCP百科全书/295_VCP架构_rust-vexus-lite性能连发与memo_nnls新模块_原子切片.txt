@@ -1,0 +1,69 @@
+[2026-11-16] - 哈雷酱
+# rust-vexus-lite 11-14 性能连发与 memo_nnls 新模块
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-16（第30次上游合并：f08b16b0，上游 11-14 性能批量提交 + 719b8ff1 编译产物）
+适用范围：`rust-vexus-lite/src/` 本轮 18 文件改动
+事实来源：
+- 总规模：**18 文件 +2,009 −206**
+- 新增：`memo_nnls.rs`（**569 行**）
+- 大幅改动：`memo_pipeline.rs`(+328) / `rivermemo_wormhole.rs`(+299) / `rivermemo_topology_v3.rs`(224) / `memo_geometry.rs`(+193) / `light_memo.rs`(+152) / `memo_sensing.rs`(+122) / `ingestion.rs`(+102) / `memo_thinking.rs`(70) / `native_rerank.rs`(40)
+- 小改动：`index_source.rs`(21) / `knowledge_runtime.rs`(21) / `memo_projection.rs`(21) / `storage.rs`(18) / `retrieval_index.rs`(18) / `global_chunks.rs`(12) / `result_deduplicator.rs`(4) / `lib.rs`(+1)
+- 编译产物：`719b8ff1 更新编译产物`
+
+## 核心结论
+这是继 10-26（PR #528–#547）之后的**第二轮性能批量**，但比上轮更狠：上轮是「省拷贝、省解码」，本轮是「**省扫描、省重算、省对象构建**」。同时新增一个数学模块 `memo_nnls`，说明记忆系统的求解器从「启发式融合」向「带约束的优化问题」推进。
+
+## 一、新增 memo_nnls.rs（569 行）——NNLS 求解器
+源码头部事实：
+```rust
+use nalgebra::{DMatrix, DVector};
+
+const DUAL_TOL: f64 = 1e-10;
+const RANK_TOL: f64 = 1e-12;
+const CHECK_TOL: f64 = 2e-8;
+
+pub(crate) struct Diagnostics {
+    iterations, active_tags, dual_violation, stationarity_error,
+    complementarity_error, energy_closure_error, residual_ratio
+}
+pub(crate) struct Solution {
+    projection: Vec<f32>, residual: Vec<f32>,
+    // Unit-Tag coefficients divided by input query norm.
+    contributions: Vec<f64>,
+}
+```
+- **NNLS = Non-Negative Least Squares（非负最小二乘）**：强制系数非负，即「记忆只能加分不能减分」。
+- **KKT 条件诊断齐备**：`dual_violation`（对偶可行）、`stationarity_error`（平稳性）、`complementarity_error`（互补松弛）——三个量正好是 KKT 三条件，说明作者把「解对不对」变成了**可量化验收**。
+- **`energy_closure_error` + `residual_ratio`**：能量闭合与残差比，用于判断投影是否漏能。
+- `contributions` 注释原文：`Unit-Tag coefficients divided by input query norm.`——贡献度做了归一化，可跳模型比较。
+
+## 二、性能优化逐条（提交标题原文）
+| commit | 优化内容 |
+|---|---|
+| `d0bd3b6c` | **sensing**：无更深残差层时跳过动态虫洞扫描；延迟 map 默认值 |
+| `fe739d03` | **ingestion**：每个 Tag 向量只修复一次并复用预备插入 |
+| `70ddc6eb` | **memo-pipeline**：融合去重缓存向量范数，不再逐对重算 |
+| `c1e9c4a9` | **wormhole**：仅在请求 trace 时才构建 unified-bonus trace 对象 |
+| `9a9031de` | **memo-nnls**：双扫描跳过被动列，复用 solver 缓冲 |
+| `494d91e4` | **storage**：借用向量 BLOB、归还时只通知一个读者、注册锁前先规范化路径 |
+| `fcde5b88` | **LightMemo**：纯 KNN 候选先截到 k 再读文本 |
+| `d3bae4a8` | **thinking**：每阶段只预过滤一次各模块的路由边 |
+| `84cad1ea` | **vcp-tdb-index**：仅当 k 接近重排预算时才记录 rerank 分数 |
+| `f73945c2` | **refactor(index)**：用 `RetrievalIndex::model_hash` 作 SQL 构建身份 |
+
+## 三、两个修正（非性能）
+- `0235474a` **fix(projection)**：`mark a lane truncated when the edge limit cuts a node's row`——边数上限截断节点行时，必须标记该泳道为 truncated（否则下游会当成完整数据）。
+- `1ad5d4aa` **docs(projection)**：`reserved outer opportunities are 2, not 8`——**文档自纠**：保留的外围机会是 2 不是 8。这是对切片 265（双场投影预算）的**参数修正**，旧文档写的 8 是错的。
+
+## 四、对既有切片的影响（重要）
+- **切片 265（Memo 双场投影预算）**：其中「保留外围机会」若写 8，应按本条改为 **2**。
+- **切片 209（rust-vexus-lite 记忆管线）**：本轮为第二轮性能批量，已在 209 第十三节基础上新增本节。
+- **切片 266（动态虫洞）**：`rivermemo_wormhole.rs` +299，叠加切片 266 已有内容。
+
+## 未证实部分
+- 不断言 NNLS 在记忆管线中的具体调用位置（本轮只核验了模块自身与 `9a9031de` 的双扫描优化）。
+- 不断言性能提升幅度（提交标题未给基准数据）。
+
+关联节点：rust-vexus-lite记忆管线Rust下沉(209)、Memo双场投影预算与请求级向量复用(265)、Memo请求级动态虫洞(266)
+Tag: rust-vexus-lite, memo_nnls, NNLS, 非负最小二乘, nalgebra, KKT, dual_violation, stationarity_error, complementarity_error, energy_closure_error, 性能批量, 跳过扫描, 缓存范数, 复用缓冲, 借用BLOB, 截断标记, 文档自纠, 第30次上游合并, 719b8ff1
