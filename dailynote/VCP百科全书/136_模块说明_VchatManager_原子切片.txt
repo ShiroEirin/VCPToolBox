@@ -81,4 +81,9 @@ VchatManager是VCPChat的管理器模块，提供Agent和Group的集中管理界
 3. 支持选择性修复
 4. 提供详细的检查报告
 
-Tag: VChat管理, Agent管理, Group管理, 一致性检查, 聊天历史, JSON编辑, TagMemo V9.1
+九、2026-11-19 第31次上游合并：话题顺序与全量侧栏（7826d96b / ec479ae8）
+
+1. `7826d96b`：话题列表可调整顺序并保存到 `topics` 数组，`script.js` +134、`style.css` +29、`tests/vchatmanager-topic-array.test.js` +57。
+2. `ec479ae8`：侧栏列出全部 Agent 和群组，话题按 `topics` 数组顺序显示；一致性检查跳过辅助对话目录，恢复的话题带上主程序话题字段；测试再 +96。
+
+Tag: VChat管理, Agent管理, Group管理, 一致性检查, 聊天历史, JSON编辑, TagMemo V9.1, 话题顺序, topics数组, 第31次上游合并

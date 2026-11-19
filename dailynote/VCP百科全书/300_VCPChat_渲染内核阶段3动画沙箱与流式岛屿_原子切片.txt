@@ -50,4 +50,10 @@ Chat 的消息渲染正在从「一次性 innerHTML + 全局重绘」重构为**
 - 不断言「岛屿」的具体边界判定规则（推测与 `streamIslandGate` 的 gate 条件相关）。
 
 关联节点：渲染协议扫描与工具卡片架构重构(264)、统一聊天上下文组装器chatContextPipeline(282)、ProjectForge Rust服务迁移(299)
-Tag: 渲染内核, 阶段3, renderTemplateCompiler, streamIslandGate, strictAnimationIsland, animationMountController, offscreenDomWindow, renderWorker, vcpDocumentScanner, vcpParseContext, mathRenderer, katex多线程, 岛屿渲染, 沙箱, 流式动画回归, 推倒重建, 第30次上游合并, 026a9af9
+## 2026-11-19 v5.2 迭代（76b57049）
+
+- `messageRenderer.js` 227 行大段替换、`streamManager.js` 148 行，配 `message-renderer-animation-island`（94 行）与 `stream-manager-terminal-cleanup`（95 行）两个测试。
+- 边界规则收敛到新模块：`markdownPolicy.js`（62 行，`bareLinkEnd` 处理全角标点与 CJK 主机名）、`proseLinks.js`（64 行，HTML 正文裸链复用同一规则）、`contentPipeline.js`（+50，显式 `full-render` / `stream-fast` 与「保护→结构修正→恢复」顺序）。
+- 详见切片 307。
+
+Tag: 渲染内核, 阶段3, renderTemplateCompiler, streamIslandGate, strictAnimationIsland, animationMountController, offscreenDomWindow, renderWorker, vcpDocumentScanner, vcpParseContext, mathRenderer, katex多线程, 岛屿渲染, 沙箱, 流式动画回归, 推倒重建, 026a9af9, v5.2, markdownPolicy, proseLinks, contentPipeline, 第31次上游合并

@@ -160,4 +160,11 @@ Tag: rust-vexus-lite, memo_sensing, memo_pipeline, memo_dtsc, rivermemo_topology
 - 大幅改动文件：`memo_pipeline.rs`(+328) / `rivermemo_wormhole.rs`(+299) / `rivermemo_topology_v3.rs`(224) / `memo_geometry.rs`(+193) / `light_memo.rs`(+152) / `memo_sensing.rs`(+122) / `ingestion.rs`(+102)。
 - 编译产物 `719b8ff1` 同步更新。
 - 详见切片 295。
-Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, 第24次上游合并, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容, 第25次上游合并, memo_projection, 双场投影, 动态虫洞, README, 探针脚本, 第26次上游合并, native_rerank, memo_workspace, 确定性求和, float_roundtrip, 稀疏排除, 性能优化
+十五、2026-11-19 第31次上游合并：双曲场增量转化与局部残差复用
+
+- **双曲场增量转化（20719293 / 65946a5f / a355429f）**：全局 Chunk 双曲场改为「冻结代际 + 转化尾部」。索引分两段：`[0, trained_len())` 训练图节点（CSR 偏移界定），其后为转化尾部；超过 32 条增量才触发转化，一次最多取标识最小的 1024 条。尾部单独落 `.vcpwi`（魔数 `VCPWI001`，3072 维每条约 0.8 KB，上限 512 MiB），`snapshot_bytes` 只写训练图，训练代索引载荷逐字节不变。
+- **局部残差增量复用（f519147e / 9d0273d9 / ce585c0b）**：`memo_geometry.rs` +291/−104、新增 `memo_local_reuse.rs` 88 行、新增 `memo_local_reuse_tests.rs` 189 行；append-only 窗口内未受影响 Tag 复用结果，前提是「已发布输入」被记录（`schema.rs` +12）。
+- **编译产物**：`e22aeded`「更新编译产物」、`1190647c` 同步。
+- 详见切片 303、305、306。
+
+Tag: rust-vexus-lite, Rust下沉, memo_sensing, memo_pipeline, rivermemo_topology_v3, rayon, Windows FlushFileBuffers, normalized_sqlite_path, vcp-tdb-index, QuIVer, TriviumDB, 单SQL运行时, 4096维度兼容, memo_projection, 双场投影, 动态虫洞, README, 探针脚本, native_rerank, memo_workspace, 确定性求和, float_roundtrip, 稀疏排除, 性能优化, 双曲场增量转化, memo_local_reuse, vcpwi, 转化尾部, 第31次上游合并

@@ -1,0 +1,57 @@
+[2026-11-19] - 哈雷酱
+# WarpedFieldAtlas 双曲场图：后端只读插件 + 前端两视图
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-19（第31次上游合并：f4fb3b3b / 29765567，上游 77220614 / e9615e74）
+适用范围：`VCPToolBox/Plugin/WarpedFieldAtlas`（后端数据）、`VCPChat/modules/warpedFieldAtlas`（前端）
+事实来源：
+- `VCPChat/modules/warpedFieldAtlas/feature.json`（全文）
+- `VCPChat/modules/warpedFieldAtlas/renderer/atlas-app.js` **1,975 行**（头部注释与常量）
+- `VCPChat/modules/warpedFieldAtlas/renderer/metric-slice.mjs` 37 行、`index.js` 27 行、`preloadApi.js` 17 行、`window.js` 36 行、`window.html` 28 行
+- 后端插件 PR #618：`ad8bb70e`「feat(WarpedFieldAtlas): 双曲场图的只读数据插件」、`ec435c0e`（合并）
+- 前端 PR #344 `2b712eb4`；后续 `6ae034c6` #345 边收细、`078e9977` 弱线淡化、`f8043a37` 两端平滑收细、`0711a40b` 悬停标名并从侧栏定位共现来源
+
+## 一、模块身份
+
+`feature.json` 实测字段：
+
+```text
+manifestVersion 1.0.0 / name WarpedFieldAtlas / displayName 双曲场图 / version 0.1.0
+pluginType feature / main index.js / renderer modules/warpedFieldAtlas/renderer/index.js
+tests [tests/warped-field-atlas.test.mjs] / defaultEnabled true
+```
+
+自述定位：把知识库里 RiverMemo V5 的双曲场画出来；全景图看每个 Tag、每个日记片段落在哪一圈，查询视图看一条查询最近的是谁、半径改变了哪些名次。数据由后端插件提供，**只读**，在右栏「应用」里打开。
+
+## 二、两个视图的坐标语义
+
+| 视图 | 横轴 | 纵轴 | 说明 |
+| --- | --- | --- | --- |
+| 全景 panorama | 沿圆周按近邻排布的**角度** | 训练快照里的**实际半径** | 角度差不代表距离 |
+| 查询 query | 与查询方向的**夹角** | 节点**半径** | 同一条虚线上的点到查询等距 |
+
+代码内说明常量原文：`半径取自训练快照；沿圆周按近邻排布，角度差不代表距离。` / `横轴是与查询方向的夹角，纵轴是节点半径；同一条虚线上的点到查询等距。`
+
+## 三、交互与常量
+
+- 交互：滚轮缩放、拖动平移、点选节点；说明与详情在右侧栏，**不做悬停提示**。
+- `FOCUS_SHARE = 0.7`：展开的话题团占整圈比例；`MOTION_MS = 220`：展开/收起动画时长；`MINI = 172`：缩略图边长；`NEAR = 10`：指针命中像素半径。
+- 节点标志位：`FLAG_ENTRY = 1` / `FLAG_DIRECTION = 2` / `FLAG_SHELL = 4`。
+- 场类型：`tag` 与 `chunk`；画面题签 `PLATE I/II/III` 分别对应 Tag 场、Chunk 场、查询。
+- `focusMap(group, count)` 导出：把某一团拉宽到占整圈的 0.7，其余按同比例压窄，正上方接缝不动，环上先后次序不变。
+
+## 四、前后端分工
+
+后端插件只提供只读数据；前端 `mountAtlas(container, source)` 挂载界面，`source.get(route)` 取数据——Chat 内经主进程转到后端插件，命令行预览时直接请求本机服务。
+
+## 五、测试面
+
+`tests/warped-field-atlas.test.mjs` 99 行、`tests/warped-field-metric-slice.test.mjs` 32 行。
+
+## 未证实部分
+
+- 未逐行读 1,975 行 `atlas-app.js`；交互细节以头部注释与导出函数为准。
+- 后端插件的 manifest 命令面未纳入本切片。
+
+关联节点：双曲场全局Chunk索引与增量转化器(303)、RiverMemo拓扑V3理论(210)、rust-vexus-lite记忆管线Rust下沉(209)
+Tag: WarpedFieldAtlas, 双曲场图, 全景视图, 查询视图, 等距线, focusMap, FOCUS_SHARE, 只读插件, feature, 右栏应用, 第31次上游合并, PR618, PR344, PR345

@@ -1,0 +1,65 @@
+[2026-11-19] - 哈雷酱
+# RiverMemo V5.2 生产内核换轨与 V5.1 母锚系绳实验结论
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-19（第31次上游合并：f4fb3b3b，上游 77220614）
+适用范围：`rust-vexus-lite` 双曲路由与上层 JS 接线；`docs/双曲Vexus合龙交付说明.md` 第 11–16 节
+事实来源：
+- 提交 `dabd0a45`「核心生产内核换轨」（`KnowledgeBaseManager.js` +161、`Plugin/LightMemo/LightMemo.js`、`nativeQuery.js`、`plugin-manifest.json`、`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js`、`RAGResultFormatter.js`、`RiverMemoEngine.js`）
+- 提交 `a76f02b3`「清理试验场」、`4b70327e`「更新文档」、`fb699d11`「更新试验记录1」、`e17aec46` #614（research/rivermemo-v5.2）
+- `docs/双曲Vexus合龙交付说明.md` 第 13–16 节
+- `docs/RIVERMEMO_V51_PARENT_TETHER_EXPERIMENT.md`（2026-11-17，本轮新增）
+
+## 一、换轨落点
+
+`dabd0a45` 把双曲路由接进生产链：知识库管理、LightMemo、RAGDiary 三处同时改，`RiverMemoEngine.js` 仅 3 行——说明换轨发生在**下层原生路由选择**，不是上层算法重写。
+
+同批删除 7 篇双曲阶段预注册与工作报告（`双曲Phase4B预注册.md` −42、`4C` −63、`4D` −41、`5D` −39、`双曲Phase5工作报告.md` −261、`双曲Phase5预注册.md` −74 等），实验场随之清空。
+
+## 二、生产配置面（交付说明原文）
+
+全局默认仍是余弦；只有显式指定双曲路由才加载或构建双曲场。
+
+| 字段 | 可用值 | 默认 |
+| --- | --- | --- |
+| `tagRoutingMode` | `cosine` / `warped_ags` | `cosine` |
+| `warpedPreset` | `locked_2` / `locked_0` | `locked_2` |
+| `warpedRadiusStrategy` | `epa_guided` / `layer_schedule` | `epa_guided` |
+
+生产预设统一为：软化系数 **0.15**、喉部 **1.5**、角尺度 **2.0**、节点半径 **0.35–0.65**、自适应罗盘开启；默认预设均值减除系数 **0.7**，另一个 AB 预设为 **1.0**。
+
+最简配置：`[{"config":{"tagRoutingMode":"warped_ags"}}]`；显式生产配置：`[{"config":{"tagRoutingMode":"warped_ags","warpedPreset":"locked_2","warpedRadiusStrategy":"epa_guided"}}]`。
+
+## 三、第 15 节的交付边界
+
+RAGDiary 与 LightMemo 的生产默认走 V5；双曲 ANN 作为兜底；旧轨 AB 保持隔离。第 16 节记录实验模块清理、最终验证与最新模块身份。
+
+## 四、V5.1 母锚系绳：已测，不采用
+
+实验规模：**64 文件八组母锚探针消融**。结论逐字：
+
+> 小角度母锚系绳能够改变候选，少数查询因此跨过层准入门槛，但没有获得稳定的整体收益。重点验证的「导航抬升、残差精排」没有净增接受层；它也不能在精排阶段排除与残差同向的异域词。0.66 大系绳明显损害残差解释。
+
+**不替换现役 V5，不保留生产实验开关。** 文档明确写出保留目的：避免以后把同一公式、同一参数矩阵当成尚未验证的新方案重复施工。
+
+被测算子（LaTeX 原文）：
+
+```text
+p_<ℓ = q − r_ℓ,   p̂ = p_<ℓ / ‖p_<ℓ‖,   r̂ = r_ℓ / ‖r_ℓ‖
+u_⊥ = (r̂ − ⟨r̂, p̂⟩ p̂) / ‖r̂ − ⟨r̂, p̂⟩ p̂‖
+q̃_ℓ = τ p̂ + sqrt(1 − τ²) u_⊥
+```
+
+即先把残差方向对母锚做 FP64 正交消元，再构造单位导航探针。
+
+## 五、为什么这条要单独记
+
+负结果同样是证据。`0.66 大系绳损害残差解释` 这条边界，比多一篇「又优化了」的记录更能阻止后续重复施工。
+
+## 未证实部分
+
+- 未逐行核对 `dabd0a45` 的 161 行 `KnowledgeBaseManager.js` 改动。
+- 八组消融的逐组数据未在本切片复述，原始数值见文档。
+
+关联节点：RiverMemo拓扑V3理论(210)、rust-vexus-lite记忆管线Rust下沉(209)、双曲场全局Chunk索引与增量转化器(303)
+Tag: RiverMemo, V5.2, 内核换轨, warped_ags, locked_2, epa_guided, 双曲ANN兜底, 母锚系绳, parent tether, 正交消元, 负结果, 第31次上游合并, dabd0a45, PR614

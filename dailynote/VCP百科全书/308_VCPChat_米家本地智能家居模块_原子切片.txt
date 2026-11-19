@@ -1,0 +1,50 @@
+[2026-11-19] - 哈雷酱
+# 米家（Mijia）本地智能家居模块
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-19（第31次上游合并：29765567，上游 e9615e74）
+适用范围：`VCPChat/Mijiamodules/`、`modules/ipc/mijiaHandlers.js`、`preloads/api/mijia.js`
+事实来源：
+- 提交 `4d2614c6`「新增米家」；`e5a1c24f` / `f508833d`「更新地图」；`e9615e74`「fix」
+- `Mijiamodules/capabilities.json`（全文）
+- `modules/ipc/mijiaHandlers.js` **210 行**（头部实现）
+- 文件实测：`device-controls.js` 199、`panel.js` 204、`mijia.css` 274、`mijia_bridge.py` 230、`device-art.js` 26、`window.js` 37、`mijia.html` 23、`capabilities.json` 22
+- 配套：`preloads/api/mijia.js` 16、`docs/mijia-local-app.md` 28、`tests/mijia-local-app.test.js` **234 行**、`main.html` +1
+
+## 一、模块形态
+
+不是 VCP 插件，而是 VCPChat 内的**本地应用**：`Mijiamodules/` 提供界面与设备图元，`modules/ipc/mijiaHandlers.js` 在主进程注册 IPC，`Mijiamodules/mijia_bridge.py` 是与设备通信的 Python 桥。
+
+## 二、能力表是数据不是代码
+
+`capabilities.json` 以设备型号为键，逐属性给出 `siid` / `piid` / 类型 / 单位 / 范围 / 提交方式。实测两条：
+
+| 型号 | 属性示例 |
+| --- | --- |
+| `yeelink.light.lamp2` | `power`（siid 2 / piid 1 / boolean / `commit: immediate`）、`brightness`（siid 2 / piid 2 / 1–100% / step 1 / `apply`）、`colorTemperature`（siid 2 / piid 3 / 2500–4800K / `apply`） |
+| `midjd6.fridge.610` | 冷藏/冷冻当前与设定温度（siid 3/4）、`mode`（siid 2 / piid 2，枚举：无特殊模式/智能/假日/速冷/速冻）、`doorState`（siid 5 / piid 2，枚举：未报告开门/左门开/右门开/双门开）、`fault`（siid 2 / piid 1） |
+
+`commit: immediate` 与 `apply` 的区别写在数据里，界面据此决定是否等用户确认——新增设备只需加 JSON，不改控件代码。
+
+## 三、主进程侧的四道约束
+
+`mijiaHandlers.js` 头部实测：
+
+1. **发送方白名单**：`isAllowedSender` 要求 `file:` 协议、主帧、且相对路径只能是 `main.html` 或 `Mijiamodules/mijia.html`；否则拒收。
+2. **输出上限**：`MAX_OUTPUT = 4 * 1024 * 1024`（4 MB）。
+3. **登录超时**：`LOGIN_TIMEOUT = 90_000`（90 秒）。
+4. **设备级串行**：`deviceQueues` 为每个设备维护队列，`queuedOperations` 计数——同一设备的操作不并发，跨设备可并行。
+
+桥进程经 `spawn` 启动，用 `readline` 按行读响应；打包场景下 `app.getAppPath()` 以 `.asar` 结尾时改用 `${root}.unpacked`，保证 Python 脚本能被外部解释器读到。
+
+## 四、测试
+
+`tests/mijia-local-app.test.js` **234 行**，是本轮 Chat 侧单个新功能里测试体量最大的一项。
+
+## 未证实部分
+
+- 未读 `mijia_bridge.py` 230 行，具体米家云协议（OAuth 流程、设备发现接口）未在切片中断言。
+- 未核对 `device-art.js` 的图元来源（自绘还是官方素材）。
+
+关联节点：VCPChat前端架构与渲染体系(162)、VchatManager模块说明(136)
+Tag: 米家, Mijia, 智能家居, capabilities.json, siid, piid, yeelink.light.lamp2, 冰箱, doorState, mijiaHandlers, deviceQueues, asar unpacked, 本地应用, 第31次上游合并, 4d2614c6

@@ -159,4 +159,12 @@ JS：整个上下文查询向量
 - 详见切片 265（双场投影预算与请求级向量复用）、266（请求级动态虫洞）。
 
 关联节点：RiverMemoEngine与TopologyV3(207), TagMemoV10Engine完整架构(208), rust-vexus-lite记忆管线(209), TagMemoEngine统一构型(198), TagMemo浪潮算法V5(143), Memo双场投影预算(265), Memo请求级动态虫洞(266)
-Tag: RiverMemo, topology-v3, Ω泛函, 双场语义基线, 关系拓扑创新, 直接锚点创新, 查询河网形态, Softmax, Atomic, Propositional, Narrative, 连续图读出, 三评分头, compute_query_morphology, DSTC, SmoothStep, 正部投影, TagMemo V9.1, 2026-08-04, 第25次上游合并, 种子流域, 双场投影预算, 动态虫洞, maxProjectionNodes
+七、2026-11-19 第31次上游合并：V5.2 生产换轨与 V5.1 实验结论
+
+- `docs/RIVERMEMO_TOPOLOGY_V3.md` 本轮被修改（M），配合 `dabd0a45`「核心生产内核换轨」。
+- 生产默认仍是余弦；只有显式 `tagRoutingMode: warped_ags` 才加载或构建双曲场。生产预设：软化 0.15、喉部 1.5、角尺度 2.0、节点半径 0.35–0.65、自适应罗盘开启、均值减除 0.7（AB 预设 1.0）。
+- 第 15 节确立 RAGDiary／LightMemo 生产默认 V5、双曲 ANN 兜底、旧轨 AB 隔离；第 16 节记录实验模块清理与最新模块身份。
+- **V5.1 母锚系绳已测不采用**：64 文件八组消融；小系绳收益不稳定，0.66 大系绳明显损害残差解释；不保留生产开关。
+- 详见切片 305。
+
+Tag: RiverMemo, topology-v3, Ω泛函, 双场语义基线, 关系拓扑创新, 直接锚点创新, 查询河网形态, Softmax, Atomic, Propositional, Narrative, 连续图读出, 三评分头, compute_query_morphology, DSTC, SmoothStep, 正部投影, TagMemo V9.1, 种子流域, 双场投影预算, 动态虫洞, maxProjectionNodes, V5.2, warped_ags, 母锚系绳, 第31次上游合并

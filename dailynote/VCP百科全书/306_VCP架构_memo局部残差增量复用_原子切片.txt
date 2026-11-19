@@ -1,0 +1,44 @@
+[2026-11-19] - 哈雷酱
+# memo 局部残差增量复用：append-only 窗口内只算受影响的 Tag
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-19（第31次上游合并：f4fb3b3b，上游 77220614）
+适用范围：`rust-vexus-lite/src/memo_geometry.rs` / `memo_local_reuse.rs` / `schema.rs` / `TagMemoEngine.js`
+事实来源：
+- `f519147e`「reuse local residuals of unaffected Tags in append-only windows」：`memo_geometry.rs` **+291/−104**、新增 `memo_local_reuse.rs` **88 行**、`memo_nnls.rs` 2 行
+- `9d0273d9`「record the published inputs that local residual reuse depends on」：`memo_geometry.rs` +14、`memo_local_reuse.rs` +40、`schema.rs` +12
+- `ce585c0b`「enable append-only reuse for threshold training, with tests」：`TagMemoEngine.js` 7 行、`memo_artifact_builder.rs` +4、新增 `memo_local_reuse_tests.rs` **189 行**、`tests/unifiedGeometryScheduling.test.js` 14 行、`docs/Tag双曲场训练换代施工图.md` 14 行
+
+## 一、省掉的是哪一步
+
+局部残差（每个 Tag 在邻居锥上的解释残差）原本在每次几何刷新时全量重算。当本轮变更只是**追加**——新增日记、新增 Tag，已有 Tag 的邻居集合没有被改动——这些未受影响的 Tag 的局部残差结果与上次完全一致，可以复用。
+
+复用的前提是**追加窗口**（append-only）：只要窗口内没有删除、没有向量版本变化、没有一致性修复，未受影响 Tag 的输入集合就不变。
+
+## 二、可复用的前提被显式记录
+
+`9d0273d9` 把复用依赖的**已发布输入**写进存储：没有这份记录，就无法在下次启动时判断「上次的结果还能不能用」。`schema.rs` 的 +12 行对应这次的持久化面。
+
+这一条是整个改动的安全性来源：复用的不是「上一次的结果」，而是「输入身份相同」这一事实。
+
+## 三、测试面
+
+`memo_local_reuse_tests.rs` **189 行**独立测试文件，另在 `tests/unifiedGeometryScheduling.test.js` 增加 14 行调度侧断言。测试文件与实现文件分开，说明复用逻辑被当作可独立验证的单元，而不是散落在几何主流程里。
+
+## 四、与阈值训练的关系
+
+`ce585c0b` 标题写明 append-only 复用对**阈值训练**同样启用。阈值训练此前被当作必须全量重算的路径，这次把它纳入复用范围。
+
+## 五、边界
+
+- 只覆盖 append-only 窗口内**未受影响**的 Tag；受影响者仍按原路径重算。
+- 复用依赖已发布输入的记录；记录与几何产物同时失效（沿用既有代际机制）。
+- 本切片不含性能数字——提交未给出耗时对比。
+
+## 未证实部分
+
+- 未逐行读 `memo_local_reuse.rs` 的 88 行实现与 40 行增补，也未读 189 行测试的断言细节。
+- 「未受影响」的判定条件（邻居集合比对 vs 边权变更）未在提交标题中给出，本切片不作推断。
+
+关联节点：rust-vexus-lite记忆管线Rust下沉(209)、双曲场全局Chunk索引与增量转化器(303)、RiverMemoV5-2内核换轨(305)
+Tag: memo, 局部残差, 增量复用, append-only, memo_local_reuse, memo_geometry, 已发布输入, schema, 阈值训练, 189行测试, 第31次上游合并, f519147e, 9d0273d9, ce585c0b

@@ -1,0 +1,57 @@
+[2026-11-19] - 哈雷酱
+# ProjectForge MCP Bridge：本地 stdio 桥，不经过 VCP 后端
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-19（第31次上游合并：29765567，上游 e9615e74）
+适用范围：`VCPChat/VCPDistributedServer/Plugin/ProjectForge/mcpbridge/`
+事实来源：
+- `mcpbridge/README.md`（前 40 行，含范围与状态声明）
+- 文件实测：`bridge.cjs` 119、`bridge.test.cjs` 102、`search.cjs` 244、`search.test.cjs` 237、`server.cjs` 55、`tools.cjs` 190、`config.example.json` 9、`package.json` 13、`package-lock.json` 1,227 行
+- `tools.cjs` 工具名生成规则（实测代码行）
+
+## 一、它解决的问题
+
+让 Zed 之类的 MCP 客户端直接调用 ProjectForge 能力，而不必先启动 VCP 后端或 GUI。README 原文：
+
+> 桥通过本地 stdio 提供 MCP，直接加载上一级 `ProjectForgeService.js`，复用工程管理、原生索引、文件编辑、快照和历史能力。它不经过 VCP 后端、不要求启动 VCPDistributedServer 或 GUI，也不使用 VCP 工具调用封装。桥只负责协议、配置、工具名 / 参数适配、能力开关和结果转换，不复制一套业务实现。
+
+调用链：
+
+```text
+Zed / 其他 MCP 客户端
+  → node mcpbridge/server.cjs --config /absolute/path/config.json
+  → ProjectForgeService.js
+  → 原生 projectforge_indexer 服务 + 桥独立数据库
+```
+
+## 二、工具名是派生的
+
+`tools.cjs` 实测规则：
+
+```js
+name: `pf_${command.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()}`
+```
+
+即工具名由 command 的驼峰转下划线并加 `pf_` 前缀，**不手写工具名表**——上游命令面变化时工具名自动跟随。另有独立 `pf_search`，直接经相邻的 `CodeSearcher.js` 启动平台对应的 Rust 搜索二进制，同样不经过 VCP 后端。
+
+参数校验走 ajv（README 依赖声明），`tools.cjs` 内可见 `nonempty` / `text` / `list` / `boolean` 等 schema 片段。stdio 的 stdout 只用于 MCP 协议消息，日志写 stderr。
+
+## 三、依赖与状态（原文边界）
+
+- 需要 **Node.js 22 或更高**。
+- 不是可随意复制的独立发行包：依赖宿主 VCPChat 的模块、`node_modules` 与匹配当前源码/平台的原生索引器。
+- 构建顺序：`npm run build:pf-indexer` → `npm --prefix VCPDistributedServer/Plugin/ProjectForge/mcpbridge install` → `npm --prefix ... test`。
+- **已通过 SDK 客户端与真实原生服务的集成测试；Zed 图形界面的连接与提示词加载仍需在客户端验证。**
+- 保留手动创建工程的流程，不新增自动工程或 `--workspace-root` 模式。
+
+## 四、为什么值得单独记
+
+这是 ProjectForge 第一次对外提供**不依赖 VCP 宿主**的入口。此前它的能力面要么走 VCP 插件调用，要么走 Chat 前端；MCP 桥把同一套服务暴露给外部编辑器，而实现上只做协议适配——这条边界如果守住，后续换客户端不需要改业务层。
+
+## 未证实部分
+
+- 未读 `bridge.cjs` 119 行与 `search.cjs` 244 行，能力开关的具体清单未断言。
+- `pf_search` 的平台二进制映射表未核对。
+
+关联节点：ProjectForge项目锻造台RustAST索引与链接图(248)、ProjectForgeRust服务迁移与阶段3渲染内核(299)
+Tag: ProjectForge, MCP, mcpbridge, stdio, ProjectForgeService, pf_search, CodeSearcher, ajv, Node22, Zed, 协议适配, 不经过VCP后端, 第31次上游合并

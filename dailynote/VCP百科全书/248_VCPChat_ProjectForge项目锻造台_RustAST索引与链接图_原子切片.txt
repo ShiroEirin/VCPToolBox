@@ -87,3 +87,12 @@ Tag: ProjectForge, 项目锻造台, AST, tree-sitter, Rust索引器, symbols.rs,
 - **新增 GUI 回退单文件能力**：`VCPDistributedServer/Plugin/ProjectForge/gui-revert-file.js`（本轮新增）——即 GUI 侧可对**单个文件**执行回退，此前命令面只有 batch/toNode 粒度。
 - **API 配置面**：新增 `preloads/api/projectForge.js` 与 `modules/ipc/projectForgeHandlers.js` 已在上次收录；本轮无接口面破坏性变更。
 - 未逐行核对：宏 FFI 误报的判定条件（宏名白名单 vs AST 节点类型判定）与 gui-revert-file.js 与命令面 Rollback 的参数映射关系。
+
+## 2026-11-19 第31次上游合并：MCP 桥（mcpbridge/）
+
+- 新增目录 `VCPDistributedServer/Plugin/ProjectForge/mcpbridge/`：`server.cjs` 55、`bridge.cjs` 119、`tools.cjs` 190、`search.cjs` 244，配 `bridge.test.cjs` 102 与 `search.test.cjs` 237。
+- 直接加载上一级 `ProjectForgeService.js`，不经过 VCP 后端、不要求启动 VCPDistributedServer 或 GUI；工具名由 `pf_<command 驼峰转下划线>` 自动派生，另有 `pf_search` 经 `CodeSearcher.js` 启动平台 Rust 二进制。
+- 状态原文：已通过 SDK 客户端与真实原生服务集成测试；Zed 图形界面的连接与提示词加载仍需在客户端验证。
+- 详见切片 309。
+
+Tag: ProjectForge, 项目锻造台, AST, tree-sitter, Rust索引器, symbols.rs, facts微内核, 链接图, linkGraph, 符号解析, sourceService, gitService, workspaceIndex, BladeGame, Electron, V文坊, mcpbridge, MCP, stdio, pf_search, 第31次上游合并

@@ -1,0 +1,51 @@
+[2026-11-19] - 哈雷酱
+# VCPChat 流式渲染器 v5.2：Markdown 策略抽离与裸链规则统一
+
+状态：CURRENT_VERIFIED
+最后核验：2026-11-19（第31次上游合并：29765567，上游 e9615e74）
+适用范围：`modules/renderer/` 与 `modules/messageRenderer.js`、`modules/renderer/streamManager.js`
+事实来源：
+- 提交 `76b57049`「流式渲染器迭代 v5.2更新」：`messageRenderer.js` **227 行**（大段替换）、`streamManager.js` **148 行**、`streamTransientHistory.js` +10、`contentProcessor.js` 8 行、新增 `tests/message-renderer-animation-island.test.mjs` **94 行**、`tests/stream-manager-terminal-cleanup.test.js` **95 行**
+- 新增 `modules/renderer/markdownPolicy.js` **62 行**、`modules/renderer/proseLinks.js` **64 行**、`modules/renderer/contentPipeline.js` +50、`modules/renderer/unsavedReplyRecovery.js` **99 行**（+ `tests/unsaved-reply-recovery.test.mjs` 39 行）
+- 渲染修复系列：`2e51167f` 粗体配对、`187fbed5` 中文标点断链、`bcf4b9f5` 正文 svg 空行、`eb712cd5` HTML 卡片可点网址、`48613bc8` mermaid 焦点滚轮、`deb1d41e` 滚动跟随
+
+## 一、把「规则」从渲染器里抽出来
+
+`markdownPolicy.js` 头部两句就是契约：
+
+```text
+// Keep Markdown source byte-for-byte intact: a single tilde is ordinary text.
+// A bare link in Chinese text ends where the sentence punctuation starts.
+```
+
+导出 `bareLinkEnd(raw)`：`LINK_STOP` 命中全角标点、弯引号、省略号、破折号即结束；主机名内出现 CJK 字符时在该字符处截断，但**路径里的中文保留**（`zh.wikipedia.org/wiki/中文`）。
+
+`applyMarkdownPolicy(parser)` 只改两个 tokenizer：`del` 仅在 `~~` 开头时交给 Marked 处理（单个波浪线保持普通文本），`url` 只移动裸链的**结束位置**，起点判定仍用 Marked 原规则。
+
+## 二、HTML 正文里的裸链也走同一套规则
+
+`proseLinks.js` 的动机写在头部：原始 HTML 块绕过 Markdown 的 autolink 规则，`<p>主页：https://example.com</p>` 会一直是纯文本。它复用 `bareLinkEnd`，并配 `SKIP` 选择器列表跳过 `a / pre / code / button / script / style / textarea / input / select / option / svg / math / .katex / [contenteditable]` 与三类工具气泡。
+
+`trimTrailing(url)`：去尾部 `.,;:!?*_~`，遇到 `)` 时按括号配平决定是否去掉。点击仍交给聊天列表上既有的委托处理。
+
+## 三、内容管线显式化顺序
+
+`contentPipeline.js` 头部自述三条目标：显式化顺序协议、区分 `full-render` 与 `stream-fast` 两种模式、让「保护 → 结构修正 → 恢复」成为固定流程。它不重写既有处理器，只做集中调度，业务细节通过依赖注入提供。
+
+其中一个具体约束：OpenHerPersona 回填注释不能「从开标记删到文末」——VCP 工具循环会把后续内容追加进同一条消息，贪婪剥离会吞掉工具调用块。实现用与插件服务端同款的字符串感知括号配平扫描。
+
+## 四、未保存回复与终端清理
+
+`unsavedReplyRecovery.js`（99 行）处理配置替换时主聊未保存回复的短暂缺失；`streamManager.js` 的 148 行改动对应 `stream-manager-terminal-cleanup` 测试（95 行），即流结束时终端状态的清理。
+
+## 五、这批修复的共同点
+
+粗体配对、中文标点断链、svg 空行、HTML 卡片网址、mermaid 滚轮、滚动跟随——六个问题都发生在「Markdown 与 HTML 混合、中文与标点混排」的边界上。v5.2 的处理方式是把边界规则收敛到 `markdownPolicy` 一处，而不是在每个渲染分支里各打补丁。
+
+## 未证实部分
+
+- 未逐行读 `messageRenderer.js` 的 227 行替换内容，也未读 `streamManager.js` 的 148 行。
+- 未断言 `stream-fast` 与 `full-render` 的具体差异项。
+
+关联节点：渲染内核阶段3动画沙箱与流式岛屿(300)、渲染协议扫描与工具卡片架构重构(264)、渲染管线HTML规范化与二重DOM竞态防护(232)
+Tag: 流式渲染器, v5.2, markdownPolicy, bareLinkEnd, proseLinks, contentPipeline, full-render, stream-fast, 裸链, 中文标点, 粗体配对, mermaid, unsavedReplyRecovery, 第31次上游合并, 76b57049
