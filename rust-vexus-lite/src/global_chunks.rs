@@ -5,7 +5,12 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use vcp_tdb_index::index::quiver::corrected_sm::CorrectedSmIndex;
+use vcp_tdb_index::index::quiver::corrected_sm::{
+    CorrectedSmIndex, FlatSearchConfig, FlatSearchStats,
+};
+
+#[path = "warped_chunks.rs"]
+mod warped_chunks;
 
 const MAGIC: &[u8; 8] = b"VCPGCH01";
 
@@ -34,10 +39,15 @@ struct Snapshot {
 pub(crate) struct GlobalChunks {
     pub rows: HashMap<i64, ChunkHeader>,
     routing: CorrectedSmIndex,
+    legacy_enabled: bool,
+    warped: Option<warped_chunks::WarpedChunks>,
     dimension: usize,
     model: String,
     facts: String,
     pub last_used: Instant,
+    // Only production scope metadata is cold-loaded. Global membership and
+    // trained geometry remain independent of this request working set.
+    hot_partitions: HashSet<String>,
 }
 
 fn facts(connection: &Connection) -> Result<String, String> {
@@ -65,9 +75,43 @@ impl GlobalChunks {
         Ok(Self {
             rows: HashMap::new(),
             routing: CorrectedSmIndex::empty_flat(dimension).map_err(|e| e.to_string())?,
+            legacy_enabled: true,
+            warped: None,
             dimension, model: model.into(), facts: String::new(),
             last_used: Instant::now(),
+            hot_partitions: HashSet::new(),
         })
+    }
+
+    /// Production keeps only live membership; the old quantized payload is AB-only.
+    pub fn production(dimension: usize, model: &str) -> Result<Self, String> {
+        let mut table = Self::empty(dimension, model)?;
+        table.legacy_enabled = false;
+        Ok(table)
+    }
+
+    pub fn legacy_resident(&self) -> bool { self.legacy_enabled }
+
+    pub fn disable_legacy(&mut self) -> Result<(), String> {
+        if self.legacy_enabled {
+            self.routing = CorrectedSmIndex::empty_flat(self.dimension).map_err(|e| e.to_string())?;
+            self.legacy_enabled = false;
+            self.hot_partitions.clear();
+            for row in self.rows.values_mut() {
+                row.first_line = String::new();
+                row.date = 0;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn enable_legacy(&mut self, connection: &Connection, directory: &Path) -> Result<(), String> {
+        if !self.legacy_enabled {
+            let mut replacement = Self::load(connection, directory, self.dimension, &self.model)?;
+            replacement.warped = self.warped.take();
+            *self = replacement;
+        }
+        Ok(())
     }
 
     pub fn matches_model(&self, dimension: usize, model: &str) -> bool {
@@ -79,6 +123,8 @@ impl GlobalChunks {
             && self.routing.len() > self.rows.len().saturating_mul(5) / 4 {
             let mut replacement = Self::empty(self.dimension, &self.model)?;
             replacement.synchronize(connection)?;
+            // Routing compaction is not a mathematical training boundary.
+            replacement.warped = self.warped.take();
             *self = replacement;
         }
         Ok(())
@@ -89,6 +135,8 @@ impl GlobalChunks {
         self.last_used = Instant::now();
         let current = facts(connection)?;
         if current == self.facts { return Ok(0); }
+        // Keep the trained geometry. Live membership/vector deltas are handled
+        // in its frozen coordinates; only explicit training replaces the field.
         let mut statement = connection.prepare(
             "SELECT c.id,c.vector_version,c.metadata_version,f.metadata_version
              FROM chunks c JOIN files f ON f.id=c.file_id WHERE c.vector IS NOT NULL"
@@ -130,16 +178,21 @@ impl GlobalChunks {
                     continue;
                 }
                 let slot = self.routing.len();
-                self.routing.push_flat_vector(&values, id as u64).map_err(|e| e.to_string())?;
+                if self.legacy_enabled {
+                    self.routing.push_flat_vector(&values, id as u64).map_err(|e| e.to_string())?;
+                }
                 slot
             } else { previous_slot.unwrap() };
             let (file_id, content, diary): (i64, String, String) =
                 metadata.query_row([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
                     .map_err(|e| e.to_string())?;
+            let hot = self.legacy_enabled || self.hot_partitions.contains(&diary);
             self.rows.insert(id, ChunkHeader {
                 id, file_id, diary,
-                first_line: content.split('\n').next().unwrap_or_default().trim().into(),
-                date: chunk_date(&content),
+                first_line: if hot {
+                    content.split('\n').next().unwrap_or_default().trim().into()
+                } else { String::new() },
+                date: if hot { chunk_date(&content) } else { 0 },
                 vector_version: vv, metadata_version: mv, file_version: fv, slot,
             });
             changed += 1;
@@ -148,14 +201,77 @@ impl GlobalChunks {
         Ok(changed)
     }
 
+    /// Activate exactly the partitions required by this frozen request. The
+    /// caller holds the table mutex until scope filtering and retrieval finish.
+    /// No vector payload, file publication, or geometry rebuild is involved.
+    pub fn activate_partitions(
+        &mut self, connection: &Connection, diaries: &HashSet<String>,
+    ) -> Result<(), String> {
+        if self.legacy_enabled { return Ok(()); }
+        if connection.is_autocommit() {
+            return Err("Chunk partition activation requires a read transaction".into());
+        }
+        // Publish readiness only after all reads succeed. Partial text loads on
+        // error are not marked ready and are retried; no result escapes that request.
+        let missing: HashSet<_> = diaries.difference(&self.hot_partitions).cloned().collect();
+        let mut statement = connection.prepare(
+            "SELECT c.id,c.content FROM chunks c JOIN files f ON f.id=c.file_id
+             WHERE f.diary_name=?1 AND c.vector IS NOT NULL",
+        ).map_err(|error| error.to_string())?;
+        for diary in &missing {
+            let mut rows = statement.query([diary]).map_err(|error| error.to_string())?;
+            while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+                let id: i64 = row.get(0).map_err(|error| error.to_string())?;
+                if let Some(header) = self.rows.get_mut(&id) {
+                    let content: String = row.get(1).map_err(|error| error.to_string())?;
+                    header.first_line = content.split('\n').next().unwrap_or_default().trim().into();
+                    header.date = chunk_date(&content);
+                }
+            }
+        }
+        for row in self.rows.values_mut().filter(|row| !diaries.contains(&row.diary)) {
+            row.first_line = String::new();
+            row.date = 0;
+        }
+        self.hot_partitions = diaries.clone();
+        Ok(())
+    }
+
+    pub fn partition_stats(&self) -> serde_json::Value {
+        let first_line_bytes: usize = self.rows.values().map(|row| row.first_line.capacity()).sum();
+        serde_json::json!({
+            "mode":if self.legacy_enabled {"legacy-global"} else {"request-partitions"},
+            "hotPartitions":self.hot_partitions.len(),
+            "globalMembers":self.rows.len(),
+            "firstLineBytes":first_line_bytes,
+            "note":"Managed text capacity only; excludes global member headers, geometry and RSS"
+        })
+    }
+
     /// `admits` is called exactly once per live row, at that row's current slot,
     /// when `limit > 0` and the scan completes (an empty search returns early).
+    #[cfg(test)]
     pub fn search<P>(&self, query: &[f32], limit: usize, mut admits: P)
         -> Result<Vec<i64>, String>
     where P: FnMut(&ChunkHeader) -> bool {
         self.routing.search_flat_filtered(query, limit, |slot, id| {
             self.rows.get(&(id as i64)).is_some_and(|row| row.slot == slot && admits(row))
         }).map(|hits| hits.into_iter().map(|hit| hit.0 as i64).collect())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Request-local Route 2 selection; cache contains only derived hot metadata.
+    /// Admission still runs once per live row, before any statistical rejection.
+    pub fn search_with_config<P>(
+        &mut self, query: &[f32], limit: usize, config: &FlatSearchConfig, mut admits: P,
+    ) -> Result<(Vec<i64>, FlatSearchStats), String>
+    where P: FnMut(&ChunkHeader) -> bool {
+        if config.enabled {
+            self.routing.prepare_flat_headers().map_err(|e| e.to_string())?;
+        }
+        self.routing.search_flat_filtered_with_config(query, limit, config, |slot, id| {
+            self.rows.get(&(id as i64)).is_some_and(|row| row.slot == slot && admits(row))
+        }).map(|(hits, stats)| (hits.into_iter().map(|hit| hit.0 as i64).collect(), stats))
             .map_err(|e| e.to_string())
     }
 
@@ -211,8 +327,9 @@ impl GlobalChunks {
             }
             Ok(Self {
                 rows: snapshot.rows.into_iter().map(|row| (row.id, row)).collect(),
-                routing, dimension, model: model.into(), facts: snapshot.facts,
+                routing, legacy_enabled: true, warped: None, dimension, model: model.into(), facts: snapshot.facts,
                 last_used: Instant::now(),
+                hot_partitions: HashSet::new(),
             })
         })();
         match loaded {
@@ -228,6 +345,7 @@ impl GlobalChunks {
     /// is separate from queries; SQL member versions survive eviction/restart.
     pub fn checkpoint(&mut self, db_path: &str, directory: &Path, database_generation: u64,
         threshold: f64, allow_initial: bool) -> Result<bool, String> {
+        if !self.legacy_enabled { return Ok(false); }
         if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
             return Err("Invalid global Chunk checkpoint threshold".into());
         }
@@ -350,6 +468,52 @@ fn slot_path(directory: &Path, slot: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn production_partitions_release_text_reload_and_follow_live_metadata() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE kbm_runtime_meta(key TEXT PRIMARY KEY,value TEXT);
+             INSERT INTO kbm_runtime_meta VALUES('global_chunk_facts','1');
+             CREATE TABLE files(id INTEGER PRIMARY KEY,diary_name TEXT,metadata_version INTEGER);
+             INSERT INTO files VALUES(1,'A',1),(2,'B',1);
+             CREATE TABLE chunks(id INTEGER PRIMARY KEY,file_id INTEGER,content TEXT,vector BLOB,
+                 vector_version INTEGER,metadata_version INTEGER);
+             INSERT INTO chunks VALUES(1,1,'[2026-11-17] Alice',X'0000803f00000000',1,1);
+             INSERT INTO chunks VALUES(2,2,'[2026-11-18] Bob',X'000000000000803f',1,1);
+             BEGIN;"
+        ).unwrap();
+        let mut table = GlobalChunks::production(2, "test").unwrap();
+        table.synchronize(&db).unwrap();
+        assert_eq!(table.rows.len(), 2);
+        assert!(table.rows.values().all(|row| row.first_line.capacity() == 0));
+        let a = HashSet::from(["A".to_string()]);
+        let b = HashSet::from(["B".to_string()]);
+        table.activate_partitions(&db, &a).unwrap();
+        assert!(table.rows[&1].first_line.contains("Alice"));
+        assert_eq!(table.rows[&1].date, 20261117);
+        assert!(table.rows[&2].first_line.is_empty());
+        table.activate_partitions(&db, &b).unwrap();
+        assert_eq!(table.rows[&1].first_line.capacity(), 0);
+        assert_eq!(table.rows[&1].date, 0);
+        assert!(table.rows[&2].first_line.contains("Bob"));
+        db.execute_batch(
+            "UPDATE chunks SET content='[2026-12-01] Changed',metadata_version=2 WHERE id=1;
+             UPDATE kbm_runtime_meta SET value='2' WHERE key='global_chunk_facts';"
+        ).unwrap();
+        table.synchronize(&db).unwrap();
+        assert!(table.rows[&1].first_line.is_empty());
+        table.activate_partitions(&db, &a).unwrap();
+        assert!(table.rows[&1].first_line.contains("Changed"));
+        assert_eq!(table.rows[&1].date, 20261201);
+        assert_eq!(table.rows[&2].first_line.capacity(), 0);
+        assert_eq!(table.partition_stats()["hotPartitions"], 1);
+        assert!(!table.legacy_resident());
+        table.activate_partitions(&db, &HashSet::new()).unwrap();
+        assert!(table.rows.values().all(|row| row.first_line.capacity() == 0));
+        assert_eq!(table.rows.len(), 2);
+        db.execute_batch("ROLLBACK").unwrap();
+    }
 
     #[test]
     fn generations_checkpoint_reload_and_corruption_recover_without_embeddings() {

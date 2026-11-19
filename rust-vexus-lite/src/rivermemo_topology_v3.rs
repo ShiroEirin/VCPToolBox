@@ -505,6 +505,7 @@ impl NativeArtifact {
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub(crate) struct QueryCalibration {
+    pub(crate) exact_focus_id: Option<i64>,
     pub(crate) differentia_vector: Vec<f32>,
     pub(crate) superseded_ids: Vec<i64>,
     pub(crate) differentia_confidence: f64,
@@ -526,6 +527,9 @@ pub(crate) struct MemoQueryObservation {
     pub(crate) local_domain_ids: Arc<Vec<i64>>,
     pub(crate) transfer_domain_ids: Arc<Vec<i64>>,
     pub(crate) tag_vectors: Arc<TagVectorPool>,
+    // Readout heads serialize only their SQL loading phase and retain additions
+    // in the same request. Computing scores remains parallel and lock-free.
+    readout_vectors: Mutex<TagVectorPool>,
     pub(crate) database_generation: u64,
 }
 
@@ -556,6 +560,9 @@ impl MemoQueryObservation {
                 .map(|vector| vector.capacity() * size_of::<f32>()).sum::<usize>()
             + (self.local_field.capacity() + self.transfer_field.capacity())
                 * size_of::<(i64, f64)>()
+            + self.readout_vectors.lock().map(|pool|
+                pool.values().map(|v|v.len()*size_of::<f32>()).sum::<usize>()
+                +pool.capacity()*size_of::<(i64,Arc<[f32]>)>()).unwrap_or(0)
             + self.tag_vectors.values().map(|v| v.len() * size_of::<f32>()).sum::<usize>()
             + self.tag_vectors.capacity() * size_of::<(i64, Arc<[f32]>)>()
             + (self.local_domain_ids.capacity() + self.transfer_domain_ids.capacity())
@@ -575,6 +582,10 @@ struct MemoQueryCacheEntry {
 /// 让 RiverMemo Topology V3 直接复用统一管线产物，避免河网经 JS JSON 往返。
 pub(crate) struct MemoRuntime {
     active_artifact: RwLock<Option<(String, u64, Arc<NativeArtifact>)>>,
+    pub(crate) warped_fields: RwLock<HashMap<crate::warped_tag_field::Preset, Arc<crate::warped_tag_field::WarpedTagField>>>,
+    warped_epoch: AtomicU64,
+    pub(crate) warped_cold_load: Mutex<()>,
+    routing_publication: Mutex<()>,
     generation: AtomicU64,
     query_sequence: AtomicU64,
     query_cache: Mutex<HashMap<String, MemoQueryCacheEntry>>,
@@ -589,6 +600,10 @@ impl MemoRuntime {
     pub(crate) fn new() -> Self {
         Self {
             active_artifact: RwLock::new(None),
+            warped_fields: RwLock::new(HashMap::new()),
+            warped_epoch: AtomicU64::new(0),
+            warped_cold_load: Mutex::new(()),
+            routing_publication: Mutex::new(()),
             generation: AtomicU64::new(0),
             query_sequence: AtomicU64::new(0),
             query_cache: Mutex::new(HashMap::new()),
@@ -615,6 +630,7 @@ impl MemoRuntime {
         artifact_sig: &str,
         artifact: Arc<NativeArtifact>,
     ) -> std::result::Result<u64, String> {
+        let _publication=self.routing_publication.lock().map_err(|e|e.to_string())?;
         let mut guard = self
             .active_artifact
             .write()
@@ -632,6 +648,8 @@ impl MemoRuntime {
             }
         }
 
+        self.warped_epoch.fetch_add(1,AtomicOrdering::AcqRel);
+        self.warped_fields.write().map_err(|e|e.to_string())?.clear();
         let generation = self.generation.fetch_add(1, AtomicOrdering::AcqRel) + 1;
         *guard = Some((artifact_sig.to_string(), generation, artifact));
         drop(guard);
@@ -697,6 +715,7 @@ impl MemoRuntime {
             local_domain_ids: Arc::new(local_domain_ids),
             transfer_domain_ids: Arc::new(transfer_domain_ids),
             tag_vectors,
+            readout_vectors: Mutex::new(TagVectorPool::new()),
             database_generation,
         });
 
@@ -755,13 +774,38 @@ impl MemoRuntime {
         Ok(removed)
     }
 
+    pub(crate) fn warped_build_ticket(&self) -> u64 {
+        self.warped_epoch.load(AtomicOrdering::Acquire)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn invalidate_warped_fields(&self) -> std::result::Result<(),String> {
+        let _publication=self.routing_publication.lock().map_err(|e|e.to_string())?;
+        self.warped_epoch.fetch_add(1,AtomicOrdering::AcqRel);
+        self.warped_fields.write().map_err(|e|e.to_string())?.clear();
+        Ok(())
+    }
+
+    pub(crate) fn publish_warped_field(&self, ticket:u64, signature:&str,
+        field:Arc<crate::warped_tag_field::WarpedTagField>) -> std::result::Result<(),String> {
+        let _publication=self.routing_publication.lock().map_err(|e|e.to_string())?;
+        if ticket!=self.warped_build_ticket() || self.get(signature)?.is_none() {
+            return Err("warped construction invalidated before publication".into());
+        }
+        self.warped_fields.write().map_err(|e|e.to_string())?.insert(field.preset,field);
+        Ok(())
+    }
+
     pub(crate) fn clear(&self) -> std::result::Result<(), String> {
+        let _publication=self.routing_publication.lock().map_err(|e|e.to_string())?;
+        self.warped_epoch.fetch_add(1,AtomicOrdering::AcqRel);
         let mut guard = self
             .active_artifact
             .write()
             .map_err(|error| format!("memo runtime clear lock failed: {}", error))?;
         *guard = None;
         drop(guard);
+        self.warped_fields.write().map_err(|e| e.to_string())?.clear();
         self.clear_query_cache()
     }
 
@@ -1073,14 +1117,14 @@ fn decode_artifact(
     }.prepared()))
 }
 
-fn validate_artifact_with_connection(
+pub(crate) fn validate_artifact_with_connection(
     connection: &Connection,
     artifact_sig: &str,
 ) -> std::result::Result<(), String> {
     let dependency_keys = serde_json::to_string(crate::storage::MEMO_ARTIFACT_DEPENDENCIES)
         .map_err(|e| e.to_string())?;
     let dependency_count = crate::storage::MEMO_ARTIFACT_DEPENDENCIES.len() as i64;
-    let validate = |index_hint: &str| -> rusqlite::Result<bool> { connection.query_row(
+    let validate = |index_hint: &str| -> rusqlite::Result<bool> { connection.prepare_cached(
         &format!("SELECT EXISTS(
            SELECT 1 FROM rivermemo_artifacts a{index_hint}
            WHERE a.artifact_sig=?1 AND a.status='ready'
@@ -1097,8 +1141,8 @@ fn validate_artifact_with_connection(
                  AND (m.value IS NULL
                       OR CAST(m.value AS INTEGER) < CAST(d.dependency_version AS INTEGER))
              )
-         )"), rusqlite::params![artifact_sig, dependency_keys, dependency_count], |row| row.get(0),
-    ) };
+         )"))?.query_row(rusqlite::params![artifact_sig, dependency_keys, dependency_count], |row| row.get(0))
+   };
     // 覆盖索引让校验只读索引页，不必越过行里的大 payload 去读排在它后面的列；
     // SQLite 默认会选主键索引，所以显式指定。还没建这个索引的库退回原查询，条件不变。
     let compatible = match validate(" INDEXED BY idx_rivermemo_validation") {
@@ -1710,8 +1754,77 @@ fn branch_confidence(topology: &TopologyOutput, mode: &str) -> f64 {
         * clamp01(topology.node_alignment_score)).sqrt()
 }
 
-/// Query cosine is the floor; fields only contribute bounded positive surplus.
+#[derive(Clone, Default)]
+struct GenusEvidence {
+    // The weakest parent affinity determines the conjunction.
+    limiting: Option<(i64, f64, Option<(usize, f64)>, f64)>,
+    missing_parent: Option<i64>,
+    exact_focus_target: Option<i64>,
+}
+
+// A single parent keeps this experiment from overriding a multi-parent
+// conjunction. Only observed, active 0 -> 1 ordinary edges are eligible.
+fn exact_focus_targets(input: &NativeInput, active: &HashMap<(i64, i64), f64>) -> HashSet<i64> {
+    let mut targets = HashSet::new();
+    let Some(focus) = input.calibration.exact_focus_id else { return targets };
+    let state = &input.query_state;
+    if input.calibration.superseded_ids.len() != 1 || input.calibration.differentia_confidence <= 0.0
+        || !state.river_nodes.iter().any(|n| n.id == focus && n.hop == 0 && n.energy > 0.0)
+        || !state.field_provenance.iter().any(|p| p.id == focus && p.hop == 0
+            && matches!(p.source_type.as_str(), "lexical_seed" | "core")) {
+        return targets;
+    }
+    let first_hop: HashSet<_> = state.river_nodes.iter().filter(|n| n.hop == 1)
+        .map(|n| n.id).collect();
+    for edge in &state.river_edges {
+        if edge.source_id == focus && !edge.immediate_return && !edge.wormhole && edge.flow > 0.0
+            && first_hop.contains(&edge.target_id) && active.contains_key(&(focus, edge.target_id)) {
+            targets.insert(edge.target_id);
+        }
+    }
+    targets
+}
+
+fn genus_evidence(curve: &Curve, input: &NativeInput, vectors: &TagVectorPool,
+    cosines: &CosineCache) -> GenusEvidence {
+    let mut result = GenusEvidence::default();
+    let calibration = &input.calibration;
+    if calibration.differentia_confidence <= 0.0 || calibration.differentia_vector.is_empty()
+        || calibration.differentia_vector.len() != input.query.vector.len() { return result; }
+    for &id in &calibration.superseded_ids {
+        let Some(parent) = vectors.get(&id) else {
+            // Legacy callers may not carry the pipeline pool. Never fetch for this gate.
+            return GenusEvidence { missing_parent: Some(id), ..Default::default() };
+        };
+        let body = cosine(parent, &curve.chunk_vector);
+        let best = curve.tags.iter().enumerate().map(|(i, tag)| {
+            (i, if tag.id == id { 1.0 } else { cosines.tag_pair(id, parent, tag) })
+        }).max_by(|a,b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)));
+        let affinity = best.map_or(body, |(_, sim)| body.max(sim));
+        if result.limiting.as_ref().is_none_or(|old| affinity < old.3) {
+            result.limiting = Some((id, body, best, affinity));
+        }
+    }
+    result
+}
+
+impl GenusEvidence {
+    fn base_gate(&self) -> f64 {
+        self.limiting.as_ref().map_or(1.0, |p| clamp01((p.3 - 0.50) / 0.22))
+    }
+
+    fn gate(&self) -> f64 {
+        if self.exact_focus_target.is_some() { 1.0 } else { self.base_gate() }
+    }
+}
+
+#[cfg(test)]
 fn field_resonance(curve: &Curve, input: &NativeInput, support: f64) -> (f64, f64, f64) {
+    gated_field_resonance(curve, input, support, &GenusEvidence::default())
+}
+
+fn gated_field_resonance(curve: &Curve, input: &NativeInput, support: f64,
+    genus: &GenusEvidence) -> (f64, f64, f64) {
     let local = if input.local_vector.iter().all(|v| v.is_finite())
         && squared_norm(&input.local_vector) > 1e-12 {
         positive(input.config.pure_local_weight)
@@ -1724,12 +1837,12 @@ fn field_resonance(curve: &Curve, input: &NativeInput, support: f64) -> (f64, f6
     let raw_query = clamp01(curve.query_score);
     let calibration = &input.calibration;
     let mixing = if calibration.differentia_vector.len() == input.query.vector.len()
-        && !calibration.differentia_vector.is_empty() {
+        && !calibration.differentia_vector.is_empty() && genus.missing_parent.is_none() {
         0.5 * clamp01(calibration.differentia_confidence)
     } else { 0.0 };
     let query = if mixing > 0.0 {
         (1.0 - mixing) * raw_query + mixing
-            * clamp01(cosine(&calibration.differentia_vector, &curve.chunk_vector))
+            * (genus.gate() * clamp01(cosine(&calibration.differentia_vector, &curve.chunk_vector)))
     } else { raw_query };
     let field = if total > 1e-12 {
         clamp01((local * clamp01(curve.local_score)
@@ -1971,6 +2084,12 @@ struct ObservableOutput {
     transfer_potential: f64,
     tail_only_ratio: f64,
     field_support: f64,
+    intent_coverage_factor: f64,
+    hit_seed_energy: f64,
+    total_seed_energy: f64,
+    semantic_field_contacts: usize,
+    #[serde(skip)]
+    genus: GenusEvidence,
 }
 
 fn scalar_field_support(coverage: f64, potential: f64) -> f64 {
@@ -1982,6 +2101,46 @@ fn scalar_field_support(coverage: f64, potential: f64) -> f64 {
     clamp01(domain.max(tail))
 }
 
+/// Seed energy is counted once, with exact contacts reserving endpoints before
+/// semantic contacts. No peer candidate or additional SQL contributes evidence.
+fn intent_coverage(curve: &Curve, input: &NativeInput, vectors: &TagVectorPool,
+    cosines: &CosineCache) -> (f64, f64, f64) {
+    let mut seeds = BTreeMap::<i64, f64>::new();
+    for node in input.query_state.river_nodes.iter().filter(|n| n.hop == 0) {
+        let energy = positive(node.energy);
+        if energy > 0.0 {
+            seeds.entry(node.id).and_modify(|e| *e = e.max(energy)).or_insert(energy);
+        }
+    }
+    let total: f64 = seeds.values().sum();
+    if total <= 1e-12 { return (1.0, 0.0, 0.0); }
+    let maximum = seeds.values().copied().fold(0.0, f64::max);
+    let mut contacts = Vec::new();
+    for (&id, &energy) in &seeds {
+        for tag in &curve.tags {
+            let exact = id == tag.id;
+            let similarity = if exact { 1.0 } else {
+                vectors.get(&id).map(|v| cosines.tag_pair(id, v, tag)).unwrap_or(0.0)
+            };
+            if exact || similarity >= 0.72 {
+                contacts.push((exact, similarity, id, tag.id, energy));
+            }
+        }
+    }
+    contacts.sort_by(|a,b| b.0.cmp(&a.0).then_with(|| b.1.total_cmp(&a.1))
+        .then(a.2.cmp(&b.2)).then(a.3.cmp(&b.3)));
+    let mut used_seeds = HashSet::new();
+    let mut used_tags = HashSet::new();
+    let mut hit = 0.0;
+    for (_, _, seed, tag, energy) in contacts {
+        if used_seeds.contains(&seed) || used_tags.contains(&tag) { continue; }
+        used_seeds.insert(seed);
+        used_tags.insert(tag);
+        hit += energy;
+    }
+    ((hit / (0.55 * total).max(maximum)).sqrt().clamp(0.35, 1.0), hit, total)
+}
+
 fn evaluate_observables(
     curve: &Curve,
     geometry: &GeometryOutput,
@@ -1989,37 +2148,63 @@ fn evaluate_observables(
     workspace: &FieldWorkspace,
     visible: bool,
     cosines: &CosineCache,
+    vectors: &TagVectorPool,
 ) -> ObservableOutput {
     let mut seen_ids = HashSet::new();
     let tags: Vec<&TagData> = curve.tags.iter().filter(|t| seen_ids.insert(t.id)).collect();
     let chain_size = tags.len().max(1) as f64;
     let mut exact_seed_hits = 0usize;
-    let mut local_contacts = 0usize;
-    let mut transfer_contacts = 0usize;
+    let mut local_contacts = 0.0;
+    let mut transfer_contacts = 0.0;
+    let mut semantic_field_contacts = 0usize;
     let mut local_potential = 0.0;
     let mut transfer_potential = 0.0;
     let mut tail_only = 0usize;
     let mut boundary: f64 = 0.0;
 
     for tag in &tags {
-        let local = workspace.local.get(&tag.id).copied().unwrap_or(0.0);
-        let transfer = workspace.transfer.get(&tag.id).copied().unwrap_or(0.0);
+        let mut local = workspace.local.get(&tag.id).copied().unwrap_or(0.0);
+        let mut transfer = workspace.transfer.get(&tag.id).copied().unwrap_or(0.0);
+        let exact_local = workspace.local.contains_key(&tag.id);
+        let exact_transfer = workspace.transfer.contains_key(&tag.id);
+        let mut local_contact = if workspace.local_domain.contains(&tag.id) { 1.0 } else { 0.0 };
+        let mut transfer_contact = if workspace.transfer_domain.contains(&tag.id) { 1.0 } else { 0.0 };
+        if !exact_local || !exact_transfer {
+            let best = input.query_state.river_nodes.iter().filter_map(|node| {
+                let vector = vectors.get(&node.id)?;
+                let similarity = cosines.tag_pair(node.id, vector, tag);
+                (similarity > 0.82).then_some((node.id, similarity))
+            }).max_by(|a,b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)));
+            if let Some((id, similarity)) = best {
+                let discount = 0.75 * clamp01((similarity - 0.82) / 0.18);
+                if !exact_local {
+                    local = discount * workspace.local.get(&id).copied().unwrap_or(0.0);
+                    local_contact = if workspace.local_domain.contains(&id) { discount } else { 0.0 };
+                }
+                if !exact_transfer {
+                    transfer = discount * workspace.transfer.get(&id).copied().unwrap_or(0.0);
+                    transfer_contact = if workspace.transfer_domain.contains(&id) { discount } else { 0.0 };
+                }
+                semantic_field_contacts += usize::from(local > 0.0 || transfer > 0.0);
+            }
+        }
         exact_seed_hits += usize::from(workspace.source_ids.contains(&tag.id));
-        local_contacts += usize::from(workspace.local_domain.contains(&tag.id));
-        transfer_contacts += usize::from(workspace.transfer_domain.contains(&tag.id));
+        local_contacts += local_contact;
+        transfer_contacts += transfer_contact;
         local_potential += local;
         transfer_potential += transfer;
         tail_only += usize::from(
             (local > 0.0 || transfer > 0.0)
-                && !workspace.local_domain.contains(&tag.id)
-                && !workspace.transfer_domain.contains(&tag.id),
+                && local_contact == 0.0 && transfer_contact == 0.0,
         );
         boundary = boundary
             .max((clamp01(cosines.query_tag(&input.query.vector, tag)) * tag.chunk_cosine).sqrt());
     }
 
-    let local_coverage = local_contacts as f64 / chain_size;
-    let transfer_coverage = transfer_contacts as f64 / chain_size;
+    let (intent_factor, hit_seed_energy, total_seed_energy) =
+        intent_coverage(curve, input, vectors, cosines);
+    let local_coverage = local_contacts / chain_size;
+    let transfer_coverage = transfer_contacts / chain_size;
     let local_mean = local_potential / chain_size;
     let transfer_mean = transfer_potential / chain_size;
     let tail_ratio = tail_only as f64 / chain_size;
@@ -2053,7 +2238,12 @@ fn evaluate_observables(
         transfer_potential: transfer_mean,
         tail_only_ratio: tail_ratio,
         field_support: scalar_field_support(local_coverage, local_mean)
-            .max(scalar_field_support(transfer_coverage, transfer_mean)),
+            .max(scalar_field_support(transfer_coverage, transfer_mean)) * intent_factor,
+        intent_coverage_factor: intent_factor,
+        hit_seed_energy,
+        total_seed_energy,
+        semantic_field_contacts,
+        genus: genus_evidence(curve, input, vectors, cosines),
     }
 }
 
@@ -2593,22 +2783,11 @@ fn assign_v3_scores(
         item.v2_bonus = clamp01(requested.min(positive(config.topology_bonus_cap)));
     }
 
-    // Absolute activation: unrelated candidates cannot change eligibility.
-    let threshold = clamp01(config.anchor_activation_floor);
     let graph_gate = omega.omega.powf(config.omega_gamma.max(0.0));
 
     for item in work.iter_mut() {
-        let activation = if item.anchor.strength <= threshold {
-            0.0
-        } else if config.anchor_saturation - threshold > 1e-12 {
-            let normalized = clamp01(
-                (item.anchor.strength - threshold) / (config.anchor_saturation - threshold),
-            );
-            normalized * normalized * (3.0 - 2.0 * normalized)
-        } else {
-            1.0
-        };
-        item.anchor_bonus = config.anchor_bonus_cap * activation;
+        // Keep anchor observations for roles and traces, never as a ranking reward.
+        item.anchor_bonus = 0.0;
         if omega.omega < config.struct_role_min_omega
             && item.role == "structural_explanation"
         {
@@ -2617,7 +2796,7 @@ fn assign_v3_scores(
 
         item.gated_bonus = (item.v2_bonus * graph_gate)
             .min(positive(config.topology_bonus_cap - item.path_bonus));
-        item.final_score = clamp01(item.pure_score + item.path_bonus + item.gated_bonus + item.anchor_bonus);
+        item.final_score = clamp01(item.pure_score + item.path_bonus + item.gated_bonus);
         item.ranking_score = item.final_score;
     }
 }
@@ -2724,6 +2903,7 @@ pub(crate) fn run_native_with_observation(
         .map_err(|error| format!("invalid RiverMemo native input JSON: {}", error))?;
     let mut tag_vectors = TagVectorPool::new();
     let mut pinned_artifact = None;
+    let mut pinned_observation = None;
     if let Some(handle) = input.observation_handle.as_deref() {
         let cached = match observation {
             Some(value) if value.artifact_sig == artifact_sig => value.clone(),
@@ -2783,6 +2963,13 @@ pub(crate) fn run_native_with_observation(
         if input.query_state.query_id.is_none() {
             input.query_state.query_id = cached.observation.query_id.clone();
         }
+        pinned_observation=Some(cached);
+    }
+    // Keep the Arc owner alive before taking its request-local load lock.
+    let mut readout_vectors=pinned_observation.as_ref().map(|cached|
+        cached.readout_vectors.lock().map_err(|e|e.to_string())).transpose()?;
+    if let Some(pool)=readout_vectors.as_ref() {
+        tag_vectors.extend(pool.iter().map(|(&id,v)|(id,v.clone())));
     }
     let dimension = input.dimension;
     if input.query.vector.len() != dimension
@@ -2924,6 +3111,12 @@ pub(crate) fn run_native_with_observation(
         .filter(|edge| edge.wormhole).map(|edge| edge.target_id));
     let query_stats = ensure_tag_vectors_loaded(
         connection, &mut tag_vectors, &requested_tag_ids, dimension)?;
+    if let Some(pool)=readout_vectors.as_mut() {
+        let initial=&pinned_observation.as_ref().unwrap().tag_vectors;
+        pool.extend(tag_vectors.iter().filter(|(id,_)|!initial.contains_key(id))
+            .map(|(&id,v)|(id,v.clone())));
+    }
+    drop(readout_vectors);
     let query_tag_sql_batches = query_stats.sql_batches;
     let query_and_seed_tag_vectors = tag_vectors;
     let mut wormhole_model = wormhole::build(&input, &query_and_seed_tag_vectors, &artifact);
@@ -2937,7 +3130,8 @@ pub(crate) fn run_native_with_observation(
         &curves,
         &input.query.vector,
         input.query_state.river_nodes.iter().map(|node| node.id)
-            .chain(seeds.iter().map(|seed| seed.0)),
+            .chain(seeds.iter().map(|seed| seed.0))
+            .chain(input.calibration.superseded_ids.iter().copied()),
         &query_and_seed_tag_vectors,
     );
 
@@ -2966,6 +3160,7 @@ pub(crate) fn run_native_with_observation(
         })
         .collect();
 
+    let focus_targets = exact_focus_targets(&input, &workspace.active_edges);
     let omega = compute_omega(&input);
     let path_gate = if omega.omega > 0.0 {
         omega.omega.powf(input.config.omega_gamma.max(0.0))
@@ -2979,10 +3174,15 @@ pub(crate) fn run_native_with_observation(
                 &curve, &input, &artifact, &query_and_seed_tag_vectors, &cosines,
             );
             let visible = true; // 越权候选已在进入候选池前删除。
-            let observables =
-                evaluate_observables(&curve, &geometry, &input, &workspace, visible, &cosines);
+            let mut observables =
+                evaluate_observables(&curve, &geometry, &input, &workspace, visible, &cosines,
+                    &query_and_seed_tag_vectors);
+            if observables.genus.limiting.is_some() && !focus_targets.is_empty() {
+                observables.genus.exact_focus_target = curve.tags.iter()
+                    .find(|tag| focus_targets.contains(&tag.id)).map(|tag| tag.id);
+            }
             let (semantic_base, field_score, field_resonance_bonus) =
-                field_resonance(&curve, &input, observables.field_support);
+                gated_field_resonance(&curve, &input, observables.field_support, &observables.genus);
             let topology_raw = clamp01(
                 0.625 * geometry.path_quality
                     + 0.375
@@ -3083,7 +3283,7 @@ pub(crate) fn run_native_with_observation(
                     "strongestNodeMatchQuality": item.topology.strongest_node_match_quality,
                     "precisionGrounding": precision_grounding(&item.topology),
                     "fieldSupport": item.observables.field_support,
-                    "fieldResonanceBeforeSupport": field_resonance(&item.curve, &input, 1.0).2,
+                    "fieldResonanceBeforeSupport": gated_field_resonance(&item.curve, &input, 1.0, &item.observables.genus).2,
                     "queryScore": clamp01(item.curve.query_score),
 
                     "fieldScore": item.field_score,
@@ -3118,6 +3318,17 @@ pub(crate) fn run_native_with_observation(
                     "finalScore": item.final_score,
                     "nativeBackend": "rust-rayon"
                 })).map(|mut trace| {
+                    let genus = &item.observables.genus;
+                    trace["genusGate"] = serde_json::json!(genus.limiting.map(|_| genus.gate()));
+                    trace["genusGateBeforeFocus"] = serde_json::json!(genus.limiting.map(|_| genus.base_gate()));
+                    trace["genusExactFocusTargetId"] = serde_json::json!(genus.exact_focus_target);
+                    trace["genusMissingParentId"] = serde_json::json!(genus.missing_parent);
+                    trace["genusEvidence"] = serde_json::json!(genus.limiting.map(|(id, body, best, affinity)| {
+                        serde_json::json!({"parentId": id, "bodyCosine": body, "affinity": affinity,
+                            "bestTagId": best.map(|(i,_)| item.curve.tags[i].id),
+                            "bestTagName": best.map(|(i,_)| item.curve.tags[i].name.as_str()),
+                            "bestTagCosine": best.map(|(_,s)| s)})
+                    }));
                     trace["differentiaScore"] = if input.calibration.differentia_vector.is_empty() {
                         Value::Null
                     } else {
@@ -3163,7 +3374,13 @@ pub(crate) fn run_native_with_observation(
         .collect();
     let compute_ms = compute_started.elapsed().as_secs_f64() * 1000.0;
 
-    let output = NativeOutput {
+    let retired_controls = [
+        "conditionalBandwidth", "conditionalClosureBandwidth", "conditionalDirectBandwidth",
+        "minimumPeers", "minimumEffectivePeers", "innovationConfidenceZ", "innovationScale",
+        "anchorActivationZ", "anchorFrontierContrast", "anchorFrontierAbsFloor",
+        "reliabilitySeedSaturation", "anchorBonusCap", "anchorActivationFloor", "anchorSaturation",
+    ];
+    let mut output = NativeOutput {
         schema: RESULT_SCHEMA.to_string(),
         algorithm_version: ALGORITHM_VERSION.to_string(),
         artifact_sig: artifact_sig.to_string(),
@@ -3212,6 +3429,10 @@ pub(crate) fn run_native_with_observation(
             "fieldSupportPotentialSaturation": 0.02,
             "fieldSupportCoverageSaturation": 0.5,
             "fieldSupportTailCap": 0.1,
+            "fieldSupportSemanticThreshold": 0.82,
+            "fieldSupportSemanticDiscount": 0.75,
+            "fieldSupportIntentThreshold": 0.72,
+            "fieldSupportIntentFloor": 0.35,
             "implicitContactDiscount": 0.35,
             "implicitStrengthCap": 0.035,
             "weakSemanticPivot": 0.65,
@@ -3228,12 +3449,13 @@ pub(crate) fn run_native_with_observation(
             "softMatchDiscount": 0.65,
             "graphConfidence": "sqrt(branchCoverage*meanClosure*nodeAlignmentScore)",
             "graphReward": "candidate-self-no-role-multiplier",
-            "retiredControls": ["conditionalBandwidth", "conditionalClosureBandwidth",
-                "conditionalDirectBandwidth", "minimumPeers", "minimumEffectivePeers",
-                "innovationConfidenceZ", "innovationScale", "anchorActivationZ",
-                "anchorFrontierContrast", "anchorFrontierAbsFloor", "reliabilitySeedSaturation"]
+            "retiredControls": retired_controls
         }),
     };
+    output.parameters["anchorReward"] = Value::from("retired-zero-unified-field");
+    output.parameters["queryCalibration"]["genusGateMode"] =
+        Value::from("min-parent-max-body-tag-ramp-0.50-0.72+single-parent-exact-focus-one-hop");
+    output.parameters["queryCalibration"]["exactFocusId"] = serde_json::json!(input.calibration.exact_focus_id);
     serde_json::to_string(&output)
         .map_err(|error| format!("encode RiverMemo native output failed: {}", error))
 }
@@ -3696,14 +3918,15 @@ mod stoploss_tests {
     }
 
     #[test]
-    fn absolute_activation_preserves_multiple_answers_and_score_accounting() {
+    fn retired_anchor_bonus_is_zero_even_when_config_passes_legacy_cap() {
+        let config: NativeConfig = serde_json::from_str(r#"{"anchorBonusCap":0.1}"#).unwrap();
         let mut candidates = vec![work(1, 0.15), work(1, 0.15), work(0, 0.0)];
-        assign_v3_scores(&mut candidates, "narrative", &omega(), &NativeConfig::default());
+        assign_v3_scores(&mut candidates, "narrative", &omega(), &config);
         for item in &candidates[..2] {
             assert_eq!(item.role, "direct_answer");
-            assert!(item.anchor_bonus > 0.0);
+            assert_eq!(item.anchor_bonus, 0.0);
             assert!((item.final_score - item.pure_score - item.path_bonus
-                - item.gated_bonus - item.anchor_bonus).abs() < 1e-12);
+                - item.gated_bonus).abs() < 1e-12);
         }
         assert_ne!(candidates[2].role, "direct_answer");
         let prior = candidates[0].anchor_bonus;
@@ -3782,11 +4005,78 @@ mod conservative_topology_tests {
         };
         let cache = CosineCache::build(&[c.clone(), duplicate.clone()], &[1.0, 0.0],
             [], &TagVectorPool::new());
-        let a = evaluate_observables(&c, &GeometryOutput::default(), &input, &workspace, true, &cache);
+        let a = evaluate_observables(&c, &GeometryOutput::default(), &input, &workspace, true, &cache,
+            &TagVectorPool::new());
         let b = evaluate_observables(&duplicate, &GeometryOutput::default(),
-            &input, &workspace, true, &cache);
+            &input, &workspace, true, &cache, &TagVectorPool::new());
         assert_eq!(a.field_support, b.field_support);
         assert!(a.field_support > 0.8);
+    }
+
+    #[test]
+    fn semantic_field_support_is_strict_discounted_and_exact_first() {
+        let mut input = input();
+        input.query_state.river_nodes.truncate(1);
+        let pool: TagVectorPool = [(1, Arc::from(vec![1.0_f32, 0.0]))].into_iter().collect();
+        let mut workspace = FieldWorkspace {
+            local: HashMap::from([(1, 0.04)]), transfer: HashMap::from([(1, 0.02)]),
+            local_domain: HashSet::from([1]), transfer_domain: HashSet::from([1]),
+            source_ids: HashSet::from([1]), active_edges: HashMap::new(),
+        };
+        let evaluate = |c: &Curve, w: &FieldWorkspace| {
+            let cache = CosineCache::build(std::slice::from_ref(c), &input.query.vector, [1], &pool);
+            evaluate_observables(c, &GeometryOutput::default(), &input, w, true, &cache, &pool)
+        };
+        let weak = curve(vec![tag(9, 0, vec![0.81, (1.0_f32 - 0.81_f32.powi(2)).sqrt()])]);
+        assert_eq!(evaluate(&weak, &workspace).field_support, 0.0);
+        let alias = curve(vec![tag(9, 0, vec![1.0, 0.0])]);
+        let soft = evaluate(&alias, &workspace);
+        assert!((soft.local_potential - 0.03).abs() < 1e-12);
+        assert_eq!(soft.semantic_field_contacts, 1);
+        assert_eq!(soft.intent_coverage_factor, 1.0);
+        assert!(soft.field_support > 0.0);
+        let mut duplicate = alias.clone();
+        duplicate.tags.extend(alias.tags.clone());
+        assert_eq!(evaluate(&duplicate, &workspace).field_support, soft.field_support);
+        workspace.local.insert(9, 0.01);
+        workspace.local_domain.insert(9);
+        let exact = evaluate(&alias, &workspace);
+        assert_eq!(exact.local_potential, 0.01);
+        assert_eq!(exact.local_coverage, 1.0);
+    }
+
+    #[test]
+    fn intent_coverage_discounts_minor_leg_without_double_claiming_seeds() {
+        let mut input = input();
+        input.query_state.river_nodes = vec![
+            RiverNode { id: 1, energy: 0.4, normalized_energy: 1.0, hop: 0 },
+            RiverNode { id: 2, energy: 0.1, normalized_energy: 0.25, hop: 0 },
+        ];
+        let pool: TagVectorPool = [
+            (1, Arc::from(vec![1.0_f32, 0.0])),
+            (2, Arc::from(vec![0.0_f32, 1.0])),
+        ].into_iter().collect();
+        let minor = curve(vec![tag(2, 0, vec![0.0, 1.0])]);
+        let both = curve(vec![tag(1, 0, vec![1.0, 0.0]), tag(2, 1, vec![0.0, 1.0])]);
+        let cache = CosineCache::build(&[minor.clone(), both.clone()], &input.query.vector, [1,2], &pool);
+        assert_eq!(intent_coverage(&minor, &input, &pool, &cache), (0.5, 0.1, 0.5));
+        assert_eq!(intent_coverage(&both, &input, &pool, &cache), (1.0, 0.5, 0.5));
+        let mut duplicate = minor.clone();
+        duplicate.tags.extend(minor.tags.clone());
+        assert_eq!(intent_coverage(&duplicate, &input, &pool, &cache).1, 0.1);
+        let broad = curve(vec![tag(9, 0, vec![0.74, 0.74])]);
+        assert_eq!(intent_coverage(&broad, &input, &pool, &cache).1, 0.0);
+        input.query_state.river_nodes[1].id = 3;
+        let same_pool: TagVectorPool = [(1, Arc::from(vec![1.0_f32, 0.0])),
+            (3, Arc::from(vec![1.0_f32, 0.0]))].into_iter().collect();
+        let alias = curve(vec![tag(9, 0, vec![1.0, 0.0])]);
+        let same_cache = CosineCache::build(std::slice::from_ref(&alias),
+            &input.query.vector, [1,3], &same_pool);
+        assert_eq!(intent_coverage(&alias, &input, &same_pool, &same_cache).1, 0.4);
+        input.query_state.river_nodes.truncate(1);
+        assert_eq!(intent_coverage(&both, &input, &pool, &cache).0, 1.0);
+        input.query_state.river_nodes.clear();
+        assert_eq!(intent_coverage(&minor, &input, &pool, &cache), (1.0, 0.0, 0.0));
     }
 
     #[test]
